@@ -112,6 +112,21 @@ describe('login callback', () => {
     expect(replay.headers.location).toBe('/?login=error');
   });
 
+  it('routes a network failure during redemption through the login-error flow', async () => {
+    const idClient = new FakeIdClient();
+    idClient.redeemCode = async () => {
+      // What fetch throws when the id host is unreachable.
+      throw new TypeError('fetch failed');
+    };
+    const { app } = authApp(idClient);
+    const { state, cookies } = await startLogin(app);
+    const res = await request(app)
+      .get(`/api/auth/callback?code=x&state=${encodeURIComponent(state)}`)
+      .set('Cookie', cookies);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/?login=error');
+  });
+
   it('denies a non-super-admin without an enabled tenant_user record', async () => {
     const idClient = new FakeIdClient();
     // superAdmin comes from the id response only; an admin-looking email must

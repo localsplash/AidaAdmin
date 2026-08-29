@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express';
-import type { AdminSession, SessionStore } from './session-store.js';
+import type { AdminSession, SessionRepository } from './session-store.js';
 import { readCookie, SESSION_COOKIE } from './routes.js';
 
 declare module 'express-serve-static-core' {
@@ -8,10 +8,20 @@ declare module 'express-serve-static-core' {
   }
 }
 
-export function sessionMiddleware(store: SessionStore) {
+export function sessionMiddleware(store: SessionRepository) {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const sid = readCookie(req, SESSION_COOKIE);
-    req.session = sid ? store.get(sid) : null;
-    next();
+    if (!sid) {
+      req.session = null;
+      next();
+      return;
+    }
+    store
+      .get(sid)
+      .then((session) => {
+        req.session = session;
+        next();
+      })
+      .catch(next);
   };
 }

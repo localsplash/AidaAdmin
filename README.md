@@ -77,12 +77,25 @@ consumed from the `id` token response and never recalculated locally. A Super Ad
 enter without a tenant mapping; every other user needs an enabled `tenant_user` record
 (none exist until phase 3 lands the NocoDB repositories, so non-super-admins are denied).
 
-Sessions are persisted server-side and keyed by `iUserId`; the browser holds only an
-opaque, httpOnly, signed session cookie. Identity events (`session.revoked`,
-`user.merged`, `identity.linked/unlinked`) arrive at `/id/events` and are applied
-idempotently against a durable cursor (`ID_EVENT_STATE_FILE`); on boot the server
-catches up via `GET {ID_BASE_URL}/api/events?since=<cursor>` and, when
-`ID_REGISTER_WEBHOOK=true`, re-registers the receiver.
+Sessions, single-use login states, and the identity-event log live in AidaAdmin's own
+PostgreSQL database (`AIDA_ADMIN_DATABASE_URL` — the `aida_admin` database with its own
+credential on the existing server, fully separate from AidaControl's `aida_runtime`).
+The browser holds only an opaque, httpOnly, signed session cookie; the database stores
+a hash of it, never the value. The additive schema (`admin_session`, `auth_state`,
+`identity_event`, `identity_event_checkpoint`) is migrated automatically at startup.
+Without a database URL (credential-less dev and unit tests), memory-backed stores with
+identical semantics are used.
+
+Identity events (`session.revoked`, `user.merged`, `identity.linked/unlinked`) arrive
+at `/id/events` and are processed in one transaction: record the event by `event_id`
+(duplicates short-circuit), apply session revocation/merging, mark it processed, and
+advance the checkpoint — committed together, with 2xx returned only after commit so
+`id` retries anything that failed. Because `id`'s `/api/token` response carries no
+session identifier, a `session.revoked` of any scope revokes **all** local sessions
+for that user (the POC decision — strictly safer than under-revoking). On boot the
+server catches up via `GET {ID_BASE_URL}/api/events?since=<checkpoint>` (paging past
+id's 200-event response limit) and, when `ID_REGISTER_WEBHOOK=true`, re-registers the
+receiver.
 
 Every response carries an `x-correlation-id` header (inbound value echoed when
 well-formed). Logs are structured JSON with credential-bearing fields redacted.

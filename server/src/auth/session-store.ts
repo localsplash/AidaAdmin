@@ -1,61 +1,48 @@
 import { randomBytes } from 'node:crypto';
 
-const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+export const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
+/**
+ * What a live AidaAdmin session carries. There is deliberately no id session
+ * identifier: id's /api/token response does not include one, so on
+ * `session.revoked` (any scope) the POC revokes every local session for the
+ * user instead of trying to match a single one.
+ */
 export interface AdminSession {
-  sid: string;
   iUserId: number;
   email: string | null;
   displayName: string | null;
   /** Consumed from the id token response; never derived locally. */
   superAdmin: boolean;
-  /** id_tbl_Session identifier when id supplies one, for revocation events. */
-  idSessionId: string | null;
   provider: string | null;
-  createdAt: number;
-  lastSeenAt: number;
 }
 
 /**
- * Server-side session persistence keyed by our own random session ID and by
- * `id` user.iUserId, so identity events (session.revoked, user.merged) can be
- * applied locally. In-memory is acceptable for the POC single-process server;
- * revocation events and the idle TTL bound staleness.
+ * Server-side session persistence. `create` returns the opaque browser
+ * cookie value; implementations store only a hash of it. Backed by
+ * PostgreSQL (`admin_session`) when AIDA_ADMIN_DATABASE_URL is configured,
+ * with this in-memory fallback for credential-less dev and unit tests.
  */
-export class SessionStore {
-  private readonly sessions = new Map<string, AdminSession>();
+export interface SessionRepository {
+  create(session: AdminSession): Promise<string>;
+  /** Returns the live session and slides its expiry, or null. */
+  get(sid: string): Promise<AdminSession | null>;
+  revoke(sid: string): Promise<void>;
+}
 
-  create(input: Omit<AdminSession, 'sid' | 'createdAt' | 'lastSeenAt'>): AdminSession {
-    const now = Date.now();
-    const session: AdminSession = {
-      ...input,
-      sid: randomBytes(32).toString('base64url'),
-      createdAt: now,
-      lastSeenAt: now,
-    };
-    this.sessions.set(session.sid, session);
-    return session;
-  }
+interface MemorySessionRecord {
+  session: AdminSession;
+  expiresAt: number;
+}
 
-  get(sid: string): AdminSession | null {
-    const session = this.sessions.get(sid);
-    if (!session) return null;
-    if (Date.now() - session.lastSeenAt > SESSION_TTL_MS) {
-      this.sessions.delete(sid);
-      return null;
-    }
-    session.lastSeenAt = Date.now();
-    return session;
-  }
-
-  revoke(sid: string): void {
-    this.sessions.delete(sid);
-  }
+/** Shared by the memory repository and the memory identity-event effects. */
+export class MemoryAuthDb {
+  readonly sessions = new Map<string, MemorySessionRecord>();
 
   revokeByUser(iUserId: number): number {
     let revoked = 0;
-    for (const [sid, session] of this.sessions) {
-      if (session.iUserId === iUserId) {
+    for (const [sid, record] of this.sessions) {
+      if (record.session.iUserId === iUserId) {
         this.sessions.delete(sid);
         revoked += 1;
       }
@@ -63,23 +50,11 @@ export class SessionStore {
     return revoked;
   }
 
-  revokeByIdSession(idSessionId: string): number {
-    let revoked = 0;
-    for (const [sid, session] of this.sessions) {
-      if (session.idSessionId === idSessionId) {
-        this.sessions.delete(sid);
-        revoked += 1;
-      }
-    }
-    return revoked;
-  }
-
-  /** user.merged: sessions for the merged-away user now belong to the target. */
   mergeUser(fromUserId: number, toUserId: number): number {
     let moved = 0;
-    for (const session of this.sessions.values()) {
-      if (session.iUserId === fromUserId) {
-        session.iUserId = toUserId;
+    for (const record of this.sessions.values()) {
+      if (record.session.iUserId === fromUserId) {
+        record.session.iUserId = toUserId;
         moved += 1;
       }
     }
@@ -88,5 +63,30 @@ export class SessionStore {
 
   count(): number {
     return this.sessions.size;
+  }
+}
+
+export class MemorySessionRepository implements SessionRepository {
+  constructor(readonly db: MemoryAuthDb = new MemoryAuthDb()) {}
+
+  async create(session: AdminSession): Promise<string> {
+    const sid = randomBytes(32).toString('base64url');
+    this.db.sessions.set(sid, { session: { ...session }, expiresAt: Date.now() + SESSION_TTL_MS });
+    return sid;
+  }
+
+  async get(sid: string): Promise<AdminSession | null> {
+    const record = this.db.sessions.get(sid);
+    if (!record) return null;
+    if (record.expiresAt < Date.now()) {
+      this.db.sessions.delete(sid);
+      return null;
+    }
+    record.expiresAt = Date.now() + SESSION_TTL_MS;
+    return record.session;
+  }
+
+  async revoke(sid: string): Promise<void> {
+    this.db.sessions.delete(sid);
   }
 }

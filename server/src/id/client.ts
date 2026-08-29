@@ -67,9 +67,9 @@ export class HttpIdClient implements IdClient {
   }
 
   async listEvents(since: number): Promise<IdEvent[]> {
-    const body = (await this.request(`/api/events?since=${since}`)) as
-      IdEvent[] | { events?: IdEvent[] };
-    return Array.isArray(body) ? body : (body.events ?? []);
+    // id's contract (src/app.ts GET /api/events): { items: [...] }.
+    const body = (await this.request(`/api/events?since=${since}`)) as { items?: IdEvent[] };
+    return body.items ?? [];
   }
 
   async registerWebhook(name: string, webhookUrl: string): Promise<void> {

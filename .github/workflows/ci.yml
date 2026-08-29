@@ -9,6 +9,18 @@ jobs:
   checks:
     name: Format, lint, typecheck, test, build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: aida_admin_app
+          POSTGRES_PASSWORD: ci-test
+          POSTGRES_DB: aida_admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aida_admin_app -d aida_admin"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,8 +35,10 @@ jobs:
         run: npm run lint
       - name: Typecheck
         run: npm run typecheck
-      - name: Unit and component tests
+      - name: Unit and component tests (with PostgreSQL integration)
         run: npm test
+        env:
+          AIDA_ADMIN_DATABASE_URL: postgresql://aida_admin_app:ci-test@localhost:5432/aida_admin
       - name: Build
         run: npm run build
       - name: Browser smoke test

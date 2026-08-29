@@ -40,7 +40,7 @@ export function createApp(
   app.use(cookieParser(config.serviceConfig.SESSION_SECRET));
   app.use(sessionMiddleware(deps.sessionStore));
 
-  app.use(healthRoutes(config));
+  app.use(healthRoutes(config, deps));
 
   // Trusted-network surface (id webhooks), guarded by CIDR policy — not by
   // the browser CSRF token.

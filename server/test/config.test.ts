@@ -56,6 +56,19 @@ describe('loadConfig', () => {
     expect(() => loadConfig(env)).toThrowError(/E2E_FAKE_SESSION/);
   });
 
+  it('parses boolean environment strings strictly', () => {
+    // "false" must be false — z.coerce.boolean would treat it as true.
+    expect(loadConfig({ NODE_ENV: 'test', E2E_FAKE_SESSION: 'false' }).e2eFakeSession).toBe(false);
+    expect(loadConfig({ NODE_ENV: 'test', ID_REGISTER_WEBHOOK: '0' }).idRegisterWebhook).toBe(
+      false,
+    );
+    expect(loadConfig({ NODE_ENV: 'test', E2E_FAKE_SESSION: 'true' }).e2eFakeSession).toBe(true);
+    expect(loadConfig({ NODE_ENV: 'test', ID_REGISTER_WEBHOOK: '1' }).idRegisterWebhook).toBe(true);
+    expect(() => loadConfig({ NODE_ENV: 'test', E2E_FAKE_SESSION: 'banana' })).toThrowError(
+      /E2E_FAKE_SESSION/,
+    );
+  });
+
   it('rejects an invalid port', () => {
     expect(() => loadConfig({ NODE_ENV: 'test', PORT: 'not-a-port' })).toThrowError(ConfigError);
   });

@@ -1,5 +1,18 @@
 import { z } from 'zod';
 
+/**
+ * Strict environment boolean: "false"/"0"/"no" mean false. (z.coerce.boolean
+ * would treat the string "false" as true — a real misconfiguration hazard.)
+ */
+const envBool = z.preprocess((value) => {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'boolean') return value;
+  const text = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(text)) return true;
+  if (['false', '0', 'no', ''].includes(text)) return false;
+  return value;
+}, z.boolean());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
@@ -8,11 +21,9 @@ const envSchema = z.object({
    * Enables the fake authenticated session used by the browser smoke test.
    * Refused outright in production (see loadConfig).
    */
-  E2E_FAKE_SESSION: z.coerce.boolean().default(false),
-  /** Durable id-event cursor location (created on demand). */
-  ID_EVENT_STATE_FILE: z.string().default('data/id-events.json'),
+  E2E_FAKE_SESSION: envBool,
   /** Register the /id/events webhook with id at startup. */
-  ID_REGISTER_WEBHOOK: z.coerce.boolean().default(false),
+  ID_REGISTER_WEBHOOK: envBool,
 });
 
 /**
@@ -24,6 +35,7 @@ const envSchema = z.object({
 export const SERVICE_ENV_VARS = [
   'PUBLIC_BASE_URL',
   'SESSION_SECRET',
+  'AIDA_ADMIN_DATABASE_URL',
   'ID_BASE_URL',
   'ID_TRUSTED_APP_CIDRS',
   'ID_EVENT_SOURCE_CIDRS',
@@ -60,7 +72,6 @@ export interface AppConfig {
   port: number;
   logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   e2eFakeSession: boolean;
-  idEventStateFile: string;
   idRegisterWebhook: boolean;
   /** Service variables present in the environment; values stay out of this object except where a later phase needs them. */
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
@@ -88,8 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
-  const { NODE_ENV, PORT, LOG_LEVEL, E2E_FAKE_SESSION, ID_EVENT_STATE_FILE, ID_REGISTER_WEBHOOK } =
-    parsed.data;
+  const { NODE_ENV, PORT, LOG_LEVEL, E2E_FAKE_SESSION, ID_REGISTER_WEBHOOK } = parsed.data;
 
   if (NODE_ENV === 'production') {
     if (missingServiceConfig.length > 0) {
@@ -121,7 +131,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: PORT,
     logLevel: LOG_LEVEL,
     e2eFakeSession: E2E_FAKE_SESSION,
-    idEventStateFile: ID_EVENT_STATE_FILE,
     idRegisterWebhook: ID_REGISTER_WEBHOOK,
     serviceConfig,
     missingServiceConfig,

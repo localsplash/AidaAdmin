@@ -1,12 +1,12 @@
 import { createApp } from './app.js';
 import { ConfigError, loadConfig } from './config.js';
-import { createDeps } from './deps.js';
+import { createDeps, migrate } from './deps.js';
 import { catchUpIdEvents } from './id/events.js';
 import { createLogger } from './logger.js';
 
 const SHUTDOWN_GRACE_MS = 10_000;
 
-function main(): void {
+async function main(): Promise<void> {
   let config;
   try {
     config = loadConfig();
@@ -21,6 +21,18 @@ function main(): void {
 
   const logger = createLogger(config);
   const deps = createDeps(config);
+
+  if (deps.pool) {
+    try {
+      await migrate(deps.pool);
+      logger.info('aida_admin schema is current');
+    } catch (err) {
+      logger.error({ err }, 'aida_admin schema migration failed');
+      // Without persistence nothing durable can be promised; refuse to serve.
+      process.exit(1);
+    }
+  }
+
   const app = createApp(config, logger, deps);
 
   const server = app.listen(config.port, () => {
@@ -70,4 +82,7 @@ function main(): void {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
