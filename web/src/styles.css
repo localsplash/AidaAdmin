@@ -238,3 +238,39 @@ fieldset label {
     padding: 1rem;
   }
 }
+
+.call-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  margin: 0.75rem 0;
+}
+
+.call-tabs [role='tab'] {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid #b8c0cc;
+  border-radius: 6px 6px 0 0;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+
+.call-tabs [role='tab'][aria-selected='true'] {
+  background: var(--color-banner-bg);
+  border-color: var(--color-accent);
+  font-weight: 600;
+}
+
+.transcript {
+  background: var(--color-surface);
+  border: 1px solid #dde1e8;
+  border-radius: 6px;
+  padding: 0.75rem 1rem 0.75rem 2.25rem;
+  max-height: 20rem;
+  overflow-y: auto;
+}
+
+.transcript-note {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
