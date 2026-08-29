@@ -113,13 +113,42 @@ The runtime image is non-root (`USER node`) and contains production dependencies
 built artifacts only. In production, supply every variable from `.env.example`;
 startup fails otherwise, naming the missing variables.
 
+## NocoDB AidaConfiguration (POC phase 3)
+
+AidaAdmin's server owns the NocoDB `AidaConfiguration` base (cloud NocoDB; configure
+`NOCODB_BASE_URL`, `NOCODB_API_TOKEN`, `NOCODB_BASE_ID` — values never live in the
+repo). Only server-side code holds the token; the browser, AidaHandset, OfficePulse,
+and Asterisk never reach NocoDB. AidaControl reads the same base at call time.
+
+Schema automation (versioned in `server/src/nocodb/schema.ts`):
+
+```bash
+npm run nocodb -w server -- create     # build the schema in an empty base
+npm run nocodb -w server -- validate   # drift report; exits 1 on drift
+npm run nocodb -w server -- upgrade    # additive apply; never drops or retypes
+npm run nocodb -w server -- seed       # idempotent dedicated POC records
+```
+
+Upgrades are strictly additive: missing tables/columns are created, live-only
+tables/columns are only reported, and a type mismatch is reported for a human —
+nothing is ever dropped or retyped automatically. Repositories put the tenant scope
+in every query, enforce the spec's uniqueness rules (NocoDB has no multi-column
+unique constraints) and E.164/MAC/context normalization, use optimistic `revision`
+checks on every update, and append immutable audit records. No SIP secret has a
+column anywhere; extensions store only the enrollment token hash. With NocoDB
+configured, `tenant_user` also backs the phase 2 login directory.
+
+Unit tests isolate the repository interface with an in-memory NocoDB fake;
+`server/test/nocodb.integration.test.ts` runs against the real base whenever the
+three NocoDB variables are set (it creates dedicated, clearly-labeled records).
+
 ## POC phase status
 
 This repository is being built in the ordered phases tracked as GitHub issues:
 
 1. **#10 Bootstrap application and CI — done**
-2. **#8 `id` login, sessions, CIDR-trusted events — this change**
-3. #11 NocoDB AidaConfiguration schema and repositories
+2. **#8 `id` login, sessions, CIDR-trusted events — done**
+3. **#11 NocoDB AidaConfiguration schema and repositories — this change**
 4. #12 Tenants, users, extensions, ring groups, provisioning
 5. #13 Assistant profiles, DID routes, appearance
 6. #9 AidaControl runtime proxy over CIDR trust
