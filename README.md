@@ -201,6 +201,28 @@ unconditionally. There is no `STAFF_TOKEN_SECRET` or AidaAdmin-to-AidaControl sh
 secret. Upstream timeouts (10 s) and unavailability surface as safe, user-visible
 504/502 responses with the correlation id.
 
+## Live operations (POC phase 7)
+
+The Live operations screen (visible once a tenant is selected) shows the active-call
+list as one tab per simultaneous call, the recent-call list, and the operational error
+log — all scoped by the selected tenant through the phase 6 proxy. Each call panel
+renders the call state, the **live-only** transcript (explicitly not a historical
+record), the current speech state, Aida's suggestions, and takeover command progress.
+
+Durable control events are replayed per call from each call's own cursor, and the
+client reducer is idempotent per sequence number: duplicated or reordered events and
+reconnect replays never duplicate transcript lines or commands. A missing sequence
+number is surfaced as an unrecoverable transcript gap rather than papered over.
+
+Take over asks for confirmation, submits exactly once per attempt with
+`expectedCallVersion` and a fresh idempotency key, and disables itself until the
+command reaches a terminal state; ringing/answered/draining/completed/failed states
+render from `command.progress` events. A `transfer.failed` event shows the reason and
+that Aida resumed the call. Historical conversations are marked "Coming soon" — no
+transcript-history UI exists. Browser acceptance against the deployed non-production
+`id`, NocoDB, AidaControl, and OfficePulse services remains the final gate once those
+environments are configured.
+
 ## POC phase status
 
 This repository is being built in the ordered phases tracked as GitHub issues:
@@ -210,5 +232,5 @@ This repository is being built in the ordered phases tracked as GitHub issues:
 3. **#11 NocoDB AidaConfiguration schema and repositories — done**
 4. **#12 Tenants, users, extensions, ring groups, provisioning — done**
 5. **#13 Assistant profiles, DID routes, appearance — done**
-6. **#9 AidaControl runtime proxy over CIDR trust — this change**
-7. #14 Live operations and takeover UI
+6. **#9 AidaControl runtime proxy over CIDR trust — done**
+7. **#14 Live operations and takeover UI — this change**

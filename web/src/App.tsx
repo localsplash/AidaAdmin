@@ -9,6 +9,7 @@ import {
 } from './components/StatusScreens';
 import { TenantContextBanner } from './components/TenantContextBanner';
 import { AppearanceScreen } from './screens/AppearanceScreen';
+import { OperationsScreen } from './screens/OperationsScreen';
 import { DidRoutesScreen } from './screens/DidRoutesScreen';
 import { ExtensionsScreen } from './screens/ExtensionsScreen';
 import { ProfilesScreen } from './screens/ProfilesScreen';
@@ -62,6 +63,7 @@ function AuthenticatedShell({
             Dashboard
           </NavLink>
           {session.user.superAdmin ? <NavLink to="/tenants">Tenants</NavLink> : null}
+          {session.selectedTenant ? <NavLink to="/operations">Live operations</NavLink> : null}
         </nav>
         <span className="app-user">{session.user.displayName ?? session.user.email ?? 'User'}</span>
         <button type="button" className="logout-button" onClick={() => void handleLogout()}>
@@ -79,6 +81,7 @@ function AuthenticatedShell({
           <Route path="/tenants/:tenantId/profiles" element={<ProfilesScreen />} />
           <Route path="/tenants/:tenantId/did-routes" element={<DidRoutesScreen />} />
           <Route path="/tenants/:tenantId/appearance" element={<AppearanceScreen />} />
+          <Route path="/operations" element={<OperationsScreen />} />
           <Route path="/forbidden" element={<ForbiddenScreen />} />
           <Route path="*" element={<NotFoundScreen />} />
         </Routes>
