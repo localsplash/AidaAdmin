@@ -32,12 +32,12 @@ export function ForbiddenScreen() {
   );
 }
 
-export function LoginRequiredScreen() {
+export function LoginRequiredScreen({ failed = false }: { failed?: boolean }) {
   return (
     <main className="status-screen">
       <h1>Sign in required</h1>
       <p>Sign in with your platform account to use AidaAdmin.</p>
-      {/* Real id /authorize redirect wiring lands in POC phase 2 (issue #8). */}
+      {failed ? <p role="alert">Sign-in did not complete. Please try again.</p> : null}
       <a className="button" href="/api/auth/login">
         Sign in
       </a>

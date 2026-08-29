@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { ConfigError, loadConfig, SERVICE_ENV_VARS } from '../src/config.js';
+import { ConfigError, loadConfig, REQUIRED_CIDR_VARS, SERVICE_ENV_VARS } from '../src/config.js';
 
 const fullProductionEnv = (): NodeJS.ProcessEnv => {
   const env: NodeJS.ProcessEnv = { NODE_ENV: 'production' };
   for (const name of SERVICE_ENV_VARS) {
     env[name] = `value-for-${name}`;
   }
+  // CIDR allowlists must hold real IPv4 CIDRs in production.
+  for (const name of REQUIRED_CIDR_VARS) {
+    env[name] = '10.0.0.0/8, 192.0.2.10/32';
+  }
+  env.AIDACONTROL_TRUSTED_SERVER_CIDRS = '10.0.0.0/8';
   return env;
 };
 
@@ -51,7 +56,32 @@ describe('loadConfig', () => {
     expect(() => loadConfig(env)).toThrowError(/E2E_FAKE_SESSION/);
   });
 
+  it('parses boolean environment strings strictly', () => {
+    // "false" must be false — z.coerce.boolean would treat it as true.
+    expect(loadConfig({ NODE_ENV: 'test', E2E_FAKE_SESSION: 'false' }).e2eFakeSession).toBe(false);
+    expect(loadConfig({ NODE_ENV: 'test', ID_REGISTER_WEBHOOK: '0' }).idRegisterWebhook).toBe(
+      false,
+    );
+    expect(loadConfig({ NODE_ENV: 'test', E2E_FAKE_SESSION: 'true' }).e2eFakeSession).toBe(true);
+    expect(loadConfig({ NODE_ENV: 'test', ID_REGISTER_WEBHOOK: '1' }).idRegisterWebhook).toBe(true);
+    expect(() => loadConfig({ NODE_ENV: 'test', E2E_FAKE_SESSION: 'banana' })).toThrowError(
+      /E2E_FAKE_SESSION/,
+    );
+  });
+
   it('rejects an invalid port', () => {
     expect(() => loadConfig({ NODE_ENV: 'test', PORT: 'not-a-port' })).toThrowError(ConfigError);
+  });
+
+  it('rejects production CIDR allowlists that are malformed', () => {
+    const env = fullProductionEnv();
+    env.ID_EVENT_SOURCE_CIDRS = 'not-a-cidr';
+    expect(() => loadConfig(env)).toThrowError(/ID_EVENT_SOURCE_CIDRS/);
+  });
+
+  it('rejects production CIDR allowlists that are effectively empty', () => {
+    const env = fullProductionEnv();
+    env.ID_TRUSTED_PROXY_CIDRS = ' , ';
+    expect(() => loadConfig(env)).toThrowError(/ID_TRUSTED_PROXY_CIDRS/);
   });
 });

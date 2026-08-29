@@ -1,5 +1,18 @@
 import { z } from 'zod';
 
+/**
+ * Strict environment boolean: "false"/"0"/"no" mean false. (z.coerce.boolean
+ * would treat the string "false" as true — a real misconfiguration hazard.)
+ */
+const envBool = z.preprocess((value) => {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'boolean') return value;
+  const text = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(text)) return true;
+  if (['false', '0', 'no', ''].includes(text)) return false;
+  return value;
+}, z.boolean());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3001),
@@ -8,7 +21,9 @@ const envSchema = z.object({
    * Enables the fake authenticated session used by the browser smoke test.
    * Refused outright in production (see loadConfig).
    */
-  E2E_FAKE_SESSION: z.coerce.boolean().default(false),
+  E2E_FAKE_SESSION: envBool,
+  /** Register the /id/events webhook with id at startup. */
+  ID_REGISTER_WEBHOOK: envBool,
 });
 
 /**
@@ -20,6 +35,7 @@ const envSchema = z.object({
 export const SERVICE_ENV_VARS = [
   'PUBLIC_BASE_URL',
   'SESSION_SECRET',
+  'AIDA_ADMIN_DATABASE_URL',
   'ID_BASE_URL',
   'ID_TRUSTED_APP_CIDRS',
   'ID_EVENT_SOURCE_CIDRS',
@@ -34,11 +50,29 @@ export const SERVICE_ENV_VARS = [
 
 export type ServiceEnvVar = (typeof SERVICE_ENV_VARS)[number];
 
+/** CIDR allowlists that must be present and non-empty in production. */
+export const REQUIRED_CIDR_VARS = [
+  'ID_TRUSTED_APP_CIDRS',
+  'ID_EVENT_SOURCE_CIDRS',
+  'ID_TRUSTED_PROXY_CIDRS',
+] as const;
+
+const CIDR_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
+
+export function parseCidrList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 export interface AppConfig {
   nodeEnv: 'development' | 'test' | 'production';
   port: number;
   logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   e2eFakeSession: boolean;
+  idRegisterWebhook: boolean;
   /** Service variables present in the environment; values stay out of this object except where a later phase needs them. */
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
   /** Names (never values) of service variables absent from the environment. */
@@ -65,7 +99,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
-  const { NODE_ENV, PORT, LOG_LEVEL, E2E_FAKE_SESSION } = parsed.data;
+  const { NODE_ENV, PORT, LOG_LEVEL, E2E_FAKE_SESSION, ID_REGISTER_WEBHOOK } = parsed.data;
 
   if (NODE_ENV === 'production') {
     if (missingServiceConfig.length > 0) {
@@ -77,6 +111,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (E2E_FAKE_SESSION) {
       throw new ConfigError('E2E_FAKE_SESSION must not be enabled in production');
     }
+    // The POC trust model is CIDR-based; an empty or malformed allowlist would
+    // silently deny (or worse, misclassify) every peer, so refuse to start.
+    for (const name of REQUIRED_CIDR_VARS) {
+      const entries = parseCidrList(serviceConfig[name]);
+      if (entries.length === 0) {
+        throw new ConfigError(`Production configuration ${name} must list at least one CIDR`);
+      }
+      for (const entry of entries) {
+        if (!CIDR_RE.test(entry)) {
+          throw new ConfigError(`Production configuration ${name} contains an invalid IPv4 CIDR`);
+        }
+      }
+    }
   }
 
   return {
@@ -84,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: PORT,
     logLevel: LOG_LEVEL,
     e2eFakeSession: E2E_FAKE_SESSION,
+    idRegisterWebhook: ID_REGISTER_WEBHOOK,
     serviceConfig,
     missingServiceConfig,
   };

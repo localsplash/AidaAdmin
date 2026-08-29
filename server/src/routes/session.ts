@@ -4,16 +4,30 @@ import type { SessionView } from '../contracts/index.js';
 import { issueCsrfToken } from '../middleware/csrf.js';
 
 /**
- * Session surface for the web shell. Real id-based login arrives in POC phase
- * 2 (issue #8); until then every request is unauthenticated, except under the
- * explicitly enabled non-production E2E fake session used by the browser
- * smoke test.
+ * Session surface for the web shell. Backed by the id-login sessions from
+ * POC phase 2 (issue #8); the non-production E2E fake session used by the
+ * browser smoke test remains available.
  */
 export function sessionRoutes(config: AppConfig): Router {
   const router = Router();
 
   router.get('/api/session', (req, res) => {
     issueCsrfToken(res, config.nodeEnv === 'production');
+    if (req.session) {
+      const session: SessionView = {
+        authenticated: true,
+        user: {
+          iUserId: req.session.iUserId,
+          displayName: req.session.displayName,
+          email: req.session.email,
+          superAdmin: req.session.superAdmin,
+        },
+        // Tenant selection arrives with the phase 3/4 tenant repositories.
+        selectedTenant: null,
+      };
+      res.json(session);
+      return;
+    }
     if (config.e2eFakeSession && config.nodeEnv !== 'production') {
       const session: SessionView = {
         authenticated: true,
