@@ -8,7 +8,10 @@ import {
   LoginRequiredScreen,
 } from './components/StatusScreens';
 import { TenantContextBanner } from './components/TenantContextBanner';
+import { AppearanceScreen } from './screens/AppearanceScreen';
+import { DidRoutesScreen } from './screens/DidRoutesScreen';
 import { ExtensionsScreen } from './screens/ExtensionsScreen';
+import { ProfilesScreen } from './screens/ProfilesScreen';
 import { RingGroupsScreen } from './screens/RingGroupsScreen';
 import { TenantsScreen } from './screens/TenantsScreen';
 import { TenantUsersScreen } from './screens/TenantUsersScreen';
@@ -71,6 +74,9 @@ function AuthenticatedShell({
           <Route path="/tenants/:tenantId/users" element={<TenantUsersScreen />} />
           <Route path="/tenants/:tenantId/extensions" element={<ExtensionsScreen />} />
           <Route path="/tenants/:tenantId/ring-groups" element={<RingGroupsScreen />} />
+          <Route path="/tenants/:tenantId/profiles" element={<ProfilesScreen />} />
+          <Route path="/tenants/:tenantId/did-routes" element={<DidRoutesScreen />} />
+          <Route path="/tenants/:tenantId/appearance" element={<AppearanceScreen />} />
           <Route path="/forbidden" element={<ForbiddenScreen />} />
           <Route path="*" element={<NotFoundScreen />} />
         </Routes>
