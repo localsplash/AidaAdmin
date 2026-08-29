@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    name: Format, lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Format check
+        run: npm run format:check
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit and component tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Browser smoke test
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  container:
+    name: Container build and smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t aida-admin:ci .
+      - name: Container starts and serves /healthz
+        run: |
+          docker run -d --name aida-admin -e NODE_ENV=test -p 3001:3001 aida-admin:ci
+          for i in $(seq 1 20); do
+            if curl -fsS http://localhost:3001/healthz; then exit 0; fi
+            sleep 1
+          done
+          echo "healthz never became ready"
+          docker logs aida-admin
+          exit 1
+      - name: Container refuses production start without configuration
+        run: |
+          set +e
+          output=$(docker run --rm aida-admin:ci 2>&1)
+          status=$?
+          set -e
+          echo "$output"
+          test $status -ne 0
+          echo "$output" | grep -q 'Missing required production configuration'

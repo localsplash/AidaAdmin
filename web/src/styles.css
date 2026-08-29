@@ -1,0 +1,118 @@
+:root {
+  --color-bg: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-text: #1a1f27;
+  --color-muted: #5b6472;
+  --color-accent: #1f5eda;
+  --color-banner-bg: #eef3ff;
+  --color-banner-border: #c4d4f5;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+.skip-link {
+  position: absolute;
+  left: -999px;
+  top: 0;
+  background: var(--color-surface);
+  padding: 0.5rem 1rem;
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid #dde1e8;
+}
+
+.app-title {
+  font-weight: 700;
+}
+
+.app-header nav a {
+  color: var(--color-accent);
+  text-decoration: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+
+.app-header nav a[aria-current='page'] {
+  background: var(--color-banner-bg);
+}
+
+.app-header nav a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.app-user {
+  margin-left: auto;
+  color: var(--color-muted);
+}
+
+.tenant-banner {
+  padding: 0.5rem 1.5rem;
+  background: var(--color-banner-bg);
+  border-bottom: 1px solid var(--color-banner-border);
+}
+
+.app-main {
+  padding: 1.5rem;
+  max-width: 72rem;
+}
+
+.status-screen {
+  max-width: 28rem;
+  margin: 4rem auto;
+  padding: 2rem;
+  background: var(--color-surface);
+  border: 1px solid #dde1e8;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.status-screen .button,
+.status-screen button {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.5rem 1.25rem;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+@media (max-width: 48rem) {
+  .app-header {
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+
+  .app-main {
+    padding: 1rem;
+  }
+}
