@@ -8,6 +8,10 @@ import {
   LoginRequiredScreen,
 } from './components/StatusScreens';
 import { TenantContextBanner } from './components/TenantContextBanner';
+import { ExtensionsScreen } from './screens/ExtensionsScreen';
+import { RingGroupsScreen } from './screens/RingGroupsScreen';
+import { TenantsScreen } from './screens/TenantsScreen';
+import { TenantUsersScreen } from './screens/TenantUsersScreen';
 
 function DashboardScreen() {
   return (
@@ -52,6 +56,7 @@ function AuthenticatedShell({
           <NavLink to="/" end>
             Dashboard
           </NavLink>
+          {session.user.superAdmin ? <NavLink to="/tenants">Tenants</NavLink> : null}
         </nav>
         <span className="app-user">{session.user.displayName ?? session.user.email ?? 'User'}</span>
         <button type="button" className="logout-button" onClick={() => void handleLogout()}>
@@ -62,6 +67,10 @@ function AuthenticatedShell({
       <main id="main-content" className="app-main">
         <Routes>
           <Route path="/" element={<DashboardScreen />} />
+          <Route path="/tenants" element={<TenantsScreen />} />
+          <Route path="/tenants/:tenantId/users" element={<TenantUsersScreen />} />
+          <Route path="/tenants/:tenantId/extensions" element={<ExtensionsScreen />} />
+          <Route path="/tenants/:tenantId/ring-groups" element={<RingGroupsScreen />} />
           <Route path="/forbidden" element={<ForbiddenScreen />} />
           <Route path="*" element={<NotFoundScreen />} />
         </Routes>

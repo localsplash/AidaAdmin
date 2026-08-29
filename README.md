@@ -142,14 +142,33 @@ Unit tests isolate the repository interface with an in-memory NocoDB fake;
 `server/test/nocodb.integration.test.ts` runs against the real base whenever the
 three NocoDB variables are set (it creates dedicated, clearly-labeled records).
 
+## Tenant and telephony administration (POC phase 4)
+
+Super Admin routes under `/admin` (session + `superAdmin` required, CSRF-protected)
+cover the complete top-level workflow: tenant CRUD; central-user search/ensure via
+`id`'s directory API with `tenant_user` role assignment (the mapping stores only
+`iUserId` — never name or email); extension CRUD; RING_ALL ring groups with members
+and a 20-second default timeout; and Super Admin grants.
+
+Provisioning is transactional-per-request with no background reconciliation: the
+intended record is saved to NocoDB, then OfficePulseAidaIntegration is invoked
+immediately, and any PBX failure is returned to the administrator clearly. OfficePulse
+generates each SIP secret, stores it only in Asterisk's `ps_auths`, and returns it
+once — AidaAdmin relays it to the administrator a single time and never persists or
+logs it. Handset enrollment issues a one-time token: NocoDB stores only its hash, the
+plaintext goes once to the configured provisioning service
+(`HANDSET_PROVISIONING_URL`) and once to the administrator's screen, and rotating with
+`reprovisionDevice` bumps `device_credential_version` to revoke issued device
+credentials.
+
 ## POC phase status
 
 This repository is being built in the ordered phases tracked as GitHub issues:
 
 1. **#10 Bootstrap application and CI — done**
 2. **#8 `id` login, sessions, CIDR-trusted events — done**
-3. **#11 NocoDB AidaConfiguration schema and repositories — this change**
-4. #12 Tenants, users, extensions, ring groups, provisioning
+3. **#11 NocoDB AidaConfiguration schema and repositories — done**
+4. **#12 Tenants, users, extensions, ring groups, provisioning — this change**
 5. #13 Assistant profiles, DID routes, appearance
 6. #9 AidaControl runtime proxy over CIDR trust
 7. #14 Live operations and takeover UI

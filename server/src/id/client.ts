@@ -34,6 +34,25 @@ export interface IdClient {
   redeemCode(code: string, redirectUri: string): Promise<IdRedeemResult>;
   listEvents(since: number): Promise<IdEvent[]>;
   registerWebhook(name: string, webhookUrl: string): Promise<void>;
+  /** Idempotent create/locate in the central directory (CIDR-trusted). */
+  ensureDirectoryUser(
+    email: string,
+    displayName?: string | null,
+    idempotencyKey?: string | null,
+  ): Promise<DirectoryUser>;
+  getDirectoryUser(iUserId: number): Promise<DirectoryUser | null>;
+  searchDirectoryUsers(query: string, limit?: number): Promise<DirectoryUser[]>;
+}
+
+/**
+ * Minimal central-directory view (id's /api/directory/users*): never
+ * identities, sessions, or credentials.
+ */
+export interface DirectoryUser {
+  iUserId: number;
+  email: string | null;
+  displayName: string | null;
+  claimed: boolean;
 }
 
 export class IdClientError extends Error {
@@ -70,6 +89,36 @@ export class HttpIdClient implements IdClient {
     // id's contract (src/app.ts GET /api/events): { items: [...] }.
     const body = (await this.request(`/api/events?since=${since}`)) as { items?: IdEvent[] };
     return body.items ?? [];
+  }
+
+  async ensureDirectoryUser(
+    email: string,
+    displayName?: string | null,
+    idempotencyKey?: string | null,
+  ): Promise<DirectoryUser> {
+    return (await this.request('/api/directory/users', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, displayName, idempotencyKey }),
+    })) as DirectoryUser;
+  }
+
+  async getDirectoryUser(iUserId: number): Promise<DirectoryUser | null> {
+    try {
+      return (await this.request(`/api/directory/users/${iUserId}`)) as DirectoryUser;
+    } catch (err) {
+      if (err instanceof IdClientError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  async searchDirectoryUsers(query: string, limit = 25): Promise<DirectoryUser[]> {
+    const params = new URLSearchParams({ query, limit: String(limit) });
+    const body = (await this.request(`/api/directory/users?${params}`)) as {
+      items?: DirectoryUser[];
+      list?: DirectoryUser[];
+    };
+    return body.items ?? body.list ?? [];
   }
 
   async registerWebhook(name: string, webhookUrl: string): Promise<void> {
