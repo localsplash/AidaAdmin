@@ -181,6 +181,26 @@ logo upload (PNG/JPEG only, magic-byte checked, 512 KB cap, content-addressed na
 served from `/assets`; `ASSET_STORAGE_DIR` sets the storage location). CRM import and
 conversation history are visibly marked as future scope.
 
+## Staff runtime proxy to AidaControl (POC phase 6)
+
+AidaAdmin is the only browser/session boundary for staff runtime operations. The
+browser calls same-origin `/runtime/*` routes (CSRF-protected); the server resolves
+the session, the selected tenant (`POST /api/session/tenant`, validated against the
+caller's memberships — Super Admins may select any enabled tenant), and the
+`tenant_user` role **before every proxy call**, re-checking membership each time so a
+revoked or disabled mapping fails immediately.
+
+The proxy is an explicit allowlist — active/recent calls, call detail, event replay,
+takeover/guide commands (`TAKEOVER`/`GUIDE` only), and operational events; nothing
+else is forwarded. Requests to AidaControl originate from an IPv4 inside
+`AIDACONTROL_TRUSTED_SERVER_CIDRS` (a deployment property enforced by AidaControl)
+and carry verified `X-Aida-Identity-User-Id`, `X-Aida-Tenant-Id`, `X-Aida-Role`,
+`X-Aida-Session-Id` (the SHA-256 session reference — never the cookie value), and
+`X-Aida-Correlation-Id`. Browser-supplied `X-Aida-*` headers are stripped
+unconditionally. There is no `STAFF_TOKEN_SECRET` or AidaAdmin-to-AidaControl shared
+secret. Upstream timeouts (10 s) and unavailability surface as safe, user-visible
+504/502 responses with the correlation id.
+
 ## POC phase status
 
 This repository is being built in the ordered phases tracked as GitHub issues:
@@ -189,6 +209,6 @@ This repository is being built in the ordered phases tracked as GitHub issues:
 2. **#8 `id` login, sessions, CIDR-trusted events — done**
 3. **#11 NocoDB AidaConfiguration schema and repositories — done**
 4. **#12 Tenants, users, extensions, ring groups, provisioning — done**
-5. **#13 Assistant profiles, DID routes, appearance — this change**
-6. #9 AidaControl runtime proxy over CIDR trust
+5. **#13 Assistant profiles, DID routes, appearance — done**
+6. **#9 AidaControl runtime proxy over CIDR trust — this change**
 7. #14 Live operations and takeover UI

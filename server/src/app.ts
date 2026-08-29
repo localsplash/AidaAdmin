@@ -8,6 +8,8 @@ import { adminRoutes } from './admin/routes.js';
 import { configRoutes } from './admin/config-routes.js';
 import { sessionMiddleware } from './auth/middleware.js';
 import { authRoutes } from './auth/routes.js';
+import { tenantSelectionRoutes } from './auth/tenant-selection.js';
+import { runtimeRoutes } from './runtime/routes.js';
 import type { AppConfig } from './config.js';
 import { createDeps, type AppDeps } from './deps.js';
 import { idEventRoutes } from './id/events.js';
@@ -40,6 +42,16 @@ export function createApp(
   );
   app.use(express.json({ limit: '256kb' }));
   app.use(cookieParser(config.serviceConfig.SESSION_SECRET));
+
+  // Browser-supplied X-Aida-* trust headers are stripped unconditionally;
+  // only the runtime proxy mints them, from the verified session.
+  app.use((req, _res, next) => {
+    for (const name of Object.keys(req.headers)) {
+      if (name.toLowerCase().startsWith('x-aida-')) delete req.headers[name];
+    }
+    next();
+  });
+
   app.use(sessionMiddleware(deps.sessionStore));
 
   app.use(healthRoutes(config, deps));
@@ -49,12 +61,14 @@ export function createApp(
   app.use(idEventRoutes(config, logger, deps));
 
   // Every state-changing browser API call must carry the double-submit CSRF
-  // token. Applied before any /api or /admin handler so later phases inherit
-  // the protection.
-  app.use(['/api', '/admin'], csrfProtection);
+  // token. Applied before any /api, /admin, or /runtime handler so later
+  // phases inherit the protection.
+  app.use(['/api', '/admin', '/runtime'], csrfProtection);
 
   app.use(authRoutes(config, logger, deps));
-  app.use(sessionRoutes(config));
+  app.use(sessionRoutes(config, deps));
+  app.use(tenantSelectionRoutes(logger, deps));
+  app.use(runtimeRoutes(config, logger, deps));
   app.use(adminRoutes(logger, deps));
   app.use(configRoutes(config, logger, deps));
 

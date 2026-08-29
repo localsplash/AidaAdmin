@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import pg from 'pg';
-import type { AdminSession, SessionRepository } from '../auth/session-store.js';
+import type { AdminSession, NewAdminSession, SessionRepository } from '../auth/session-store.js';
 import { SESSION_TTL_MS } from '../auth/session-store.js';
 import type { AuthStateRepository } from '../auth/state-store.js';
 import { STATE_TTL_MS } from '../auth/state-store.js';
@@ -35,6 +35,7 @@ export async function migrate(pool: pg.Pool): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS admin_session_user_idx
       ON admin_session (identity_user_id) WHERE revoked_at IS NULL;
+    ALTER TABLE admin_session ADD COLUMN IF NOT EXISTS selected_tenant_id TEXT;
 
     CREATE TABLE IF NOT EXISTS auth_state (
       state_hash   TEXT PRIMARY KEY,
@@ -78,12 +79,13 @@ function hashToken(token: string): string {
 export class PostgresSessionRepository implements SessionRepository {
   constructor(private readonly pool: pg.Pool) {}
 
-  async create(session: AdminSession): Promise<string> {
+  async create(session: NewAdminSession): Promise<string> {
     const sid = randomBytes(32).toString('base64url');
     await this.pool.query(
       `INSERT INTO admin_session
-         (session_id_hash, identity_user_id, super_admin, email, display_name, provider, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now() + $7::interval)`,
+         (session_id_hash, identity_user_id, super_admin, email, display_name, provider,
+          selected_tenant_id, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now() + $8::interval)`,
       [
         hashToken(sid),
         session.iUserId,
@@ -91,6 +93,7 @@ export class PostgresSessionRepository implements SessionRepository {
         session.email,
         session.displayName,
         session.provider,
+        session.selectedTenantId ?? null,
         `${SESSION_TTL_MS} milliseconds`,
       ],
     );
@@ -102,7 +105,7 @@ export class PostgresSessionRepository implements SessionRepository {
       `UPDATE admin_session
           SET last_seen_at = now(), expires_at = now() + $2::interval
         WHERE session_id_hash = $1 AND revoked_at IS NULL AND expires_at > now()
-        RETURNING identity_user_id, super_admin, email, display_name, provider`,
+        RETURNING identity_user_id, super_admin, email, display_name, provider, selected_tenant_id`,
       [hashToken(sid), `${SESSION_TTL_MS} milliseconds`],
     );
     const row = result.rows[0];
@@ -113,7 +116,16 @@ export class PostgresSessionRepository implements SessionRepository {
       email: row.email ?? null,
       displayName: row.display_name ?? null,
       provider: row.provider ?? null,
+      selectedTenantId: row.selected_tenant_id ?? null,
     };
+  }
+
+  async setSelectedTenant(sid: string, tenantId: string | null): Promise<void> {
+    await this.pool.query(
+      `UPDATE admin_session SET selected_tenant_id = $2
+        WHERE session_id_hash = $1 AND revoked_at IS NULL`,
+      [hashToken(sid), tenantId],
+    );
   }
 
   async revoke(sid: string): Promise<void> {

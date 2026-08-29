@@ -15,7 +15,13 @@ export interface AdminSession {
   /** Consumed from the id token response; never derived locally. */
   superAdmin: boolean;
   provider: string | null;
+  /** The tenant this session currently operates on (staff runtime scope). */
+  selectedTenantId: string | null;
 }
+
+export type NewAdminSession = Omit<AdminSession, 'selectedTenantId'> & {
+  selectedTenantId?: string | null;
+};
 
 /**
  * Server-side session persistence. `create` returns the opaque browser
@@ -24,9 +30,10 @@ export interface AdminSession {
  * with this in-memory fallback for credential-less dev and unit tests.
  */
 export interface SessionRepository {
-  create(session: AdminSession): Promise<string>;
+  create(session: NewAdminSession): Promise<string>;
   /** Returns the live session and slides its expiry, or null. */
   get(sid: string): Promise<AdminSession | null>;
+  setSelectedTenant(sid: string, tenantId: string | null): Promise<void>;
   revoke(sid: string): Promise<void>;
 }
 
@@ -69,10 +76,18 @@ export class MemoryAuthDb {
 export class MemorySessionRepository implements SessionRepository {
   constructor(readonly db: MemoryAuthDb = new MemoryAuthDb()) {}
 
-  async create(session: AdminSession): Promise<string> {
+  async create(session: NewAdminSession): Promise<string> {
     const sid = randomBytes(32).toString('base64url');
-    this.db.sessions.set(sid, { session: { ...session }, expiresAt: Date.now() + SESSION_TTL_MS });
+    this.db.sessions.set(sid, {
+      session: { selectedTenantId: null, ...session },
+      expiresAt: Date.now() + SESSION_TTL_MS,
+    });
     return sid;
+  }
+
+  async setSelectedTenant(sid: string, tenantId: string | null): Promise<void> {
+    const record = this.db.sessions.get(sid);
+    if (record) record.session.selectedTenantId = tenantId;
   }
 
   async get(sid: string): Promise<AdminSession | null> {
