@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url';
 import cookieParser from 'cookie-parser';
 import express, { type Express } from 'express';
 import { pinoHttp } from 'pino-http';
+import { sessionMiddleware } from './auth/middleware.js';
+import { authRoutes } from './auth/routes.js';
 import type { AppConfig } from './config.js';
+import { createDeps, type AppDeps } from './deps.js';
+import { idEventRoutes } from './id/events.js';
 import type { Logger } from './logger.js';
 import { correlationMiddleware } from './middleware/correlation.js';
 import { csrfProtection } from './middleware/csrf.js';
@@ -14,7 +18,11 @@ import { sessionRoutes } from './routes/session.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
-export function createApp(config: AppConfig, logger: Logger): Express {
+export function createApp(
+  config: AppConfig,
+  logger: Logger,
+  deps: AppDeps = createDeps(config),
+): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -29,15 +37,21 @@ export function createApp(config: AppConfig, logger: Logger): Express {
     }),
   );
   app.use(express.json({ limit: '256kb' }));
-  app.use(cookieParser());
+  app.use(cookieParser(config.serviceConfig.SESSION_SECRET));
+  app.use(sessionMiddleware(deps.sessionStore));
 
   app.use(healthRoutes(config));
+
+  // Trusted-network surface (id webhooks), guarded by CIDR policy — not by
+  // the browser CSRF token.
+  app.use(idEventRoutes(config, logger, deps));
 
   // Every state-changing browser API call must carry the double-submit CSRF
   // token. Applied before any /api or /admin handler so later phases inherit
   // the protection.
   app.use(['/api', '/admin'], csrfProtection);
 
+  app.use(authRoutes(config, logger, deps));
   app.use(sessionRoutes(config));
 
   app.use('/api', (req, res) => {

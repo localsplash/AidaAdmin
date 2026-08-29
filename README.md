@@ -58,7 +58,31 @@ render the authenticated shell without credentials.
 
 - `GET /healthz` — liveness
 - `GET /readyz` — readiness, including missing-configuration variable names
-- `GET /api/session` — current session (401 until phase 2 wires real `id` login)
+- `GET /api/session` — current session (401 when signed out)
+- `GET /api/auth/login` — starts the `id` login redirect (`/authorize` with `state`)
+- `GET /api/auth/callback` — redeems the one-time code server-to-server and creates the session
+- `POST /api/auth/logout` — revokes the local session (CSRF-protected)
+- `POST /id/events` — identity-event receiver, trusted by source IPv4 only
+  (`ID_EVENT_SOURCE_CIDRS`, with `X-Forwarded-For` honored solely from
+  `ID_TRUSTED_PROXY_CIDRS` peers)
+
+## Authentication (POC phase 2)
+
+Login is delegated to the platform `id` service: the browser is redirected to
+`{ID_BASE_URL}/authorize` with a single-use `state` and the exact callback URL, and the
+returned one-time code is redeemed server-to-server at `/api/token`. Trust is TLS plus
+IPv4 allowlisting (`ID_TRUSTED_APP_CIDRS`, enforced by `id`); there is deliberately no
+`ID_CLIENT_SECRET`, webhook HMAC, or password store in this repository. `superAdmin` is
+consumed from the `id` token response and never recalculated locally. A Super Admin may
+enter without a tenant mapping; every other user needs an enabled `tenant_user` record
+(none exist until phase 3 lands the NocoDB repositories, so non-super-admins are denied).
+
+Sessions are persisted server-side and keyed by `iUserId`; the browser holds only an
+opaque, httpOnly, signed session cookie. Identity events (`session.revoked`,
+`user.merged`, `identity.linked/unlinked`) arrive at `/id/events` and are applied
+idempotently against a durable cursor (`ID_EVENT_STATE_FILE`); on boot the server
+catches up via `GET {ID_BASE_URL}/api/events?since=<cursor>` and, when
+`ID_REGISTER_WEBHOOK=true`, re-registers the receiver.
 
 Every response carries an `x-correlation-id` header (inbound value echoed when
 well-formed). Logs are structured JSON with credential-bearing fields redacted.
@@ -80,8 +104,8 @@ startup fails otherwise, naming the missing variables.
 
 This repository is being built in the ordered phases tracked as GitHub issues:
 
-1. **#10 Bootstrap application and CI — this codebase**
-2. #8 `id` login, sessions, CIDR-trusted events
+1. **#10 Bootstrap application and CI — done**
+2. **#8 `id` login, sessions, CIDR-trusted events — this change**
 3. #11 NocoDB AidaConfiguration schema and repositories
 4. #12 Tenants, users, extensions, ring groups, provisioning
 5. #13 Assistant profiles, DID routes, appearance

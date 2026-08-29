@@ -98,4 +98,23 @@ describe('App shell', () => {
     renderApp('/no-such-page');
     expect(await screen.findByRole('heading', { name: /page not found/i })).toBeInTheDocument();
   });
+
+  it('shows the forbidden screen after a denied login callback', async () => {
+    mockSessionResponse(401, { authenticated: false });
+    renderApp('/?login=denied');
+    expect(await screen.findByRole('heading', { name: /access denied/i })).toBeInTheDocument();
+  });
+
+  it('shows a sign-in failure alert after an errored login callback', async () => {
+    mockSessionResponse(401, { authenticated: false });
+    renderApp('/?login=error');
+    expect(await screen.findByRole('heading', { name: /sign in required/i })).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveTextContent(/did not complete/i);
+  });
+
+  it('offers a sign-out control in the authenticated shell', async () => {
+    mockSessionResponse(200, authenticatedSession);
+    renderApp();
+    expect(await screen.findByRole('button', { name: /sign out/i })).toBeInTheDocument();
+  });
 });

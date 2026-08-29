@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { NavLink, Route, Routes } from 'react-router-dom';
-import { fetchSession, type SessionState, type SessionView } from './api/session';
+import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { fetchSession, logout, type SessionState, type SessionView } from './api/session';
 import {
   ErrorScreen,
   ForbiddenScreen,
@@ -30,7 +30,17 @@ function NotFoundScreen() {
   );
 }
 
-function AuthenticatedShell({ session }: { session: SessionView }) {
+function AuthenticatedShell({
+  session,
+  onLoggedOut,
+}: {
+  session: SessionView;
+  onLoggedOut: () => void;
+}) {
+  const handleLogout = async () => {
+    await logout();
+    onLoggedOut();
+  };
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
@@ -44,6 +54,9 @@ function AuthenticatedShell({ session }: { session: SessionView }) {
           </NavLink>
         </nav>
         <span className="app-user">{session.user.displayName ?? session.user.email ?? 'User'}</span>
+        <button type="button" className="logout-button" onClick={() => void handleLogout()}>
+          Sign out
+        </button>
       </header>
       <TenantContextBanner session={session} />
       <main id="main-content" className="app-main">
@@ -59,6 +72,9 @@ function AuthenticatedShell({ session }: { session: SessionView }) {
 
 export default function App() {
   const [state, setState] = useState<SessionState>({ kind: 'loading' });
+  const location = useLocation();
+  // The login callback redirects here with ?login=denied|error on failure.
+  const loginFlag = new URLSearchParams(location.search).get('login');
 
   const load = useCallback(() => {
     setState({ kind: 'loading' });
@@ -73,12 +89,13 @@ export default function App() {
     case 'loading':
       return <LoadingScreen label="Loading AidaAdmin" />;
     case 'unauthenticated':
-      return <LoginRequiredScreen />;
+      if (loginFlag === 'denied') return <ForbiddenScreen />;
+      return <LoginRequiredScreen failed={loginFlag === 'error'} />;
     case 'forbidden':
       return <ForbiddenScreen />;
     case 'error':
       return <ErrorScreen onRetry={load} />;
     case 'authenticated':
-      return <AuthenticatedShell session={state.session} />;
+      return <AuthenticatedShell session={state.session} onLoggedOut={load} />;
   }
 }
