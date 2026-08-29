@@ -40,9 +40,11 @@ function NotFoundScreen() {
 function AuthenticatedShell({
   session,
   onLoggedOut,
+  onSessionChanged,
 }: {
   session: SessionView;
   onLoggedOut: () => void;
+  onSessionChanged: () => void;
 }) {
   const handleLogout = async () => {
     await logout();
@@ -66,7 +68,7 @@ function AuthenticatedShell({
           Sign out
         </button>
       </header>
-      <TenantContextBanner session={session} />
+      <TenantContextBanner session={session} onTenantChanged={onSessionChanged} />
       <main id="main-content" className="app-main">
         <Routes>
           <Route path="/" element={<DashboardScreen />} />
@@ -111,6 +113,8 @@ export default function App() {
     case 'error':
       return <ErrorScreen onRetry={load} />;
     case 'authenticated':
-      return <AuthenticatedShell session={state.session} onLoggedOut={load} />;
+      return (
+        <AuthenticatedShell session={state.session} onLoggedOut={load} onSessionChanged={load} />
+      );
   }
 }

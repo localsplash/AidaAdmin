@@ -40,6 +40,7 @@ const user = (iUserId: number): AdminSession => ({
   displayName: null,
   superAdmin: false,
   provider: null,
+  selectedTenantId: null,
 });
 
 const revokeEvent = (id: number, iUserId: number, scope: 'one' | 'all' = 'all'): IdEvent => ({

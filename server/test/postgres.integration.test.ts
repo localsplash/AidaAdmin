@@ -24,6 +24,7 @@ const user = (iUserId: number): AdminSession => ({
   displayName: 'P',
   superAdmin: false,
   provider: 'google',
+  selectedTenantId: null,
 });
 
 const event = (id: number, iUserId: number): IdEvent => ({
@@ -64,6 +65,15 @@ describe.skipIf(!databaseUrl)('PostgreSQL persistence', () => {
     expect(raw.rows.some((r) => r.session_id_hash === sid)).toBe(false);
     await sessions.revoke(sid);
     expect(await sessions.get(sid)).toBeNull();
+  });
+
+  it('persists the selected tenant across reads', async () => {
+    const sessions = new PostgresSessionRepository(pool);
+    const sid = await sessions.create(user(43));
+    await sessions.setSelectedTenant(sid, 'tenant-uuid-1');
+    expect((await sessions.get(sid))?.selectedTenantId).toBe('tenant-uuid-1');
+    await sessions.setSelectedTenant(sid, null);
+    expect((await sessions.get(sid))?.selectedTenantId).toBeNull();
   });
 
   it('consumes a login state exactly once', async () => {

@@ -1,6 +1,8 @@
 import { Router } from 'express';
+import { selectableTenants } from '../auth/tenant-selection.js';
 import type { AppConfig } from '../config.js';
-import type { SessionView } from '../contracts/index.js';
+import type { SessionView, TenantContextView } from '../contracts/index.js';
+import type { AppDeps } from '../deps.js';
 import { issueCsrfToken } from '../middleware/csrf.js';
 
 /**
@@ -8,24 +10,37 @@ import { issueCsrfToken } from '../middleware/csrf.js';
  * POC phase 2 (issue #8); the non-production E2E fake session used by the
  * browser smoke test remains available.
  */
-export function sessionRoutes(config: AppConfig): Router {
+export function sessionRoutes(config: AppConfig, deps: AppDeps): Router {
   const router = Router();
 
-  router.get('/api/session', (req, res) => {
+  router.get('/api/session', async (req, res, next) => {
     issueCsrfToken(res, config.nodeEnv === 'production');
     if (req.session) {
-      const session: SessionView = {
-        authenticated: true,
-        user: {
-          iUserId: req.session.iUserId,
-          displayName: req.session.displayName,
-          email: req.session.email,
-          superAdmin: req.session.superAdmin,
-        },
-        // Tenant selection arrives with the phase 3/4 tenant repositories.
-        selectedTenant: null,
-      };
-      res.json(session);
+      try {
+        let selectedTenant: TenantContextView | null = null;
+        if (req.session.selectedTenantId) {
+          const allowed = await selectableTenants(
+            deps,
+            req.session.iUserId,
+            req.session.superAdmin,
+          );
+          selectedTenant =
+            allowed.find((t) => t.tenantId === req.session!.selectedTenantId) ?? null;
+        }
+        const session: SessionView = {
+          authenticated: true,
+          user: {
+            iUserId: req.session.iUserId,
+            displayName: req.session.displayName,
+            email: req.session.email,
+            superAdmin: req.session.superAdmin,
+          },
+          selectedTenant,
+        };
+        res.json(session);
+      } catch (err) {
+        next(err);
+      }
       return;
     }
     if (config.e2eFakeSession && config.nodeEnv !== 'production') {
