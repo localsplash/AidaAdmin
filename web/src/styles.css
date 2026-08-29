@@ -121,6 +121,108 @@ body {
   cursor: pointer;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  background: var(--color-surface);
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #dde1e8;
+}
+
+form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 28rem;
+  margin: 1rem 0 2rem;
+}
+
+form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-weight: 600;
+}
+
+form input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #b8c0cc;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+form input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+form button[type='submit'],
+section button {
+  align-self: flex-start;
+  padding: 0.45rem 1rem;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+form button[disabled] {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+fieldset {
+  border: 1px solid #dde1e8;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+fieldset label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 400;
+}
+
+.one-time-secret {
+  background: #fff8e6;
+  border: 2px solid #d9a514;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  margin: 1rem 0;
+}
+
+.one-time-secret dd {
+  margin: 0 0 0.5rem;
+}
+
+.one-time-secret code {
+  background: #f2ead3;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
 @media (max-width: 48rem) {
   .app-header {
     flex-wrap: wrap;

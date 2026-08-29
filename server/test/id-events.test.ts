@@ -171,6 +171,15 @@ describe('boot-time catch-up', () => {
         return since < 4 ? [revokeEvent(3, 1), revokeEvent(4, 42)] : [];
       },
       async registerWebhook(): Promise<void> {},
+      async ensureDirectoryUser(): Promise<never> {
+        throw new Error('unused');
+      },
+      async getDirectoryUser(): Promise<null> {
+        return null;
+      },
+      async searchDirectoryUsers(): Promise<never[]> {
+        return [];
+      },
     };
 
     const applied = await catchUpIdEvents(idClient, s.deps, logger);

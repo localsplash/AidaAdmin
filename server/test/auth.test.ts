@@ -32,6 +32,18 @@ class FakeIdClient implements IdClient {
   }
 
   async registerWebhook(): Promise<void> {}
+
+  async ensureDirectoryUser(): Promise<never> {
+    throw new Error('unused');
+  }
+
+  async getDirectoryUser(): Promise<null> {
+    return null;
+  }
+
+  async searchDirectoryUsers(): Promise<never[]> {
+    return [];
+  }
 }
 
 function authApp(idClient: IdClient = new FakeIdClient()) {

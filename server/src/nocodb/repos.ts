@@ -149,8 +149,8 @@ export interface TenantInput {
   name: string;
   slug: string;
   asteriskContext: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
+  callerIdName?: string | null | undefined;
+  callerIdNumber?: string | null | undefined;
   enabled: boolean;
 }
 
@@ -250,13 +250,13 @@ export class NocoDbTenantUserDirectory implements TenantUserDirectory {
 }
 
 export interface ExtensionInput {
-  identityUserId?: number | null;
+  identityUserId?: number | null | undefined;
   extensionNumber: string;
   displayName: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
+  callerIdName?: string | null | undefined;
+  callerIdNumber?: string | null | undefined;
   asteriskContext: string;
-  provisioningProfile?: string | null;
+  provisioningProfile?: string | null | undefined;
   enabled: boolean;
 }
 
@@ -361,10 +361,10 @@ export interface RingGroupInput {
   name: string;
   virtualExtension: string;
   asteriskContext: string;
-  ringTimeoutSeconds?: number;
-  musicOnHoldClass?: string | null;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
+  ringTimeoutSeconds?: number | undefined;
+  musicOnHoldClass?: string | null | undefined;
+  callerIdName?: string | null | undefined;
+  callerIdNumber?: string | null | undefined;
   enabled: boolean;
 }
 
@@ -439,17 +439,62 @@ export class RingGroupRepository {
       enabled: true,
     });
   }
+
+  /**
+   * Replaces the member set: listed extensions become enabled members in the
+   * given order; existing members not listed are disabled (NocoDB rows are
+   * never deleted).
+   */
+  async setMembers(
+    tenantId: string,
+    ringGroupId: string,
+    extensionIds: string[],
+  ): Promise<NocoRecord[]> {
+    const existing = await this.listMembers(tenantId, ringGroupId);
+    const byExtension = new Map(existing.map((m) => [m.extension_id as string, m]));
+    const wanted = new Set(extensionIds);
+
+    for (const member of existing) {
+      if (!wanted.has(member.extension_id as string) && member.enabled) {
+        await this.store.update(
+          'ring_group_member',
+          member.id as string,
+          Number(member.revision),
+          { enabled: false },
+          tenantId,
+        );
+      }
+    }
+    const result: NocoRecord[] = [];
+    for (const [index, extensionId] of extensionIds.entries()) {
+      const current = byExtension.get(extensionId);
+      if (current) {
+        result.push(
+          await this.store.update(
+            'ring_group_member',
+            current.id as string,
+            Number(current.revision),
+            { enabled: true, sort_order: index + 1 },
+            tenantId,
+          ),
+        );
+      } else {
+        result.push(await this.addMember(tenantId, ringGroupId, extensionId, index + 1));
+      }
+    }
+    return result;
+  }
 }
 
 export interface AssistantProfileInput {
   name: string;
   businessName: string;
   prompt: string;
-  tone?: string | null;
-  objective?: string | null;
-  openingStatement?: string | null;
-  transferStatement?: string | null;
-  failedTransferStatement?: string | null;
+  tone?: string | null | undefined;
+  objective?: string | null | undefined;
+  openingStatement?: string | null | undefined;
+  transferStatement?: string | null | undefined;
+  failedTransferStatement?: string | null | undefined;
   enabled: boolean;
 }
 

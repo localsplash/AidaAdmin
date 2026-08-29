@@ -19,6 +19,11 @@ import { HttpIdClient, type IdClient } from './id/client.js';
 import { MemoryIdentityEventStore, type IdentityEventStore } from './id/event-store.js';
 import { HttpNocoDbApi } from './nocodb/api.js';
 import { createRepos, NocoDbTenantUserDirectory, type AidaConfigRepos } from './nocodb/repos.js';
+import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
+import {
+  HttpHandsetProvisioningDelivery,
+  type HandsetProvisioningDelivery,
+} from './provisioning/handset-delivery.js';
 
 export interface AppDeps {
   idClient: IdClient | null;
@@ -28,6 +33,10 @@ export interface AppDeps {
   eventStore: IdentityEventStore;
   /** Non-null when the NocoDB AidaConfiguration base is configured. */
   repos: AidaConfigRepos | null;
+  /** Non-null when the OfficePulse provisioning API is configured. */
+  officePulse: OfficePulseClient | null;
+  /** Non-null when the handset provisioning service is configured. */
+  handsetDelivery: HandsetProvisioningDelivery | null;
   /** Non-null when PostgreSQL persistence is configured. */
   pool: pg.Pool | null;
   /** Readiness probe for the persistence layer (always true without one). */
@@ -56,6 +65,10 @@ export function createDeps(config: AppConfig): AppDeps {
   const tenantDirectory = repos
     ? new NocoDbTenantUserDirectory(repos.tenantUsers)
     : new EmptyTenantUserDirectory();
+  const officePulseBase = config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL;
+  const officePulse = officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null;
+  const handsetUrl = config.serviceConfig.HANDSET_PROVISIONING_URL;
+  const handsetDelivery = handsetUrl ? new HttpHandsetProvisioningDelivery(handsetUrl) : null;
 
   if (databaseUrl) {
     const pool = createPool(databaseUrl);
@@ -66,6 +79,8 @@ export function createDeps(config: AppConfig): AppDeps {
       tenantDirectory,
       eventStore: new PostgresIdentityEventStore(pool),
       repos,
+      officePulse,
+      handsetDelivery,
       pool,
       dbReady: () => ping(pool),
     };
@@ -79,6 +94,8 @@ export function createDeps(config: AppConfig): AppDeps {
     tenantDirectory,
     eventStore: new MemoryIdentityEventStore(memoryDb),
     repos,
+    officePulse,
+    handsetDelivery,
     pool: null,
     dbReady: async () => true,
   };
