@@ -17,6 +17,8 @@ import {
 } from './db/postgres.js';
 import { HttpIdClient, type IdClient } from './id/client.js';
 import { MemoryIdentityEventStore, type IdentityEventStore } from './id/event-store.js';
+import { HttpNocoDbApi } from './nocodb/api.js';
+import { createRepos, NocoDbTenantUserDirectory, type AidaConfigRepos } from './nocodb/repos.js';
 
 export interface AppDeps {
   idClient: IdClient | null;
@@ -24,10 +26,18 @@ export interface AppDeps {
   stateStore: AuthStateRepository;
   tenantDirectory: TenantUserDirectory;
   eventStore: IdentityEventStore;
+  /** Non-null when the NocoDB AidaConfiguration base is configured. */
+  repos: AidaConfigRepos | null;
   /** Non-null when PostgreSQL persistence is configured. */
   pool: pg.Pool | null;
   /** Readiness probe for the persistence layer (always true without one). */
   dbReady: () => Promise<boolean>;
+}
+
+function nocodbFromConfig(config: AppConfig): AidaConfigRepos | null {
+  const { NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID } = config.serviceConfig;
+  if (!NOCODB_BASE_URL || !NOCODB_API_TOKEN || !NOCODB_BASE_ID) return null;
+  return createRepos(new HttpNocoDbApi(NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID));
 }
 
 /**
@@ -40,6 +50,12 @@ export function createDeps(config: AppConfig): AppDeps {
   const idBase = config.serviceConfig.ID_BASE_URL;
   const idClient = idBase ? new HttpIdClient(idBase) : null;
   const databaseUrl = config.serviceConfig.AIDA_ADMIN_DATABASE_URL;
+  const repos = nocodbFromConfig(config);
+  // With NocoDB configured, tenant_user backs the login directory; without
+  // it there are no mappings, so non-super-admins stay denied (POC rule).
+  const tenantDirectory = repos
+    ? new NocoDbTenantUserDirectory(repos.tenantUsers)
+    : new EmptyTenantUserDirectory();
 
   if (databaseUrl) {
     const pool = createPool(databaseUrl);
@@ -47,8 +63,9 @@ export function createDeps(config: AppConfig): AppDeps {
       idClient,
       sessionStore: new PostgresSessionRepository(pool),
       stateStore: new PostgresAuthStateRepository(pool),
-      tenantDirectory: new EmptyTenantUserDirectory(),
+      tenantDirectory,
       eventStore: new PostgresIdentityEventStore(pool),
+      repos,
       pool,
       dbReady: () => ping(pool),
     };
@@ -59,8 +76,9 @@ export function createDeps(config: AppConfig): AppDeps {
     idClient,
     sessionStore: new MemorySessionRepository(memoryDb),
     stateStore: new MemoryAuthStateRepository(),
-    tenantDirectory: new EmptyTenantUserDirectory(),
+    tenantDirectory,
     eventStore: new MemoryIdentityEventStore(memoryDb),
+    repos,
     pool: null,
     dbReady: async () => true,
   };
