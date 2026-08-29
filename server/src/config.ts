@@ -24,6 +24,8 @@ const envSchema = z.object({
   E2E_FAKE_SESSION: envBool,
   /** Register the /id/events webhook with id at startup. */
   ID_REGISTER_WEBHOOK: envBool,
+  /** Where validated appearance assets (logos) are stored and served from. */
+  ASSET_STORAGE_DIR: z.string().default('data/assets'),
 });
 
 /**
@@ -74,6 +76,7 @@ export interface AppConfig {
   logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   e2eFakeSession: boolean;
   idRegisterWebhook: boolean;
+  assetStorageDir: string;
   /** Service variables present in the environment; values stay out of this object except where a later phase needs them. */
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
   /** Names (never values) of service variables absent from the environment. */
@@ -100,7 +103,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
-  const { NODE_ENV, PORT, LOG_LEVEL, E2E_FAKE_SESSION, ID_REGISTER_WEBHOOK } = parsed.data;
+  const { NODE_ENV, PORT, LOG_LEVEL, E2E_FAKE_SESSION, ID_REGISTER_WEBHOOK, ASSET_STORAGE_DIR } =
+    parsed.data;
 
   if (NODE_ENV === 'production') {
     if (missingServiceConfig.length > 0) {
@@ -133,6 +137,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     logLevel: LOG_LEVEL,
     e2eFakeSession: E2E_FAKE_SESSION,
     idRegisterWebhook: ID_REGISTER_WEBHOOK,
+    assetStorageDir: ASSET_STORAGE_DIR,
     serviceConfig,
     missingServiceConfig,
   };

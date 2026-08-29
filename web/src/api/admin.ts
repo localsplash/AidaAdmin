@@ -93,6 +93,52 @@ export interface TenantInput {
   enabled: boolean;
 }
 
+export interface AssistantProfile {
+  id: string;
+  name: string;
+  business_name: string;
+  prompt: string;
+  tone: string | null;
+  objective: string | null;
+  opening_statement: string | null;
+  transfer_statement: string | null;
+  failed_transfer_statement: string | null;
+  enabled: boolean;
+  revision: number;
+}
+
+export interface DidRoute {
+  id: string;
+  did_e164: string;
+  assistant_profile_id: string;
+  destination_type: 'EXTENSION' | 'RING_GROUP';
+  screening_enabled: boolean;
+  enabled: boolean;
+  revision: number;
+  fallbackPreview: string;
+}
+
+export interface Appearance {
+  id: string;
+  brand_name: string;
+  primary_color: string | null;
+  logo_asset_path: string | null;
+  revision: number;
+}
+
+export interface ProfileInput {
+  tenantId: string;
+  name: string;
+  businessName: string;
+  prompt: string;
+  tone?: string;
+  objective?: string;
+  openingStatement?: string;
+  transferStatement?: string;
+  failedTransferStatement?: string;
+  enabled: boolean;
+}
+
 export const adminApi = {
   listTenants: () => call<{ tenants: Tenant[] }>('/admin/tenants', 'GET'),
   createTenant: (input: TenantInput) => call<{ tenant: Tenant }>('/admin/tenants', 'POST', input),
@@ -148,4 +194,50 @@ export const adminApi = {
     memberExtensionIds: string[];
     enabled: boolean;
   }) => call<{ ringGroup: RingGroup }>('/admin/ring-groups', 'POST', input),
+
+  listProfiles: (tenantId: string) =>
+    call<{ profiles: AssistantProfile[] }>(`/admin/tenants/${tenantId}/profiles`, 'GET'),
+  createProfile: (input: ProfileInput) =>
+    call<{ profile: AssistantProfile }>('/admin/profiles', 'POST', input),
+  updateProfile: (profileId: string, expectedRevision: number, input: ProfileInput) =>
+    call<{ profile: AssistantProfile }>(`/admin/profiles/${profileId}`, 'PUT', {
+      ...input,
+      expectedRevision,
+    }),
+
+  listDidRoutes: (tenantId: string) =>
+    call<{ didRoutes: DidRoute[] }>(`/admin/tenants/${tenantId}/did-routes`, 'GET'),
+  createDidRoute: (input: {
+    tenantId: string;
+    didE164: string;
+    assistantProfileId: string;
+    destinationType: 'EXTENSION' | 'RING_GROUP';
+    destinationId: string;
+    screeningEnabled: boolean;
+    enabled: boolean;
+  }) => call<{ didRoute: DidRoute }>('/admin/did-routes', 'POST', input),
+
+  getAppearance: (tenantId: string) =>
+    call<{ appearance: Appearance | null }>(`/admin/tenants/${tenantId}/appearance`, 'GET'),
+  saveAppearance: (tenantId: string, brandName: string, primaryColor: string | null) =>
+    call<{ appearance: Appearance }>(`/admin/tenants/${tenantId}/appearance`, 'PUT', {
+      brandName,
+      primaryColor,
+    }),
+  uploadLogo: async (tenantId: string, file: File) => {
+    const res = await fetch(`/admin/tenants/${tenantId}/appearance/logo`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': file.type, 'x-csrf-token': csrfToken() },
+      body: file,
+    });
+    const parsed = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      throw new ApiError({
+        status: res.status,
+        message: typeof parsed.message === 'string' ? parsed.message : undefined,
+      });
+    }
+    return parsed as { logoAssetPath: string };
+  },
 };

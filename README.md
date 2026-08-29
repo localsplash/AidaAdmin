@@ -161,6 +161,26 @@ plaintext goes once to the configured provisioning service
 `reprovisionDevice` bumps `device_credential_version` to revoke issued device
 credentials.
 
+## Screening configuration (POC phase 5)
+
+Assistant profiles carry the complete inbound-screening configuration: business name,
+prompt, tone, objective, and the opening/transfer/failed-transfer statements, with
+explicit save/validation and an enabled state. LiveKit model, STT, TTS, and voice are
+deliberately not configurable — the predefined `aida-prime` agent supplies those
+defaults and the POC neither stores nor sends them.
+
+DID routes bind a normalized, globally unique E.164 DID to exactly one profile and
+exactly one EXTENSION or RING_GROUP destination (the takeover/failure fallback, shown
+as a preview in the editor). Saving a route validates the destination union, tenant
+scope, and profile state (an enabled route cannot reference a disabled profile) and
+immediately provisions the DID to OfficePulse with the tenant context and the
+`/bootstrap` FastAGI path; failures are reported clearly with the record saved.
+
+Appearance is single-brand: brand name, primary color, and a same-origin validated
+logo upload (PNG/JPEG only, magic-byte checked, 512 KB cap, content-addressed name
+served from `/assets`; `ASSET_STORAGE_DIR` sets the storage location). CRM import and
+conversation history are visibly marked as future scope.
+
 ## POC phase status
 
 This repository is being built in the ordered phases tracked as GitHub issues:
@@ -168,7 +188,7 @@ This repository is being built in the ordered phases tracked as GitHub issues:
 1. **#10 Bootstrap application and CI — done**
 2. **#8 `id` login, sessions, CIDR-trusted events — done**
 3. **#11 NocoDB AidaConfiguration schema and repositories — done**
-4. **#12 Tenants, users, extensions, ring groups, provisioning — this change**
-5. #13 Assistant profiles, DID routes, appearance
+4. **#12 Tenants, users, extensions, ring groups, provisioning — done**
+5. **#13 Assistant profiles, DID routes, appearance — this change**
 6. #9 AidaControl runtime proxy over CIDR trust
 7. #14 Live operations and takeover UI

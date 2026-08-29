@@ -159,15 +159,20 @@ form label {
   font-weight: 600;
 }
 
-form input {
+form input,
+form textarea,
+form select {
   padding: 0.45rem 0.6rem;
   border: 1px solid #b8c0cc;
   border-radius: 6px;
   font-size: 1rem;
   font-weight: 400;
+  font-family: inherit;
 }
 
-form input:focus-visible {
+form input:focus-visible,
+form textarea:focus-visible,
+form select:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }

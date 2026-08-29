@@ -615,6 +615,47 @@ export class DidRouteRepository {
   }
 }
 
+export interface AppearanceInput {
+  brandName: string;
+  primaryColor?: string | null | undefined;
+  logoAssetPath?: string | null | undefined;
+}
+
+/** Single-brand POC appearance settings, one record per tenant. */
+export class AppearanceRepository {
+  constructor(private readonly store: NocoStore) {}
+
+  async getForTenant(tenantId: string): Promise<NocoRecord | null> {
+    const rows = await this.store.list('appearance', [
+      { field: 'tenant_id', op: 'eq', value: tenantId },
+    ]);
+    return rows[0] ?? null;
+  }
+
+  async save(tenantId: string, input: AppearanceInput): Promise<NocoRecord> {
+    if (input.primaryColor && !/^#[0-9a-fA-F]{6}$/.test(input.primaryColor)) {
+      throw new ValidationError('primaryColor', 'primaryColor must be a #rrggbb value');
+    }
+    const values = {
+      tenant_id: tenantId,
+      brand_name: requireNonEmpty('brandName', input.brandName),
+      primary_color: input.primaryColor ?? null,
+      ...(input.logoAssetPath !== undefined ? { logo_asset_path: input.logoAssetPath } : {}),
+    };
+    const existing = await this.getForTenant(tenantId);
+    if (existing) {
+      return this.store.update(
+        'appearance',
+        existing.id as string,
+        Number(existing.revision),
+        values,
+        tenantId,
+      );
+    }
+    return this.store.create('appearance', { logo_asset_path: null, ...values });
+  }
+}
+
 export interface AidaConfigRepos {
   store: NocoStore;
   tenants: TenantRepository;
@@ -623,6 +664,7 @@ export interface AidaConfigRepos {
   ringGroups: RingGroupRepository;
   assistantProfiles: AssistantProfileRepository;
   didRoutes: DidRouteRepository;
+  appearance: AppearanceRepository;
   audit: AuditLog;
 }
 
@@ -636,6 +678,7 @@ export function createRepos(api: NocoDbApi): AidaConfigRepos {
     ringGroups: new RingGroupRepository(store),
     assistantProfiles: new AssistantProfileRepository(store),
     didRoutes: new DidRouteRepository(store),
+    appearance: new AppearanceRepository(store),
     audit: new AuditLog(store),
   };
 }
