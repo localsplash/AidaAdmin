@@ -36,6 +36,21 @@ describe("id's parent-domain rule", () => {
     expect(verdict.ok === false && verdict.reason).toMatch(/whitespace/);
   });
 
+  it('names the apex domain when the parent domain is one app\u2019s own host', () => {
+    // The real misconfiguration: PARENT_DOMAIN set to id.localsplash.ai.
+    const verdict = checkRedirectUriAgainstParentDomain(CALLBACK, 'id.localsplash.ai');
+    expect(verdict.ok).toBe(false);
+    expect(verdict.ok === false && verdict.reason).toMatch(
+      /both hosts sit under localsplash\.ai, so PARENT_DOMAIN is probably meant to be localsplash\.ai/,
+    );
+  });
+
+  it('offers no apex hint when the domains are unrelated', () => {
+    const verdict = checkRedirectUriAgainstParentDomain(CALLBACK, 'example.com');
+    expect(verdict.ok).toBe(false);
+    expect(verdict.ok === false && verdict.reason).not.toMatch(/probably meant to be/);
+  });
+
   it('rejects a different domain and a suffix-only lookalike', () => {
     expect(checkRedirectUriAgainstParentDomain(CALLBACK, 'localsplash.com').ok).toBe(false);
     // id compares against ".parent", so this must not match.

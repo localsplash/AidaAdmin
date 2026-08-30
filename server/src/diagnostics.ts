@@ -79,12 +79,34 @@ export function checkRedirectUriAgainstParentDomain(
   const parentDomain = parentDomainRaw.toLowerCase().replace(/^\.+/, '');
   const host = url.hostname.toLowerCase();
   if (host !== parentDomain && !host.endsWith(`.${parentDomain}`)) {
+    const shared = longestSharedDomainSuffix(host, parentDomain);
+    // The common mistake is naming one app's own host (id.example.com)
+    // instead of the apex every app sits under (example.com); when both
+    // hosts share a suffix, that suffix is almost certainly the intent.
+    const hint =
+      shared && shared !== parentDomain
+        ? `; both hosts sit under ${shared}, so PARENT_DOMAIN is probably meant to be ${shared} rather than the ${parentDomain} host itself`
+        : '';
     return {
       ok: false,
-      reason: `host ${host} is not ${parentDomain} and does not end with .${parentDomain}`,
+      reason: `host ${host} is not ${parentDomain} and does not end with .${parentDomain}${hint}`,
     };
   }
   return { ok: true };
+}
+
+/** The longest suffix of at least two labels that both hosts share. */
+function longestSharedDomainSuffix(a: string, b: string): string | null {
+  const left = a.split('.');
+  const right = b.split('.');
+  const shared: string[] = [];
+  for (let i = 1; i <= Math.min(left.length, right.length); i += 1) {
+    const labelA = left[left.length - i];
+    const labelB = right[right.length - i];
+    if (labelA !== labelB) break;
+    shared.unshift(labelA as string);
+  }
+  return shared.length >= 2 ? shared.join('.') : null;
 }
 
 export interface Diagnostic {
