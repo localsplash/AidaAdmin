@@ -1,6 +1,7 @@
 import { createApp } from './app.js';
 import { ConfigError, loadConfig } from './config.js';
 import { createDeps, migrate } from './deps.js';
+import { buildDiagnostics } from './diagnostics.js';
 import { catchUpIdEvents } from './id/events.js';
 import { createLogger } from './logger.js';
 
@@ -40,6 +41,19 @@ async function main(): Promise<void> {
       { port: config.port, nodeEnv: config.nodeEnv, missing: config.missingServiceConfig },
       'AidaAdmin server listening',
     );
+
+    // The login round-trip is decided by id using the redirect_uri we send,
+    // so record it (and anything that would make id reject it) at boot
+    // rather than leaving an opaque browser 400 as the only signal.
+    const diagnostics = buildDiagnostics(config);
+    logger.info(
+      { redirectUri: diagnostics.callbackUri, authorizeUrl: diagnostics.authorizeUrl },
+      'id login redirect configured',
+    );
+    for (const finding of diagnostics.findings) {
+      const log = finding.level === 'error' ? logger.error : logger.warn;
+      log.call(logger, { fix: finding.fix }, `login preflight: ${finding.summary}`);
+    }
     if (deps.idClient) {
       const idClient = deps.idClient;
       // Catch up on identity events missed while down, then (optionally)
