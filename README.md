@@ -223,6 +223,37 @@ transcript-history UI exists. Browser acceptance against the deployed non-produc
 `id`, NocoDB, AidaControl, and OfficePulse services remains the final gate once those
 environments are configured.
 
+## Troubleshooting login
+
+Run the preflight first — it prints the exact `redirect_uri` and `/authorize` URL this
+deployment sends to `id`, plus anything that would break the round-trip (variable
+names only, never values):
+
+```bash
+npm run doctor -w server
+```
+
+**`Invalid redirect_uri: must be an https URL under the configured parent domain.`**
+
+This 400 comes from `id`, not from AidaAdmin. `id` accepts a redirect URI when the
+host equals `PARENT_DOMAIN` **or ends with `.PARENT_DOMAIN`** — subdomain depth is not
+limited, so `https://admin.aida.localsplash.ai/api/auth/callback` is valid under
+`PARENT_DOMAIN=localsplash.ai` (and under `aida.localsplash.ai`). Seeing this error
+therefore means the parent domain itself is wrong on the `id` side:
+
+1. **It is empty** — the usual cause on a fresh deployment. `PARENT_DOMAIN` lives in
+   NocoDB, in the `oAuthConfig` table of the `id` base (not in any `.env`); `id` seeds
+   the table with empty values, and its setup wizard writes the value. Set it to the
+   apex domain the apps live under, e.g. `localsplash.ai`, via `id`'s `/admin` page or
+   directly in NocoDB.
+2. **It has stray whitespace** — `id` lowercases the value and strips leading dots but
+   does not trim it, so a trailing space or newline in the NocoDB cell makes every host
+   fail to match.
+3. **It names a different domain** than the one AidaAdmin is served from.
+
+Set `ID_PARENT_DOMAIN` to the same value to have the preflight and startup check this
+locally instead of leaving the browser 400 as the only signal.
+
 ## POC phase status
 
 This repository is being built in the ordered phases tracked as GitHub issues:

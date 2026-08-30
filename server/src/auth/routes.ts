@@ -37,9 +37,18 @@ export function authRoutes(config: AppConfig, logger: Logger, deps: AppDeps): Ro
       const idBase = config.serviceConfig.ID_BASE_URL;
       const redirectUri = callbackUri(config);
       if (!idBase || !redirectUri || !deps.idClient) {
+        // Name what is missing so the operator does not have to guess.
+        const missing = [
+          ...(idBase ? [] : ['ID_BASE_URL']),
+          ...(redirectUri ? [] : ['PUBLIC_BASE_URL']),
+        ];
+        logger.error({ missing, correlationId: req.correlationId }, 'login is not configured');
         res.status(503).json({
           error: 'id_not_configured',
-          message: 'Identity service is not configured',
+          message:
+            missing.length > 0
+              ? `Identity service is not configured: set ${missing.join(' and ')}`
+              : 'Identity service is not configured',
           correlationId: req.correlationId,
         });
         return;
