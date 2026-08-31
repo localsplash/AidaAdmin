@@ -20,7 +20,7 @@ export class UniqueViolationError extends Error {
 }
 
 /**
- * Table-name-addressed access to the AidaConfiguration base with the
+ * Table-name-addressed access to the AidaAdmin base with the
  * cross-cutting rules every repository shares: logical UUID ids, ISO
  * timestamps, optimistic `revision` checks, uniqueness enforcement, and —
  * where a tenant id is given — tenant scope in every query. NocoDB cannot

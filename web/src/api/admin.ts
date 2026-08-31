@@ -182,7 +182,7 @@ export const adminApi = {
       `/admin/directory/users?query=${encodeURIComponent(query)}`,
       'GET',
     ),
-  ensureDirectoryUser: (email: string, displayName: string) =>
+  ensureDirectoryUser: (email: string, displayName: string | null) =>
     call<{ user: DirectoryUser }>('/admin/directory/users', 'POST', { email, displayName }),
   saveTenantUser: (tenantId: string, identityUserId: number, role: string, enabled: boolean) =>
     call<{ tenantUser: TenantUser }>(`/admin/tenants/${tenantId}/users/${identityUserId}`, 'PUT', {

@@ -1,7 +1,7 @@
 import type { NocoBaseInfo, NocoMetaApi } from './api.js';
 
 /**
- * The AidaConfiguration base is addressed by NAME, not by a configured id.
+ * The AidaAdmin base is addressed by NAME, not by a configured id.
  *
  * A NocoDB base id is an opaque per-instance value that nobody can know
  * before the base exists, so requiring it as configuration guarantees a

@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ExtensionsScreen } from '../src/screens/ExtensionsScreen';
 import { TenantsScreen } from '../src/screens/TenantsScreen';
+import { TenantUsersScreen } from '../src/screens/TenantUsersScreen';
 
 type FetchHandler = (url: string, init?: RequestInit) => { status: number; body: unknown } | null;
 
@@ -236,5 +237,90 @@ describe('extension without a PBX', () => {
     // No credential panel, because no secret was issued.
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+function renderTenantUsers() {
+  return render(
+    <MemoryRouter initialEntries={['/tenants/ten-1/users']}>
+      <Routes>
+        <Route path="/tenants/:tenantId/users" element={<TenantUsersScreen />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe('TenantUsersScreen', () => {
+  it('adds a brand-new user by email, without requiring them to already exist', async () => {
+    const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
+    mockFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
+        return { status: 200, body: { users: [] } };
+      }
+      if (url === '/admin/directory/users' && method === 'POST') {
+        calls.push({ url, method, body: JSON.parse(String(init!.body)) });
+        return {
+          status: 201,
+          body: {
+            user: { iUserId: 77, email: 'new@example.invalid', displayName: null, claimed: false },
+          },
+        };
+      }
+      if (url === '/admin/tenants/ten-1/users/77' && method === 'PUT') {
+        calls.push({ url, method, body: JSON.parse(String(init!.body)) });
+        return {
+          status: 200,
+          body: {
+            tenantUser: {
+              id: 'tu-1',
+              tenant_id: 'ten-1',
+              identity_user_id: 77,
+              role: 'USER',
+              enabled: true,
+            },
+          },
+        };
+      }
+      return null;
+    });
+    renderTenantUsers();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/^email$/i), 'new@example.invalid');
+    await user.click(screen.getByRole('button', { name: /add user/i }));
+
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[0]).toMatchObject({ url: '/admin/directory/users', method: 'POST' });
+    expect(calls[0]!.body.email).toBe('new@example.invalid');
+    expect(calls[1]).toMatchObject({ url: '/admin/tenants/ten-1/users/77', method: 'PUT' });
+    expect(calls[1]!.body).toMatchObject({ role: 'USER', enabled: true });
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      /added new@example\.invalid.*sign in.*identity/i,
+    );
+  });
+
+  it('marks a found central user who has not yet signed in', async () => {
+    mockFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
+        return { status: 200, body: { users: [] } };
+      }
+      if (url.startsWith('/admin/directory/users?') && method === 'GET') {
+        return {
+          status: 200,
+          body: {
+            users: [
+              { iUserId: 5, email: 'pending@example.invalid', displayName: null, claimed: false },
+            ],
+          },
+        };
+      }
+      return null;
+    });
+    renderTenantUsers();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/search by email or name/i), 'pending');
+    await user.click(screen.getByRole('button', { name: /^search$/i }));
+    expect(await screen.findByText(/not yet signed in/i)).toBeInTheDocument();
   });
 });

@@ -136,8 +136,8 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
         error: 'nocodb_not_configured',
         message:
           deps.missingNocoDb.length > 0
-            ? `The NocoDB AidaConfiguration base is not configured: set ${deps.missingNocoDb.join(', ')}`
-            : 'The NocoDB AidaConfiguration base is not configured',
+            ? `The NocoDB AidaAdmin base is not configured: set ${deps.missingNocoDb.join(', ')}`
+            : 'The NocoDB AidaAdmin base is not configured',
         missingConfiguration: deps.missingNocoDb,
         correlationId: req.correlationId,
       });
