@@ -113,7 +113,7 @@ The runtime image is non-root (`USER node`) and contains production dependencies
 built artifacts only. In production, supply every variable from `.env.example`;
 startup fails otherwise, naming the missing variables.
 
-## NocoDB AidaConfiguration (POC phase 3)
+## NocoDB AidaAdmin base (POC phase 3)
 
 AidaAdmin's server owns its NocoDB configuration base. Only the instance and the
 credential are configuration (`NOCODB_BASE_URL`, `NOCODB_API_TOKEN` — values never
@@ -274,7 +274,7 @@ This repository is being built in the ordered phases tracked as GitHub issues:
 
 1. **#10 Bootstrap application and CI — done**
 2. **#8 `id` login, sessions, CIDR-trusted events — done**
-3. **#11 NocoDB AidaConfiguration schema and repositories — done**
+3. **#11 NocoDB AidaAdmin schema and repositories — done**
 4. **#12 Tenants, users, extensions, ring groups, provisioning — done**
 5. **#13 Assistant profiles, DID routes, appearance — done**
 6. **#9 AidaControl runtime proxy over CIDR trust — done**

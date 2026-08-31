@@ -1,7 +1,7 @@
 import type { NocoColumnDef, NocoDbApi, NocoTableDef } from './api.js';
 
 /**
- * Canonical AidaConfiguration schema (normative specification §1.2), plus:
+ * Canonical AidaAdmin base schema (normative specification §1.2), plus:
  * - `revision` on mutable tables for optimistic-revision checks,
  * - `configuration_source`, `appearance`, and the immutable `audit_log`
  *   required by POC phase 3 (issue #11).

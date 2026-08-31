@@ -1,5 +1,5 @@
 /**
- * NocoDB AidaConfiguration schema commands:
+ * NocoDB AidaAdmin base schema commands:
  *
  *   npm run nocodb -w server -- create    build the schema in an empty base
  *   npm run nocodb -w server -- validate  drift report (exit 1 on drift)

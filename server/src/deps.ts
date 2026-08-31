@@ -32,7 +32,7 @@ export interface AppDeps {
   stateStore: AuthStateRepository;
   tenantDirectory: TenantUserDirectory;
   eventStore: IdentityEventStore;
-  /** Non-null when the NocoDB AidaConfiguration base is configured. */
+  /** Non-null when the NocoDB AidaAdmin base is configured. */
   repos: AidaConfigRepos | null;
   /** Names of the NocoDB variables that are missing when repos is null. */
   missingNocoDb: ServiceEnvVar[];

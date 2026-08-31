@@ -9,6 +9,10 @@ export function TenantUsersScreen() {
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviteRole, setInviteRole] = useState('USER');
+  const [inviting, setInviting] = useState(false);
 
   const load = useCallback(() => {
     adminApi
@@ -41,6 +45,30 @@ export function TenantUsersScreen() {
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Assignment failed');
+    }
+  };
+
+  const invite = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setInviting(true);
+    setError(null);
+    try {
+      const { user } = await adminApi.ensureDirectoryUser(
+        inviteEmail.trim(),
+        inviteName.trim() || null,
+      );
+      await assign(user.iUserId, inviteRole);
+      setStatus(
+        `Added ${inviteEmail.trim()} as ${inviteRole}. They gain access once they sign in ` +
+          'with this address through identity.',
+      );
+      setInviteEmail('');
+      setInviteName('');
+      setInviteRole('USER');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not add that user');
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -105,7 +133,38 @@ export function TenantUsersScreen() {
         </table>
       )}
 
-      <h2 id="find-user-heading">Find a central user</h2>
+      <h2 id="add-user-heading">Add a user by email</h2>
+      <p>
+        Any email address can be added — it does not need to already exist. The person gains access
+        the first time they sign in with that address through identity.
+      </p>
+      <form aria-labelledby="add-user-heading" onSubmit={(e) => void invite(e)}>
+        <label>
+          Email
+          <input
+            required
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+          />
+        </label>
+        <label>
+          Display name (optional)
+          <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
+        </label>
+        <label>
+          Role
+          <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+            <option value="TENANT_ADMIN">TENANT_ADMIN</option>
+            <option value="USER">USER</option>
+          </select>
+        </label>
+        <button type="submit" disabled={inviting}>
+          {inviting ? 'Adding…' : 'Add user'}
+        </button>
+      </form>
+
+      <h2 id="find-user-heading">Find an existing central user</h2>
       <form aria-labelledby="find-user-heading" onSubmit={(e) => void search(e)}>
         <label>
           Search by email or name
@@ -117,7 +176,8 @@ export function TenantUsersScreen() {
         <ul>
           {results.map((user) => (
             <li key={user.iUserId}>
-              #{user.iUserId} {user.displayName ?? user.email ?? '(no name)'}{' '}
+              #{user.iUserId} {user.displayName ?? user.email ?? '(no name)'}
+              {user.claimed ? '' : ' (not yet signed in)'}{' '}
               <button type="button" onClick={() => void assign(user.iUserId, 'TENANT_ADMIN')}>
                 Make tenant admin
               </button>{' '}
