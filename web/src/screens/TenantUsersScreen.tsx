@@ -33,11 +33,11 @@ export function TenantUsersScreen() {
     }
   };
 
-  const assign = async (identityUserId: number, role: string) => {
+  const assign = async (identityUserId: number, role: string, enabled = true) => {
     setError(null);
     try {
-      await adminApi.saveTenantUser(tenantId, identityUserId, role, true);
-      setStatus(`Assigned ${role} to user ${identityUserId}`);
+      await adminApi.saveTenantUser(tenantId, identityUserId, role, enabled);
+      setStatus(`Saved user ${identityUserId}: ${role}${enabled ? '' : ' (disabled)'}`);
       load();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Assignment failed');
@@ -58,14 +58,51 @@ export function TenantUsersScreen() {
       ) : users.length === 0 ? (
         <p>No users are mapped to this tenant yet.</p>
       ) : (
-        <ul>
-          {users.map((user) => (
-            <li key={user.id}>
-              Central user #{user.identity_user_id} — {user.role}
-              {user.enabled ? '' : ' (disabled)'}
-            </li>
-          ))}
-        </ul>
+        <table>
+          <caption className="visually-hidden">Users mapped to this tenant</caption>
+          <thead>
+            <tr>
+              <th scope="col">Central user</th>
+              <th scope="col">Role</th>
+              <th scope="col">Enabled</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id}>
+                <td>#{user.identity_user_id}</td>
+                <td>
+                  <label>
+                    <span className="visually-hidden">Role for user {user.identity_user_id}</span>
+                    <select
+                      value={user.role}
+                      onChange={(e) =>
+                        void assign(user.identity_user_id, e.target.value, user.enabled)
+                      }
+                    >
+                      <option value="TENANT_ADMIN">TENANT_ADMIN</option>
+                      <option value="USER">USER</option>
+                    </select>
+                  </label>
+                </td>
+                <td>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={user.enabled}
+                      onChange={(e) =>
+                        void assign(user.identity_user_id, user.role, e.target.checked)
+                      }
+                    />
+                    <span className="visually-hidden">
+                      Enabled for user {user.identity_user_id}
+                    </span>
+                  </label>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
 
       <h2 id="find-user-heading">Find a central user</h2>

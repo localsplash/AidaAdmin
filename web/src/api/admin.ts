@@ -112,6 +112,8 @@ export interface DidRoute {
   did_e164: string;
   assistant_profile_id: string;
   destination_type: 'EXTENSION' | 'RING_GROUP';
+  destination_extension_id: string | null;
+  destination_ring_group_id: string | null;
   screening_enabled: boolean;
   enabled: boolean;
   revision: number;
@@ -124,6 +126,34 @@ export interface Appearance {
   primary_color: string | null;
   logo_asset_path: string | null;
   revision: number;
+}
+
+export interface ExtensionInput {
+  tenantId: string;
+  extensionNumber: string;
+  displayName: string;
+  callerIdName?: string | null;
+  callerIdNumber?: string | null;
+  enabled: boolean;
+}
+
+export interface RingGroupInput {
+  tenantId: string;
+  name: string;
+  virtualExtension: string;
+  ringTimeoutSeconds: number;
+  memberExtensionIds: string[];
+  enabled: boolean;
+}
+
+export interface DidRouteInput {
+  tenantId: string;
+  didE164: string;
+  assistantProfileId: string;
+  destinationType: 'EXTENSION' | 'RING_GROUP';
+  destinationId: string;
+  screeningEnabled: boolean;
+  enabled: boolean;
 }
 
 export interface ProfileInput {
@@ -162,17 +192,19 @@ export const adminApi = {
 
   listExtensions: (tenantId: string) =>
     call<{ extensions: Extension[] }>(`/admin/tenants/${tenantId}/extensions`, 'GET'),
-  createExtension: (input: {
-    tenantId: string;
-    extensionNumber: string;
-    displayName: string;
-    enabled: boolean;
-  }) =>
-    call<{ extension: Extension; sipUsername: string; sipSecret: string }>(
-      '/admin/extensions',
-      'POST',
-      input,
-    ),
+  createExtension: (input: ExtensionInput) =>
+    call<{
+      extension: Extension;
+      sipUsername?: string;
+      sipSecret?: string;
+      provisioning?: string;
+      message?: string;
+    }>('/admin/extensions', 'POST', input),
+  updateExtension: (extensionId: string, expectedRevision: number, input: ExtensionInput) =>
+    call<{ extension: Extension }>(`/admin/extensions/${extensionId}`, 'PUT', {
+      ...input,
+      expectedRevision,
+    }),
   rotateSecret: (extensionId: string, tenantId: string, reprovisionDevice: boolean) =>
     call<{ sipSecret: string }>(`/admin/extensions/${extensionId}/rotate-secret`, 'POST', {
       tenantId,
@@ -187,13 +219,13 @@ export const adminApi = {
 
   listRingGroups: (tenantId: string) =>
     call<{ ringGroups: RingGroup[] }>(`/admin/tenants/${tenantId}/ring-groups`, 'GET'),
-  createRingGroup: (input: {
-    tenantId: string;
-    name: string;
-    virtualExtension: string;
-    memberExtensionIds: string[];
-    enabled: boolean;
-  }) => call<{ ringGroup: RingGroup }>('/admin/ring-groups', 'POST', input),
+  createRingGroup: (input: RingGroupInput) =>
+    call<{ ringGroup: RingGroup }>('/admin/ring-groups', 'POST', input),
+  updateRingGroup: (ringGroupId: string, expectedRevision: number, input: RingGroupInput) =>
+    call<{ ringGroup: RingGroup }>(`/admin/ring-groups/${ringGroupId}`, 'PUT', {
+      ...input,
+      expectedRevision,
+    }),
 
   listProfiles: (tenantId: string) =>
     call<{ profiles: AssistantProfile[] }>(`/admin/tenants/${tenantId}/profiles`, 'GET'),
@@ -207,15 +239,13 @@ export const adminApi = {
 
   listDidRoutes: (tenantId: string) =>
     call<{ didRoutes: DidRoute[] }>(`/admin/tenants/${tenantId}/did-routes`, 'GET'),
-  createDidRoute: (input: {
-    tenantId: string;
-    didE164: string;
-    assistantProfileId: string;
-    destinationType: 'EXTENSION' | 'RING_GROUP';
-    destinationId: string;
-    screeningEnabled: boolean;
-    enabled: boolean;
-  }) => call<{ didRoute: DidRoute }>('/admin/did-routes', 'POST', input),
+  createDidRoute: (input: DidRouteInput) =>
+    call<{ didRoute: DidRoute }>('/admin/did-routes', 'POST', input),
+  updateDidRoute: (didRouteId: string, expectedRevision: number, input: DidRouteInput) =>
+    call<{ didRoute: DidRoute }>(`/admin/did-routes/${didRouteId}`, 'PUT', {
+      ...input,
+      expectedRevision,
+    }),
 
   getAppearance: (tenantId: string) =>
     call<{ appearance: Appearance | null }>(`/admin/tenants/${tenantId}/appearance`, 'GET'),

@@ -346,9 +346,15 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
       });
       await audit(req, 'extension.create', 'extension', extension.id as string, input.tenantId);
       if (!deps.officePulse) {
-        res.status(503).json({
-          error: 'officepulse_not_configured',
+        // Not a failure: this deployment simply has no PBX wired up yet. The
+        // record is saved; say plainly that nothing was provisioned and that
+        // no SIP secret exists, rather than reporting an error over a
+        // successful write.
+        res.status(201).json({
           extension,
+          provisioning: 'not_configured',
+          message:
+            'Extension saved. OFFICEPULSE_PROVISIONING_BASE_URL is not set, so no PBX endpoint was created and no SIP secret was issued.',
           correlationId: req.correlationId,
         });
         return;
