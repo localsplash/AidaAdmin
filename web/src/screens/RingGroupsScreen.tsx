@@ -2,22 +2,29 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { adminApi, ApiError, type Extension, type RingGroup } from '../api/admin';
 
+const EMPTY = { name: '', virtualExtension: '', ringTimeoutSeconds: 20, enabled: true };
+
 export function RingGroupsScreen() {
   const { tenantId = '' } = useParams();
   const [groups, setGroups] = useState<RingGroup[] | null>(null);
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: '', virtualExtension: '' });
+  const [status, setStatus] = useState<string | null>(null);
+  const [form, setForm] = useState(EMPTY);
   const [members, setMembers] = useState<Set<string>>(new Set());
+  const [editing, setEditing] = useState<RingGroup | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    Promise.all([adminApi.listRingGroups(tenantId), adminApi.listExtensions(tenantId)])
-      .then(([g, e]) => {
-        setGroups(g.ringGroups);
-        setExtensions(e.extensions);
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'));
+    // Settled rather than all: a failure in one list must not blank the other.
+    void Promise.allSettled([
+      adminApi.listRingGroups(tenantId),
+      adminApi.listExtensions(tenantId),
+    ]).then(([g, e]) => {
+      if (g.status === 'fulfilled') setGroups(g.value.ringGroups);
+      else setError(g.reason instanceof Error ? g.reason.message : 'Failed to load ring groups');
+      if (e.status === 'fulfilled') setExtensions(e.value.extensions);
+    });
   }, [tenantId]);
 
   useEffect(() => {
@@ -31,23 +38,43 @@ export function RingGroupsScreen() {
     setMembers(next);
   };
 
-  const create = async (event: React.FormEvent) => {
+  const startEdit = (group: RingGroup) => {
+    setEditing(group);
+    setError(null);
+    setStatus(null);
+    setForm({
+      name: group.name,
+      virtualExtension: group.virtual_extension,
+      ringTimeoutSeconds: group.ring_timeout_seconds,
+      enabled: group.enabled,
+    });
+    setMembers(new Set(group.members.map((m) => m.extension_id)));
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setForm(EMPTY);
+    setMembers(new Set());
+  };
+
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    setStatus(null);
+    const input = { tenantId, ...form, memberExtensionIds: [...members] };
     try {
-      await adminApi.createRingGroup({
-        tenantId,
-        name: form.name,
-        virtualExtension: form.virtualExtension,
-        memberExtensionIds: [...members],
-        enabled: true,
-      });
-      setForm({ name: '', virtualExtension: '' });
-      setMembers(new Set());
+      if (editing) {
+        await adminApi.updateRingGroup(editing.id, editing.revision, input);
+        setStatus(`Saved ${form.name}`);
+      } else {
+        await adminApi.createRingGroup(input);
+        setStatus(`Created ${form.name}`);
+      }
+      cancelEdit();
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not create the ring group');
+      setError(err instanceof ApiError ? err.message : 'Could not save the ring group');
     } finally {
       setBusy(false);
     }
@@ -60,6 +87,7 @@ export function RingGroupsScreen() {
       </p>
       <h1 id="ring-groups-heading">Ring groups</h1>
       {error ? <p role="alert">{error}</p> : null}
+      {status ? <p role="status">{status}</p> : null}
 
       {groups === null ? (
         <p role="status">Loading…</p>
@@ -71,13 +99,19 @@ export function RingGroupsScreen() {
             <li key={group.id}>
               {group.name} — extension {group.virtual_extension}, rings {group.ring_timeout_seconds}
               s, {group.members.length} member(s)
+              {group.enabled ? '' : ' (disabled)'}{' '}
+              <button type="button" onClick={() => startEdit(group)}>
+                Edit
+              </button>
             </li>
           ))}
         </ul>
       )}
 
-      <h2 id="new-ring-group-heading">New ring group (RING_ALL)</h2>
-      <form aria-labelledby="new-ring-group-heading" onSubmit={(e) => void create(e)}>
+      <h2 id="ring-group-form-heading">
+        {editing ? `Edit ${editing.name}` : 'New ring group (RING_ALL)'}
+      </h2>
+      <form aria-labelledby="ring-group-form-heading" onSubmit={(e) => void submit(e)}>
         <label>
           Name
           <input
@@ -94,6 +128,16 @@ export function RingGroupsScreen() {
             onChange={(e) => setForm({ ...form, virtualExtension: e.target.value })}
           />
         </label>
+        <label>
+          Ring timeout (seconds)
+          <input
+            type="number"
+            min={1}
+            max={300}
+            value={form.ringTimeoutSeconds}
+            onChange={(e) => setForm({ ...form, ringTimeoutSeconds: Number(e.target.value) || 20 })}
+          />
+        </label>
         <fieldset>
           <legend>Members</legend>
           {extensions.length === 0 ? <p>Create extensions first.</p> : null}
@@ -108,9 +152,22 @@ export function RingGroupsScreen() {
             </label>
           ))}
         </fieldset>
+        <label>
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+          />
+          Enabled
+        </label>
         <button type="submit" disabled={busy}>
-          {busy ? 'Creating…' : 'Create and provision'}
+          {busy ? 'Saving…' : editing ? 'Save ring group' : 'Create and provision'}
         </button>
+        {editing ? (
+          <button type="button" onClick={cancelEdit}>
+            Cancel edit
+          </button>
+        ) : null}
       </form>
     </section>
   );

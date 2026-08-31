@@ -8,12 +8,16 @@ interface Secret {
   values: Array<{ label: string; value: string }>;
 }
 
+const EMPTY = { extensionNumber: '', displayName: '', callerIdName: '', enabled: true };
+
 export function ExtensionsScreen() {
   const { tenantId = '' } = useParams();
   const [extensions, setExtensions] = useState<Extension[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const [secret, setSecret] = useState<Secret | null>(null);
-  const [form, setForm] = useState({ extensionNumber: '', displayName: '' });
+  const [form, setForm] = useState(EMPTY);
+  const [editing, setEditing] = useState<Extension | null>(null);
   const [macByExtension, setMacByExtension] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
@@ -28,28 +32,58 @@ export function ExtensionsScreen() {
     load();
   }, [load]);
 
-  const create = async (event: React.FormEvent) => {
+  const startEdit = (extension: Extension) => {
+    setEditing(extension);
+    setError(null);
+    setStatus(null);
+    setForm({
+      extensionNumber: extension.extension_number,
+      displayName: extension.display_name,
+      callerIdName: extension.caller_id_name ?? '',
+      enabled: extension.enabled,
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setForm(EMPTY);
+  };
+
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setBusy(true);
     setError(null);
+    setStatus(null);
+    const input = {
+      tenantId,
+      extensionNumber: form.extensionNumber,
+      displayName: form.displayName,
+      callerIdName: form.callerIdName || null,
+      enabled: form.enabled,
+    };
     try {
-      const res = await adminApi.createExtension({
-        tenantId,
-        extensionNumber: form.extensionNumber,
-        displayName: form.displayName,
-        enabled: true,
-      });
-      setSecret({
-        title: 'SIP credentials for the new extension',
-        values: [
-          { label: 'SIP username', value: res.sipUsername },
-          { label: 'SIP secret', value: res.sipSecret },
-        ],
-      });
-      setForm({ extensionNumber: '', displayName: '' });
+      if (editing) {
+        await adminApi.updateExtension(editing.id, editing.revision, input);
+        setStatus(`Saved extension ${form.extensionNumber}`);
+      } else {
+        const res = await adminApi.createExtension(input);
+        if (res.sipSecret && res.sipUsername) {
+          setSecret({
+            title: 'SIP credentials for the new extension',
+            values: [
+              { label: 'SIP username', value: res.sipUsername },
+              { label: 'SIP secret', value: res.sipSecret },
+            ],
+          });
+        } else {
+          // Saved, but this deployment has no PBX wired up.
+          setStatus(res.message ?? 'Extension saved without PBX provisioning.');
+        }
+      }
+      cancelEdit();
       load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not create the extension');
+      setError(err instanceof ApiError ? err.message : 'Could not save the extension');
     } finally {
       setBusy(false);
     }
@@ -95,6 +129,7 @@ export function ExtensionsScreen() {
       </p>
       <h1 id="extensions-heading">Extensions</h1>
       {error ? <p role="alert">{error}</p> : null}
+      {status ? <p role="status">{status}</p> : null}
       {secret ? (
         <OneTimeSecret
           title={secret.title}
@@ -114,6 +149,7 @@ export function ExtensionsScreen() {
             <tr>
               <th scope="col">Number</th>
               <th scope="col">Name</th>
+              <th scope="col">Enabled</th>
               <th scope="col">Handset MAC</th>
               <th scope="col">Actions</th>
             </tr>
@@ -123,8 +159,12 @@ export function ExtensionsScreen() {
               <tr key={extension.id}>
                 <td>{extension.extension_number}</td>
                 <td>{extension.display_name}</td>
+                <td>{extension.enabled ? 'Yes' : 'No'}</td>
                 <td>{extension.provisioning_mac ?? '—'}</td>
                 <td>
+                  <button type="button" onClick={() => startEdit(extension)}>
+                    Edit
+                  </button>{' '}
                   <button type="button" onClick={() => void rotate(extension)}>
                     Rotate SIP secret
                   </button>{' '}
@@ -148,8 +188,10 @@ export function ExtensionsScreen() {
         </table>
       )}
 
-      <h2 id="new-extension-heading">New extension</h2>
-      <form aria-labelledby="new-extension-heading" onSubmit={(e) => void create(e)}>
+      <h2 id="extension-form-heading">
+        {editing ? `Edit extension ${editing.extension_number}` : 'New extension'}
+      </h2>
+      <form aria-labelledby="extension-form-heading" onSubmit={(e) => void submit(e)}>
         <label>
           Extension number
           <input
@@ -166,9 +208,29 @@ export function ExtensionsScreen() {
             onChange={(e) => setForm({ ...form, displayName: e.target.value })}
           />
         </label>
+        <label>
+          Caller ID name
+          <input
+            value={form.callerIdName}
+            onChange={(e) => setForm({ ...form, callerIdName: e.target.value })}
+          />
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+          />
+          Enabled
+        </label>
         <button type="submit" disabled={busy}>
-          {busy ? 'Creating…' : 'Create and provision'}
+          {busy ? 'Saving…' : editing ? 'Save extension' : 'Create and provision'}
         </button>
+        {editing ? (
+          <button type="button" onClick={cancelEdit}>
+            Cancel edit
+          </button>
+        ) : null}
       </form>
     </section>
   );

@@ -142,3 +142,99 @@ describe('ExtensionsScreen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/PBX provisioning failed/i);
   });
 });
+
+describe('editing existing records', () => {
+  it('prefills the tenant form and saves with the record revision', async () => {
+    const puts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    mockFetch((url, init) => {
+      if (url.endsWith('/admin/tenants') && init?.method === 'PUT') return null;
+      if (init?.method === 'PUT') {
+        puts.push({ url, body: JSON.parse(String(init.body)) });
+        return { status: 200, body: { tenant } };
+      }
+      if (url.endsWith('/admin/tenants')) return { status: 200, body: { tenants: [tenant] } };
+      return null;
+    });
+    render(
+      <MemoryRouter>
+        <TenantsScreen />
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /edit/i }));
+
+    // The form is populated from the record, not blank.
+    expect(screen.getByLabelText(/name/i)).toHaveValue('Acme');
+    expect(screen.getByLabelText(/slug/i)).toHaveValue('acme');
+    expect(screen.getByLabelText(/asterisk context/i)).toHaveValue('acme');
+
+    await user.clear(screen.getByLabelText(/name/i));
+    await user.type(screen.getByLabelText(/name/i), 'Acme Dental');
+    await user.click(screen.getByRole('button', { name: /save tenant/i }));
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]!.url).toBe('/admin/tenants/ten-1');
+    expect(puts[0]!.body.name).toBe('Acme Dental');
+    // The revision is what stops a concurrent edit being overwritten.
+    expect(puts[0]!.body.expectedRevision).toBe(1);
+  });
+
+  it('reports a stale revision from the server', async () => {
+    mockFetch((url, init) => {
+      if (init?.method === 'PUT') {
+        return {
+          status: 409,
+          body: { error: 'revision_conflict', message: 'tenant was modified by someone else' },
+        };
+      }
+      if (url.endsWith('/admin/tenants')) return { status: 200, body: { tenants: [tenant] } };
+      return null;
+    });
+    render(
+      <MemoryRouter>
+        <TenantsScreen />
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /edit/i }));
+    await user.click(screen.getByRole('button', { name: /save tenant/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/modified by someone else/i);
+  });
+});
+
+describe('extension without a PBX', () => {
+  it('reports the record as saved rather than failing', async () => {
+    mockFetch((url, init) => {
+      if (url.endsWith('/admin/extensions') && init?.method === 'POST') {
+        return {
+          status: 201,
+          body: {
+            extension: { id: 'ext-1' },
+            provisioning: 'not_configured',
+            message: 'Extension saved. OFFICEPULSE_PROVISIONING_BASE_URL is not set…',
+          },
+        };
+      }
+      if (url.includes('/admin/tenants/ten-1/extensions')) {
+        return { status: 200, body: { extensions: [] } };
+      }
+      return null;
+    });
+    render(
+      <MemoryRouter initialEntries={['/tenants/ten-1/extensions']}>
+        <Routes>
+          <Route path="/tenants/:tenantId/extensions" element={<ExtensionsScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/extension number/i), '100');
+    await user.type(screen.getByLabelText(/display name/i), 'Front Desk');
+    await user.click(screen.getByRole('button', { name: /create and provision/i }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/Extension saved/i);
+    // No credential panel, because no secret was issued.
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
