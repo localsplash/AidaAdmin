@@ -6,11 +6,12 @@
  *   npm run nocodb -w server -- upgrade   additive apply; never drops/retypes
  *   npm run nocodb -w server -- seed      idempotent dedicated POC records
  *
- * Requires NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID in the
- * environment (see .env.example). Values are never printed.
+ * Requires NOCODB_BASE_URL and NOCODB_API_TOKEN in the environment (see
+ * .env.example); the base itself is found by name. Values are never printed.
  */
 import { loadConfig } from '../config.js';
 import { HttpNocoDbApi } from './api.js';
+import { AIDA_BASE_NAME, CachedBaseResolver, resolveBaseId } from './base.js';
 import { createRepos } from './repos.js';
 import { reportDrift, upgradeSchema } from './schema.js';
 
@@ -24,14 +25,18 @@ async function main(): Promise<void> {
   }
 
   const config = loadConfig();
-  const { NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID } = config.serviceConfig;
-  if (!NOCODB_BASE_URL || !NOCODB_API_TOKEN || !NOCODB_BASE_ID) {
-    console.error(
-      'Missing NocoDB configuration: NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID',
-    );
+  const { NOCODB_BASE_URL, NOCODB_API_TOKEN } = config.serviceConfig;
+  if (!NOCODB_BASE_URL || !NOCODB_API_TOKEN) {
+    console.error('Missing NocoDB configuration: NOCODB_BASE_URL, NOCODB_API_TOKEN');
     process.exit(2);
   }
-  const api = new HttpNocoDbApi(NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID);
+  // The base is addressed by name; its id is discovered here exactly as the
+  // server discovers it at startup.
+  const api: HttpNocoDbApi = new HttpNocoDbApi(NOCODB_BASE_URL, NOCODB_API_TOKEN, () =>
+    resolver.resolve(),
+  );
+  const resolver = new CachedBaseResolver(() => resolveBaseId(api));
+  console.log(`Base ${AIDA_BASE_NAME}: ${await resolver.resolve()}`);
 
   if (command === 'validate') {
     const drift = await reportDrift(api);

@@ -16,6 +16,11 @@ export interface NocoTableDef {
   columns: NocoColumnDef[];
 }
 
+export interface NocoBaseInfo {
+  id: string;
+  title: string;
+}
+
 export interface NocoTableInfo {
   id: string;
   table_name: string;
@@ -39,7 +44,13 @@ export interface NocoWhere {
   value: string | number | boolean;
 }
 
-export interface NocoDbApi {
+/** The base-discovery surface, split out so the resolver needs nothing else. */
+export interface NocoMetaApi {
+  listBases(): Promise<NocoBaseInfo[]>;
+  createBase(title: string): Promise<NocoBaseInfo>;
+}
+
+export interface NocoDbApi extends NocoMetaApi {
   listTables(): Promise<NocoTableInfo[]>;
   listColumns(tableId: string): Promise<NocoColumnInfo[]>;
   createTable(def: NocoTableDef): Promise<NocoTableInfo>;
@@ -63,10 +74,14 @@ function whereClause(where: NocoWhere[]): string {
 }
 
 export class HttpNocoDbApi implements NocoDbApi {
+  /**
+   * `resolveBaseId` is supplied rather than a configured id: the base is
+   * addressed by name and discovered at runtime (see base.ts).
+   */
   constructor(
     private readonly baseUrl: string,
     private readonly apiToken: string,
-    private readonly baseId: string,
+    private readonly resolveBaseId: () => Promise<string>,
   ) {}
 
   private async request(path: string, init?: RequestInit): Promise<unknown> {
@@ -85,8 +100,21 @@ export class HttpNocoDbApi implements NocoDbApi {
     return res.status === 204 ? null : res.json();
   }
 
+  async listBases(): Promise<NocoBaseInfo[]> {
+    const body = (await this.request('/api/v2/meta/bases')) as { list?: NocoBaseInfo[] };
+    return body.list ?? [];
+  }
+
+  async createBase(title: string): Promise<NocoBaseInfo> {
+    return (await this.request('/api/v2/meta/bases', {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    })) as NocoBaseInfo;
+  }
+
   async listTables(): Promise<NocoTableInfo[]> {
-    const body = (await this.request(`/api/v2/meta/bases/${this.baseId}/tables`)) as {
+    const baseId = await this.resolveBaseId();
+    const body = (await this.request(`/api/v2/meta/bases/${baseId}/tables`)) as {
       list?: NocoTableInfo[];
     };
     return body.list ?? [];
@@ -100,7 +128,8 @@ export class HttpNocoDbApi implements NocoDbApi {
   }
 
   async createTable(def: NocoTableDef): Promise<NocoTableInfo> {
-    return (await this.request(`/api/v2/meta/bases/${this.baseId}/tables`, {
+    const baseId = await this.resolveBaseId();
+    return (await this.request(`/api/v2/meta/bases/${baseId}/tables`, {
       method: 'POST',
       body: JSON.stringify(def),
     })) as NocoTableInfo;

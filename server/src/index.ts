@@ -3,6 +3,8 @@ import { ConfigError, loadConfig } from './config.js';
 import { createDeps, migrate } from './deps.js';
 import { buildDiagnostics } from './diagnostics.js';
 import { catchUpIdEvents } from './id/events.js';
+import { AIDA_BASE_NAME } from './nocodb/base.js';
+import { upgradeSchema } from './nocodb/schema.js';
 import { createLogger } from './logger.js';
 
 const SHUTDOWN_GRACE_MS = 10_000;
@@ -54,6 +56,34 @@ async function main(): Promise<void> {
       const log = finding.level === 'error' ? logger.error : logger.warn;
       log.call(logger, { fix: finding.fix }, `login preflight: ${finding.summary}`);
     }
+    if (deps.baseResolver && deps.repos) {
+      // Zero-config bootstrap: find (or create) the base by name and bring
+      // the schema up to date. The upgrade is strictly additive and a no-op
+      // once current, so it is safe on every boot. A failure here leaves the
+      // rest of the app serving; the next configuration call retries.
+      void deps.baseResolver
+        .resolve()
+        .then(async (baseId) => {
+          logger.info({ base: AIDA_BASE_NAME, baseId }, 'NocoDB base resolved');
+          const result = await upgradeSchema(deps.repos!.store.api);
+          if (result.createdTables.length > 0 || result.addedColumns.length > 0) {
+            logger.info(
+              { created: result.createdTables, added: result.addedColumns },
+              'NocoDB schema brought up to date',
+            );
+          }
+          for (const mismatch of result.typeMismatches) {
+            logger.error(
+              { ...mismatch },
+              'NocoDB column type differs from the schema; nothing was retyped',
+            );
+          }
+        })
+        .catch((err) => {
+          logger.error({ err }, `NocoDB base ${AIDA_BASE_NAME} is not usable yet`);
+        });
+    }
+
     if (deps.idClient) {
       const idClient = deps.idClient;
       // Catch up on identity events missed while down, then (optionally)

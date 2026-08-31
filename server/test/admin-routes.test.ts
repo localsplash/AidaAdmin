@@ -401,8 +401,7 @@ describe('unconfigured NocoDB', () => {
       NODE_ENV: 'test',
       LOG_LEVEL: 'fatal',
       NOCODB_BASE_URL: 'https://nocodb.example.invalid',
-      NOCODB_API_TOKEN: 'token-value',
-      // NOCODB_BASE_ID deliberately absent.
+      // NOCODB_API_TOKEN deliberately absent.
     });
     const deps: AppDeps = createDeps(config);
     const app = createApp(config, logger, deps);
@@ -419,9 +418,9 @@ describe('unconfigured NocoDB', () => {
       .set('Cookie', [`aida.sid=${sid}`]);
     expect(res.status).toBe(503);
     expect(res.body.error).toBe('nocodb_not_configured');
-    expect(res.body.message).toContain('NOCODB_BASE_ID');
-    expect(res.body.missingConfiguration).toEqual(['NOCODB_BASE_ID']);
-    // Names only — never the token value.
-    expect(JSON.stringify(res.body)).not.toContain('token-value');
+    expect(res.body.message).toContain('NOCODB_API_TOKEN');
+    expect(res.body.missingConfiguration).toEqual(['NOCODB_API_TOKEN']);
+    // No base id is ever configuration: the base is found by name.
+    expect(JSON.stringify(res.body)).not.toContain('NOCODB_BASE_ID');
   });
 });
