@@ -152,6 +152,49 @@ checks on every update, and append immutable audit records. No SIP secret has a
 column anywhere; extensions store only the enrollment token hash. With NocoDB
 configured, `tenant_user` also backs the phase 2 login directory.
 
+## Platform users (the `AidaIdentity` base)
+
+There is one platform person record — `id_tbl_User.iUserId` in the `id` service's MySQL
+database — and AidaAdmin never copies it. Connect that database to NocoDB as a base named
+**`AidaIdentity`** and AidaAdmin reads users from it directly. Like the AidaAdmin base it is
+found by name, ignoring case, with nothing to configure; unlike it, it is **never created**,
+because an auto-created empty base of that name would shadow the real one and report that the
+platform has no users.
+
+Which door each operation uses is deliberate:
+
+| Operation                    | Source                                          | Why                                                                                                                                          |
+| ---------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| List, search, look up a user | `AidaIdentity` base, falling back to `id`'s API | The whole directory in one call instead of a keyset-paged search, and it survives `id`'s API being unreachable                               |
+| Edit a display name          | `AidaIdentity` base only                        | `id` publishes no endpoint that updates a user                                                                                               |
+| Create a user by email       | `id`'s ensure endpoint only (`ID_BASE_URL`)     | The email-uniqueness advisory lock and idempotency keys live there; inserting a row directly would trade that guarantee for duplicate people |
+
+Without the base, the directory still lists and creates through `id` — only display-name
+editing is unavailable, and the screen says so rather than hiding the reason. The startup log
+reports which of the two is in play.
+
+## Roles
+
+`superAdmin` comes from the `id` token response and is never recalculated locally; every other
+role is a `tenant_user` record.
+
+|                                                                                               | Super Admin | TENANT_ADMIN                          | USER  |
+| --------------------------------------------------------------------------------------------- | ----------- | ------------------------------------- | ----- |
+| Create tenants, grant Super Admin                                                             | yes         | no                                    | no    |
+| See the tenants list                                                                          | all tenants | the ones they administer              | empty |
+| Everything within a tenant — users, extensions, ring groups, profiles, DID routes, appearance | any tenant  | their own only                        | no    |
+| Switch tenant context                                                                         | yes         | only if they administer more than one | n/a   |
+
+A tenant administrator who belongs to exactly one tenant is placed in it by the server on
+sign-in and is shown no tenant switcher — there is nothing to choose. They also cannot remove
+their own administrator access to a tenant; only a Super Admin can. The tenant id a request
+acts on is read from the route or the body, and a tenant-scoped route carrying neither is
+denied rather than admitted.
+
+Extensions carry an optional `identity_user_id`: one platform user answers an extension, and
+one user may answer several. The user must already be a member of the same tenant, so an
+extension can never be a back door into a tenant someone was never given.
+
 Unit tests isolate the repository interface with an in-memory NocoDB fake;
 `server/test/nocodb.integration.test.ts` runs against the real base whenever the
 three NocoDB variables are set (it creates dedicated, clearly-labeled records).

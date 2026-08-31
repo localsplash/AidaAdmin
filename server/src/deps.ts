@@ -18,7 +18,8 @@ import {
 import { HttpIdClient, type IdClient } from './id/client.js';
 import { MemoryIdentityEventStore, type IdentityEventStore } from './id/event-store.js';
 import { HttpNocoDbApi } from './nocodb/api.js';
-import { CachedBaseResolver, resolveBaseId } from './nocodb/base.js';
+import { CachedBaseResolver, resolveBaseId, resolveIdentityBaseId } from './nocodb/base.js';
+import { NocoIdentityStore } from './nocodb/identity.js';
 import { createRepos, NocoDbTenantUserDirectory, type AidaConfigRepos } from './nocodb/repos.js';
 import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
 import {
@@ -38,6 +39,14 @@ export interface AppDeps {
   missingNocoDb: ServiceEnvVar[];
   /** Non-null whenever repos is; resolves the base id by name on demand. */
   baseResolver: CachedBaseResolver | null;
+  /**
+   * Reads (and writes display names to) the platform user table through the
+   * NocoDB AidaIdentity base. Non-null whenever NocoDB is configured;
+   * whether that base exists is discovered on use. Pair it with idClient
+   * through `userDirectory()` rather than holding a directory here — two
+   * fields that must agree is one too many.
+   */
+  identityStore: NocoIdentityStore | null;
   /** Non-null when the OfficePulse provisioning API is configured. */
   officePulse: OfficePulseClient | null;
   /** Non-null when the handset provisioning service is configured. */
@@ -63,6 +72,13 @@ export interface NocoDbSetup {
   repos: AidaConfigRepos;
   /** Resolves (and caches) the base id; safe to call repeatedly. */
   baseResolver: CachedBaseResolver;
+  /**
+   * Reads the platform user table out of the AidaIdentity base. Present
+   * whenever NocoDB is configured — whether that base actually exists is
+   * discovered on first use, not at wiring time, so a base connected later
+   * starts working without a restart.
+   */
+  identity: NocoIdentityStore;
 }
 
 export function nocodbFromConfig(config: AppConfig): NocoDbSetup | null {
@@ -76,7 +92,24 @@ export function nocodbFromConfig(config: AppConfig): NocoDbSetup | null {
     (): Promise<string> => resolver.resolve(),
   );
   const resolver: CachedBaseResolver = new CachedBaseResolver(() => resolveBaseId(api));
-  return { repos: createRepos(api), baseResolver: resolver };
+
+  // A second client over the same instance and credential, pointed at the
+  // identity base. Its resolver caches success only, so connecting the base
+  // after boot is picked up on the next call.
+  const identityApi: HttpNocoDbApi = new HttpNocoDbApi(
+    NOCODB_BASE_URL,
+    NOCODB_API_TOKEN,
+    (): Promise<string> => identityResolver.resolve(),
+  );
+  const identityResolver: CachedBaseResolver = new CachedBaseResolver(() =>
+    resolveIdentityBaseId(identityApi),
+  );
+
+  return {
+    repos: createRepos(api),
+    baseResolver: resolver,
+    identity: new NocoIdentityStore(identityApi),
+  };
 }
 
 /**
@@ -97,6 +130,7 @@ export function createDeps(config: AppConfig): AppDeps {
     ? new NocoDbTenantUserDirectory(repos.tenantUsers)
     : new EmptyTenantUserDirectory();
   const baseResolver = nocodb?.baseResolver ?? null;
+  const identityStore = nocodb?.identity ?? null;
   const officePulseBase = config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL;
   const officePulse = officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null;
   const handsetUrl = config.serviceConfig.HANDSET_PROVISIONING_URL;
@@ -113,6 +147,7 @@ export function createDeps(config: AppConfig): AppDeps {
       repos,
       missingNocoDb: missingNocoDbConfig(config),
       baseResolver,
+      identityStore,
       officePulse,
       handsetDelivery,
       pool,
@@ -130,6 +165,7 @@ export function createDeps(config: AppConfig): AppDeps {
     repos,
     missingNocoDb: missingNocoDbConfig(config),
     baseResolver,
+    identityStore,
     officePulse,
     handsetDelivery,
     pool: null,

@@ -4,7 +4,13 @@ import { adminApi, ApiError, type Tenant, type TenantInput } from '../api/admin'
 
 const EMPTY: TenantInput = { name: '', slug: '', asteriskContext: '', enabled: true };
 
-export function TenantsScreen() {
+/**
+ * The list is scoped by the server: every tenant for a Super Admin, the ones
+ * they administer for a tenant administrator. Only a Super Admin can create
+ * one, so the form is an edit-only form for everyone else rather than a
+ * button that leads to a refusal.
+ */
+export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -108,49 +114,53 @@ export function TenantsScreen() {
         </table>
       )}
 
-      <h2 id="tenant-form-heading">{editing ? `Edit ${editing.name}` : 'New tenant'}</h2>
-      <form aria-labelledby="tenant-form-heading" onSubmit={(e) => void submit(e)}>
-        <label>
-          Name
-          <input
-            required
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-          />
-        </label>
-        <label>
-          Slug
-          <input
-            required
-            value={form.slug}
-            onChange={(e) => setForm({ ...form, slug: e.target.value })}
-          />
-        </label>
-        <label>
-          Asterisk context
-          <input
-            required
-            value={form.asteriskContext}
-            onChange={(e) => setForm({ ...form, asteriskContext: e.target.value })}
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={form.enabled}
-            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-          />
-          Enabled
-        </label>
-        <button type="submit" disabled={saving}>
-          {saving ? 'Saving…' : editing ? 'Save tenant' : 'Create tenant'}
-        </button>
-        {editing ? (
-          <button type="button" onClick={cancelEdit}>
-            Cancel edit
-          </button>
-        ) : null}
-      </form>
+      {!canCreate && !editing ? null : (
+        <>
+          <h2 id="tenant-form-heading">{editing ? `Edit ${editing.name}` : 'New tenant'}</h2>
+          <form aria-labelledby="tenant-form-heading" onSubmit={(e) => void submit(e)}>
+            <label>
+              Name
+              <input
+                required
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </label>
+            <label>
+              Slug
+              <input
+                required
+                value={form.slug}
+                onChange={(e) => setForm({ ...form, slug: e.target.value })}
+              />
+            </label>
+            <label>
+              Asterisk context
+              <input
+                required
+                value={form.asteriskContext}
+                onChange={(e) => setForm({ ...form, asteriskContext: e.target.value })}
+              />
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+              />
+              Enabled
+            </label>
+            <button type="submit" disabled={saving}>
+              {saving ? 'Saving…' : editing ? 'Save tenant' : 'Create tenant'}
+            </button>
+            {editing ? (
+              <button type="button" onClick={cancelEdit}>
+                Cancel edit
+              </button>
+            ) : null}
+          </form>
+        </>
+      )}
     </section>
   );
 }

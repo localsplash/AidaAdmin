@@ -58,6 +58,12 @@ export interface NocoDbApi extends NocoMetaApi {
   listRecords(tableId: string, where: NocoWhere[], limit?: number): Promise<NocoRecord[]>;
   createRecord(tableId: string, values: Record<string, unknown>): Promise<NocoRecord>;
   updateRecord(tableId: string, recordId: number, values: Record<string, unknown>): Promise<void>;
+  /**
+   * PATCH with a caller-supplied key. External sources (the identity base's
+   * MySQL tables) key on their own primary-key column — `iUserId`, not the
+   * `Id` that NocoDB-owned tables carry — so the key travels in the body.
+   */
+  patchRecord(tableId: string, values: Record<string, unknown>): Promise<void>;
 }
 
 export class NocoDbError extends Error {
@@ -163,9 +169,13 @@ export class HttpNocoDbApi implements NocoDbApi {
     recordId: number,
     values: Record<string, unknown>,
   ): Promise<void> {
+    await this.patchRecord(tableId, { Id: recordId, ...values });
+  }
+
+  async patchRecord(tableId: string, values: Record<string, unknown>): Promise<void> {
     await this.request(`/api/v2/tables/${tableId}/records`, {
       method: 'PATCH',
-      body: JSON.stringify({ Id: recordId, ...values }),
+      body: JSON.stringify(values),
     });
   }
 }

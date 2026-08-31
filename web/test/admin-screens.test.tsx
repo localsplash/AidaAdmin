@@ -256,7 +256,10 @@ describe('TenantUsersScreen', () => {
     mockFetch((url, init) => {
       const method = init?.method ?? 'GET';
       if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
-        return { status: 200, body: { users: [] } };
+        return {
+          status: 200,
+          body: { users: [], canEditDisplayName: true, directoryError: null },
+        };
       }
       if (url === '/admin/directory/users' && method === 'POST') {
         calls.push({ url, method, body: JSON.parse(String(init!.body)) });
@@ -303,7 +306,10 @@ describe('TenantUsersScreen', () => {
     mockFetch((url, init) => {
       const method = init?.method ?? 'GET';
       if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
-        return { status: 200, body: { users: [] } };
+        return {
+          status: 200,
+          body: { users: [], canEditDisplayName: true, directoryError: null },
+        };
       }
       if (url.startsWith('/admin/directory/users?') && method === 'GET') {
         return {
@@ -322,5 +328,106 @@ describe('TenantUsersScreen', () => {
     await user.type(await screen.findByLabelText(/search by email or name/i), 'pending');
     await user.click(screen.getByRole('button', { name: /^search$/i }));
     expect(await screen.findByText(/not yet signed in/i)).toBeInTheDocument();
+  });
+});
+
+const MEMBER = {
+  id: 'tu-1',
+  tenant_id: 'ten-1',
+  identity_user_id: 42,
+  role: 'USER',
+  enabled: true,
+  email: 'pat@example.invalid',
+  display_name: 'Pat',
+  claimed: true,
+};
+
+describe('platform user display names', () => {
+  it('shows the person behind a mapping and saves an edited display name', async () => {
+    const puts: Array<{ url: string; body: Record<string, unknown> }> = [];
+    mockFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
+        return {
+          status: 200,
+          body: { users: [MEMBER], canEditDisplayName: true, directoryError: null },
+        };
+      }
+      if (url === '/admin/directory/users/42' && method === 'PUT') {
+        puts.push({ url, body: JSON.parse(String(init!.body)) });
+        return { status: 200, body: { user: { iUserId: 42, displayName: 'Patricia' } } };
+      }
+      return null;
+    });
+    renderTenantUsers();
+    const user = userEvent.setup();
+
+    // The mapping reads as a person, not a bare id.
+    expect(await screen.findByText(/pat@example\.invalid/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /edit name/i }));
+    const input = screen.getByLabelText(/display name for user 42/i);
+    await user.clear(input);
+    await user.type(input, 'Patricia');
+    await user.click(screen.getByRole('button', { name: /save name/i }));
+
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]!.body).toEqual({ displayName: 'Patricia' });
+  });
+
+  it('hides name editing and says why when the identity base is not connected', async () => {
+    mockFetch((url, init) => {
+      if (url === '/admin/tenants/ten-1/users' && (init?.method ?? 'GET') === 'GET') {
+        return {
+          status: 200,
+          body: {
+            users: [MEMBER],
+            canEditDisplayName: false,
+            directoryError: 'No NocoDB base named AidaIdentity exists.',
+          },
+        };
+      }
+      return null;
+    });
+    renderTenantUsers();
+    expect(await screen.findByRole('alert')).toHaveTextContent(/AidaIdentity/);
+    expect(screen.queryByRole('button', { name: /edit name/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('extension owner', () => {
+  it('offers the tenant members and sends the chosen user', async () => {
+    const posts: Array<Record<string, unknown>> = [];
+    mockFetch((url, init) => {
+      const method = init?.method ?? 'GET';
+      if (url.includes('/admin/tenants/ten-1/extensions')) {
+        return { status: 200, body: { extensions: [] } };
+      }
+      if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
+        return {
+          status: 200,
+          body: { users: [MEMBER], canEditDisplayName: true, directoryError: null },
+        };
+      }
+      if (url.endsWith('/admin/extensions') && method === 'POST') {
+        posts.push(JSON.parse(String(init!.body)));
+        return {
+          status: 201,
+          body: { extension: { id: 'ext-1' }, provisioning: 'not_configured' },
+        };
+      }
+      return null;
+    });
+    renderExtensions();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText(/extension number/i), '100');
+    await user.selectOptions(screen.getByLabelText(/^user$/i), '42');
+
+    // Picking a person fills an empty display name from them.
+    expect(screen.getByLabelText(/display name/i)).toHaveValue('Pat');
+
+    await user.click(screen.getByRole('button', { name: /create and provision/i }));
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]!.identityUserId).toBe(42);
   });
 });

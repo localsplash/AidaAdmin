@@ -13,9 +13,13 @@ function csrfToken(): string {
 }
 
 /**
- * Persistent banner naming the tenant context every action applies to, with
- * the selector that scopes runtime views. A Super Admin without a selected
- * tenant sees that explicitly rather than an empty banner.
+ * Persistent banner naming the tenant context every action applies to.
+ *
+ * The selector appears only for someone who genuinely has a choice: a Super
+ * Admin, who works across tenants, or the rare person who administers more
+ * than one. A tenant administrator of a single tenant is already in the only
+ * context they have — the server puts them there — so offering them a
+ * "switch tenant" control would only invite them to try leaving it.
  */
 export function TenantContextBanner({
   session,
@@ -62,7 +66,7 @@ export function TenantContextBanner({
           {session.user.superAdmin ? ' — acting as Super Admin' : ''}
         </span>
       )}{' '}
-      {options.length > 0 ? (
+      {session.user.superAdmin || options.length > 1 ? (
         <label>
           Switch tenant
           <select value={tenant?.tenantId ?? ''} onChange={(e) => void select(e.target.value)}>

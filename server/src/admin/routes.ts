@@ -2,13 +2,22 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { AppDeps } from '../deps.js';
+import { DirectoryUnavailableError, userDirectory, type DirectoryUserView } from '../directory.js';
 import type { Logger } from '../logger.js';
 import { IdClientError } from '../id/client.js';
+import { IdentityStoreError } from '../nocodb/identity.js';
+import { BaseResolutionError } from '../nocodb/base.js';
 import { ConflictError, NotFoundError, UniqueViolationError } from '../nocodb/repos.js';
 import { ValidationError } from '../nocodb/validation.js';
 import { OfficePulseError } from '../officepulse/client.js';
 import { HandsetDeliveryError } from '../provisioning/handset-delivery.js';
-import { requireSuperAdmin } from './authz.js';
+import {
+  requireAnyTenantAdmin,
+  requireSession,
+  requireSuperAdmin,
+  requireTenantAdmin,
+  tenantRole,
+} from './authz.js';
 
 const tenantBody = z.object({
   name: z.string(),
@@ -91,6 +100,20 @@ function fail(res: Response, req: Request, err: unknown): void {
       message: 'The identity service call failed',
       correlationId,
     });
+  } else if (err instanceof DirectoryUnavailableError) {
+    res.status(503).json({
+      error: 'directory_not_configured',
+      message: err.message,
+      missingConfiguration: err.missing,
+      correlationId,
+    });
+  } else if (err instanceof BaseResolutionError || err instanceof IdentityStoreError) {
+    // The identity base is absent or ambiguous: an operator action, named.
+    res.status(503).json({
+      error: 'identity_base_unavailable',
+      message: err.message,
+      correlationId,
+    });
   } else {
     throw err;
   }
@@ -130,8 +153,11 @@ function expectedRevision(req: Request, res: Response): number | null {
 export function adminRoutes(logger: Logger, deps: AppDeps): Router {
   const router = Router();
 
-  // Phase 4 is the Super Admin workflow; every route below requires it.
-  router.use('/admin', requireSuperAdmin);
+  // Administration is open to two roles, and which one a route needs is
+  // stated on the route itself: platform-wide actions take requireSuperAdmin,
+  // everything scoped to one tenant takes requireTenantAdmin, which admits a
+  // Super Admin anywhere and a TENANT_ADMIN only in their own tenant.
+  router.use('/admin', requireSession);
 
   router.use('/admin', (req, res, next) => {
     if (!deps.repos) {
@@ -150,6 +176,25 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
   });
 
   const repos = () => deps.repos!;
+  const tenantAdmin = requireTenantAdmin(deps);
+  const directory = userDirectory(deps);
+
+  /**
+   * An extension may name one platform user as the person who answers it,
+   * and one user may answer several extensions. The user must already be a
+   * member of the same tenant: an extension is not a way to grant someone a
+   * tenant they were never given.
+   */
+  async function assertTenantMember(tenantId: string, identityUserId: number): Promise<void> {
+    const memberships = await repos().tenantUsers.listForUser(identityUserId);
+    if (!memberships.some((m) => m.tenant_id === tenantId)) {
+      throw new ValidationError(
+        'identityUserId',
+        'That user is not a member of this tenant — add them on the tenant users screen first',
+      );
+    }
+  }
+  const anyTenantAdmin = requireAnyTenantAdmin(deps);
 
   const audit = (
     req: Request,
@@ -171,15 +216,33 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
 
   // ── Tenants ───────────────────────────────────────────────────────────────
 
-  router.get('/admin/tenants', async (_req, res, next) => {
+  /**
+   * Scoped to what the caller may administer rather than gated outright: a
+   * Super Admin sees every tenant, a TENANT_ADMIN sees the ones they
+   * administer, and anyone else sees none. That makes this list the natural
+   * entry point to a tenant's screens for both roles.
+   */
+  router.get('/admin/tenants', async (req, res, next) => {
     try {
-      res.json({ tenants: await repos().tenants.list() });
+      const session = req.session!;
+      const tenants = await repos().tenants.list();
+      if (session.superAdmin) {
+        res.json({ tenants });
+        return;
+      }
+      const memberships = await repos().tenantUsers.listForUser(session.iUserId);
+      const administered = new Set(
+        memberships
+          .filter((m) => Boolean(m.enabled) && m.role === 'TENANT_ADMIN' && m.tenant_id)
+          .map((m) => m.tenant_id as string),
+      );
+      res.json({ tenants: tenants.filter((t) => administered.has(t.id as string)) });
     } catch (err) {
       next(err);
     }
   });
 
-  router.post('/admin/tenants', async (req, res, next) => {
+  router.post('/admin/tenants', requireSuperAdmin, async (req, res, next) => {
     try {
       const input = parse(tenantBody, req.body, res, req);
       if (!input) return;
@@ -195,7 +258,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.put('/admin/tenants/:tenantId', async (req, res, next) => {
+  router.put('/admin/tenants/:tenantId', tenantAdmin, async (req, res, next) => {
     try {
       const input = parse(tenantBody, req.body, res, req);
       if (!input) return;
@@ -215,14 +278,14 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
 
   // ── Central directory + tenant users ──────────────────────────────────────
 
-  router.get('/admin/directory/users', async (req, res, next) => {
+  router.get('/admin/directory/users', anyTenantAdmin, async (req, res, next) => {
     try {
-      if (!deps.idClient) {
-        res.status(503).json({ error: 'id_not_configured', correlationId: req.correlationId });
-        return;
-      }
       const query = typeof req.query.query === 'string' ? req.query.query : '';
-      res.json({ users: await deps.idClient.searchDirectoryUsers(query) });
+      res.json({
+        users: await directory.search(query),
+        canEditDisplayName: directory.canEditDisplayName,
+        canCreate: directory.canCreate,
+      });
     } catch (err) {
       try {
         fail(res, req, err);
@@ -232,12 +295,8 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.post('/admin/directory/users', async (req, res, next) => {
+  router.post('/admin/directory/users', anyTenantAdmin, async (req, res, next) => {
     try {
-      if (!deps.idClient) {
-        res.status(503).json({ error: 'id_not_configured', correlationId: req.correlationId });
-        return;
-      }
       const body = parse(
         z.object({ email: z.string().email(), displayName: z.string().nullish() }),
         req.body,
@@ -245,7 +304,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
         req,
       );
       if (!body) return;
-      const user = await deps.idClient.ensureDirectoryUser(body.email, body.displayName ?? null);
+      const user = await directory.ensure(body.email, body.displayName ?? null);
       res.status(201).json({ user });
     } catch (err) {
       try {
@@ -256,19 +315,21 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.get('/admin/tenants/:tenantId/users', async (req, res, next) => {
+  /**
+   * The one platform-user field AidaAdmin may change. Everything else about
+   * a person — email, identities, credentials — belongs to id alone, and id
+   * publishes no update endpoint at all, so this write goes through the
+   * NocoDB identity base.
+   */
+  router.put('/admin/directory/users/:identityUserId', anyTenantAdmin, async (req, res, next) => {
     try {
-      res.json({ users: await repos().tenantUsers.listForTenant(req.params.tenantId as string) });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  router.put('/admin/tenants/:tenantId/users/:identityUserId', async (req, res, next) => {
-    try {
-      const input = parse(tenantUserBody, req.body, res, req);
-      if (!input) return;
-      const tenantId = req.params.tenantId as string;
+      const body = parse(
+        z.object({ displayName: z.string().max(255).nullish() }),
+        req.body,
+        res,
+        req,
+      );
+      if (!body) return;
       const identityUserId = Number(req.params.identityUserId);
       if (!Number.isInteger(identityUserId) || identityUserId <= 0) {
         res.status(400).json({
@@ -278,20 +339,10 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
         });
         return;
       }
-      // The mapping references the central user — never copies name/email.
-      await repos().tenants.get(tenantId);
-      if (deps.idClient && !(await deps.idClient.getDirectoryUser(identityUserId))) {
-        res.status(404).json({ error: 'unknown_identity_user', correlationId: req.correlationId });
-        return;
-      }
-      const mapping = await repos().tenantUsers.save(
-        tenantId,
-        identityUserId,
-        input.role,
-        input.enabled,
-      );
-      await audit(req, 'tenant_user.save', 'tenant_user', mapping.id as string, tenantId);
-      res.json({ tenantUser: mapping });
+      const displayName = body.displayName?.trim() || null;
+      const user = await directory.updateDisplayName(identityUserId, displayName);
+      await audit(req, 'directory_user.update', 'identity_user', String(identityUserId), null);
+      res.json({ user });
     } catch (err) {
       try {
         fail(res, req, err);
@@ -301,7 +352,97 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.put('/admin/super-admins/:identityUserId', async (req, res, next) => {
+  /**
+   * The tenant's members, each resolved against the central directory so the
+   * screen can show a person rather than a bare id. A directory that cannot
+   * be reached degrades to ids alone instead of failing the listing.
+   */
+  router.get('/admin/tenants/:tenantId/users', tenantAdmin, async (req, res, next) => {
+    try {
+      const users = await repos().tenantUsers.listForTenant(req.params.tenantId as string);
+      let people: DirectoryUserView[] = [];
+      let directoryError: string | null = null;
+      try {
+        people = await directory.search('');
+      } catch (err) {
+        directoryError = err instanceof Error ? err.message : 'The user directory is unavailable';
+      }
+      const byId = new Map(people.map((u) => [u.iUserId, u]));
+      res.json({
+        users: users.map((user) => {
+          const person = byId.get(Number(user.identity_user_id));
+          return {
+            ...user,
+            email: person?.email ?? null,
+            display_name: person?.displayName ?? null,
+            claimed: person?.claimed ?? null,
+          };
+        }),
+        canEditDisplayName: directory.canEditDisplayName,
+        directoryError,
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.put(
+    '/admin/tenants/:tenantId/users/:identityUserId',
+    tenantAdmin,
+    async (req, res, next) => {
+      try {
+        const input = parse(tenantUserBody, req.body, res, req);
+        if (!input) return;
+        const tenantId = req.params.tenantId as string;
+        const identityUserId = Number(req.params.identityUserId);
+        if (!Number.isInteger(identityUserId) || identityUserId <= 0) {
+          res.status(400).json({
+            error: 'validation',
+            message: 'identityUserId must be a positive integer',
+            correlationId: req.correlationId,
+          });
+          return;
+        }
+        // The mapping references the central user — never copies name/email.
+        await repos().tenants.get(tenantId);
+        if (directory.available && !(await directory.get(identityUserId))) {
+          res
+            .status(404)
+            .json({ error: 'unknown_identity_user', correlationId: req.correlationId });
+          return;
+        }
+        // A tenant administrator must not be able to demote or lock out the
+        // last administrator of their own tenant by editing themselves.
+        if (!req.session!.superAdmin && identityUserId === req.session!.iUserId) {
+          const current = await tenantRole(deps, identityUserId, tenantId);
+          if (current === 'TENANT_ADMIN' && (input.role !== 'TENANT_ADMIN' || !input.enabled)) {
+            res.status(403).json({
+              error: 'forbidden',
+              message: 'You cannot remove your own administrator access to this tenant',
+              correlationId: req.correlationId,
+            });
+            return;
+          }
+        }
+        const mapping = await repos().tenantUsers.save(
+          tenantId,
+          identityUserId,
+          input.role,
+          input.enabled,
+        );
+        await audit(req, 'tenant_user.save', 'tenant_user', mapping.id as string, tenantId);
+        res.json({ tenantUser: mapping });
+      } catch (err) {
+        try {
+          fail(res, req, err);
+        } catch (unhandled) {
+          next(unhandled);
+        }
+      }
+    },
+  );
+
+  router.put('/admin/super-admins/:identityUserId', requireSuperAdmin, async (req, res, next) => {
     try {
       const body = parse(z.object({ enabled: z.boolean() }), req.body, res, req);
       if (!body) return;
@@ -325,7 +466,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
 
   // ── Extensions ────────────────────────────────────────────────────────────
 
-  router.get('/admin/tenants/:tenantId/extensions', async (req, res, next) => {
+  router.get('/admin/tenants/:tenantId/extensions', tenantAdmin, async (req, res, next) => {
     try {
       res.json({
         extensions: await repos().extensions.listForTenant(req.params.tenantId as string),
@@ -335,11 +476,12 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.post('/admin/extensions', async (req, res, next) => {
+  router.post('/admin/extensions', tenantAdmin, async (req, res, next) => {
     try {
       const input = parse(extensionBody, req.body, res, req);
       if (!input) return;
       const tenant = await repos().tenants.get(input.tenantId);
+      if (input.identityUserId) await assertTenantMember(input.tenantId, input.identityUserId);
       const extension = await repos().extensions.create(input.tenantId, {
         ...input,
         asteriskContext: tenant.asterisk_context as string,
@@ -387,13 +529,14 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.put('/admin/extensions/:extensionId', async (req, res, next) => {
+  router.put('/admin/extensions/:extensionId', tenantAdmin, async (req, res, next) => {
     try {
       const input = parse(extensionBody, req.body, res, req);
       if (!input) return;
       const revision = expectedRevision(req, res);
       if (revision === null) return;
       const tenant = await repos().tenants.get(input.tenantId);
+      if (input.identityUserId) await assertTenantMember(input.tenantId, input.identityUserId);
       const extension = await repos().extensions.update(
         input.tenantId,
         req.params.extensionId as string,
@@ -422,112 +565,121 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.post('/admin/extensions/:extensionId/rotate-secret', async (req, res, next) => {
-    try {
-      const body = parse(
-        z.object({ tenantId: z.string(), reprovisionDevice: z.boolean().default(false) }),
-        req.body,
-        res,
-        req,
-      );
-      if (!body) return;
-      const extension = await repos().extensions.get(
-        body.tenantId,
-        req.params.extensionId as string,
-      );
-      if (!deps.officePulse) {
-        res
-          .status(503)
-          .json({ error: 'officepulse_not_configured', correlationId: req.correlationId });
-        return;
+  router.post(
+    '/admin/extensions/:extensionId/rotate-secret',
+    tenantAdmin,
+    async (req, res, next) => {
+      try {
+        const body = parse(
+          z.object({ tenantId: z.string(), reprovisionDevice: z.boolean().default(false) }),
+          req.body,
+          res,
+          req,
+        );
+        if (!body) return;
+        const extension = await repos().extensions.get(
+          body.tenantId,
+          req.params.extensionId as string,
+        );
+        if (!deps.officePulse) {
+          res
+            .status(503)
+            .json({ error: 'officepulse_not_configured', correlationId: req.correlationId });
+          return;
+        }
+        const rotated = await deps.officePulse.rotateProvisionedExtensionSecret(
+          extension.id as string,
+          randomUUID(),
+          body.reprovisionDevice,
+        );
+        if (body.reprovisionDevice) {
+          // Invalidate previously issued device credentials.
+          await repos().extensions.bumpCredentialVersion(
+            body.tenantId,
+            extension.id as string,
+            Number(extension.revision),
+            Number(extension.device_credential_version ?? 1),
+          );
+        }
+        await audit(
+          req,
+          'extension.rotate_secret',
+          'extension',
+          extension.id as string,
+          body.tenantId,
+        );
+        res.json({ sipSecret: rotated.sipSecret, secretShownOnce: true });
+      } catch (err) {
+        try {
+          fail(res, req, err);
+        } catch (unhandled) {
+          next(unhandled);
+        }
       }
-      const rotated = await deps.officePulse.rotateProvisionedExtensionSecret(
-        extension.id as string,
-        randomUUID(),
-        body.reprovisionDevice,
-      );
-      if (body.reprovisionDevice) {
-        // Invalidate previously issued device credentials.
-        await repos().extensions.bumpCredentialVersion(
+    },
+  );
+
+  router.post(
+    '/admin/extensions/:extensionId/handset-enrollment',
+    tenantAdmin,
+    async (req, res, next) => {
+      try {
+        const body = parse(enrollmentBody, req.body, res, req);
+        if (!body) return;
+        const extension = await repos().extensions.get(
+          body.tenantId,
+          req.params.extensionId as string,
+        );
+        if (!deps.handsetDelivery) {
+          res.status(503).json({
+            error: 'handset_provisioning_not_configured',
+            correlationId: req.correlationId,
+          });
+          return;
+        }
+        const deviceId = randomUUID();
+        const enrollmentToken = randomBytes(32).toString('base64url');
+        const expiresAt = new Date(Date.now() + body.ttlSeconds * 1000).toISOString();
+        // Only the hash reaches NocoDB; the plaintext goes once to the
+        // provisioning service and once to the administrator's response.
+        const updated = await repos().extensions.recordEnrollment(
           body.tenantId,
           extension.id as string,
           Number(extension.revision),
-          Number(extension.device_credential_version ?? 1),
+          {
+            deviceId,
+            provisioningMac: body.provisioningMac,
+            enrollmentTokenHash: createHash('sha256').update(enrollmentToken).digest('hex'),
+            enrollmentExpiresAt: expiresAt,
+          },
         );
-      }
-      await audit(
-        req,
-        'extension.rotate_secret',
-        'extension',
-        extension.id as string,
-        body.tenantId,
-      );
-      res.json({ sipSecret: rotated.sipSecret, secretShownOnce: true });
-    } catch (err) {
-      try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
-      }
-    }
-  });
-
-  router.post('/admin/extensions/:extensionId/handset-enrollment', async (req, res, next) => {
-    try {
-      const body = parse(enrollmentBody, req.body, res, req);
-      if (!body) return;
-      const extension = await repos().extensions.get(
-        body.tenantId,
-        req.params.extensionId as string,
-      );
-      if (!deps.handsetDelivery) {
-        res
-          .status(503)
-          .json({ error: 'handset_provisioning_not_configured', correlationId: req.correlationId });
-        return;
-      }
-      const deviceId = randomUUID();
-      const enrollmentToken = randomBytes(32).toString('base64url');
-      const expiresAt = new Date(Date.now() + body.ttlSeconds * 1000).toISOString();
-      // Only the hash reaches NocoDB; the plaintext goes once to the
-      // provisioning service and once to the administrator's response.
-      const updated = await repos().extensions.recordEnrollment(
-        body.tenantId,
-        extension.id as string,
-        Number(extension.revision),
-        {
+        await deps.handsetDelivery.deliver({
           deviceId,
-          provisioningMac: body.provisioningMac,
-          enrollmentTokenHash: createHash('sha256').update(enrollmentToken).digest('hex'),
-          enrollmentExpiresAt: expiresAt,
-        },
-      );
-      await deps.handsetDelivery.deliver({
-        deviceId,
-        provisioningMac: updated.provisioning_mac as string,
-        enrollmentToken,
-        expiresAt,
-      });
-      await audit(
-        req,
-        'extension.handset_enrollment',
-        'extension',
-        extension.id as string,
-        body.tenantId,
-      );
-      res.status(201).json({ deviceId, enrollmentToken, expiresAt, tokenShownOnce: true });
-    } catch (err) {
-      try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
+          provisioningMac: updated.provisioning_mac as string,
+          enrollmentToken,
+          expiresAt,
+        });
+        await audit(
+          req,
+          'extension.handset_enrollment',
+          'extension',
+          extension.id as string,
+          body.tenantId,
+        );
+        res.status(201).json({ deviceId, enrollmentToken, expiresAt, tokenShownOnce: true });
+      } catch (err) {
+        try {
+          fail(res, req, err);
+        } catch (unhandled) {
+          next(unhandled);
+        }
       }
-    }
-  });
+    },
+  );
 
   // ── Ring groups ───────────────────────────────────────────────────────────
 
-  router.get('/admin/tenants/:tenantId/ring-groups', async (req, res, next) => {
+  router.get('/admin/tenants/:tenantId/ring-groups', tenantAdmin, async (req, res, next) => {
     try {
       const tenantId = req.params.tenantId as string;
       const groups = await repos().ringGroups.listForTenant(tenantId);
@@ -571,7 +723,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     });
   }
 
-  router.post('/admin/ring-groups', async (req, res, next) => {
+  router.post('/admin/ring-groups', tenantAdmin, async (req, res, next) => {
     try {
       const input = parse(ringGroupBody, req.body, res, req);
       if (!input) return;
@@ -597,7 +749,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.put('/admin/ring-groups/:ringGroupId', async (req, res, next) => {
+  router.put('/admin/ring-groups/:ringGroupId', tenantAdmin, async (req, res, next) => {
     try {
       const input = parse(ringGroupBody, req.body, res, req);
       if (!input) return;
