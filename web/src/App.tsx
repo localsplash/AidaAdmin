@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { NavLink, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { fetchSession, logout, type SessionState, type SessionView } from './api/session';
 import {
   ErrorScreen,
@@ -17,14 +17,50 @@ import { RingGroupsScreen } from './screens/RingGroupsScreen';
 import { TenantsScreen } from './screens/TenantsScreen';
 import { TenantUsersScreen } from './screens/TenantUsersScreen';
 
-function DashboardScreen() {
+const TENANT_SCREENS = [
+  { path: 'users', label: 'Users' },
+  { path: 'extensions', label: 'Extensions' },
+  { path: 'ring-groups', label: 'Ring groups' },
+  { path: 'profiles', label: 'Profiles' },
+  { path: 'did-routes', label: 'DID routes' },
+  { path: 'appearance', label: 'Appearance' },
+] as const;
+
+/**
+ * The landing page. For a tenant administrator this is the whole map of
+ * what they can do — they administer one tenant and arrive already in it —
+ * so the tenant's screens are listed here rather than only behind the
+ * tenants list.
+ */
+function DashboardScreen({ session }: { session: SessionView }) {
+  const tenant = session.selectedTenant;
+  const administers = session.user.superAdmin || tenant?.role === 'TENANT_ADMIN';
   return (
     <section aria-labelledby="dashboard-heading">
       <h1 id="dashboard-heading">Dashboard</h1>
-      <p>
-        Welcome to AidaAdmin. Tenant, telephony, assistant, and live-operations management arrive in
-        the following POC phases.
-      </p>
+      {tenant && administers ? (
+        <>
+          <p>
+            Managing <strong>{tenant.name}</strong>.
+          </p>
+          <nav aria-label={`${tenant.name} management`}>
+            <ul>
+              {TENANT_SCREENS.map((screen) => (
+                <li key={screen.path}>
+                  <Link to={`/tenants/${tenant.tenantId}/${screen.path}`}>{screen.label}</Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        </>
+      ) : (
+        <p>
+          Welcome to AidaAdmin.{' '}
+          {session.user.superAdmin
+            ? 'Choose a tenant to manage, or open Tenants to create one.'
+            : 'You have no tenant to manage yet — an administrator can map you to one.'}
+        </p>
+      )}
     </section>
   );
 }
@@ -62,7 +98,12 @@ function AuthenticatedShell({
           <NavLink to="/" end>
             Dashboard
           </NavLink>
-          {session.user.superAdmin ? <NavLink to="/tenants">Tenants</NavLink> : null}
+          {/* The tenants list is scoped server-side, so it is the way in for
+              both roles: every tenant for a Super Admin, their own for a
+              tenant administrator. */}
+          {session.user.superAdmin || session.selectedTenant?.role === 'TENANT_ADMIN' ? (
+            <NavLink to="/tenants">Tenants</NavLink>
+          ) : null}
           {session.selectedTenant ? <NavLink to="/operations">Live operations</NavLink> : null}
         </nav>
         <span className="app-user">{session.user.displayName ?? session.user.email ?? 'User'}</span>
@@ -73,8 +114,8 @@ function AuthenticatedShell({
       <TenantContextBanner session={session} onTenantChanged={onSessionChanged} />
       <main id="main-content" className="app-main">
         <Routes>
-          <Route path="/" element={<DashboardScreen />} />
-          <Route path="/tenants" element={<TenantsScreen />} />
+          <Route path="/" element={<DashboardScreen session={session} />} />
+          <Route path="/tenants" element={<TenantsScreen canCreate={session.user.superAdmin} />} />
           <Route path="/tenants/:tenantId/users" element={<TenantUsersScreen />} />
           <Route path="/tenants/:tenantId/extensions" element={<ExtensionsScreen />} />
           <Route path="/tenants/:tenantId/ring-groups" element={<RingGroupsScreen />} />

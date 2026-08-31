@@ -89,8 +89,10 @@ describe('App shell', () => {
       },
     });
     renderApp();
-    await screen.findByText(/acme dental/i);
-    expect(screen.getByRole('status')).toHaveTextContent(/tenant_admin/i);
+    await screen.findByRole('heading', { name: /dashboard/i });
+    const banner = screen.getByRole('status');
+    expect(banner).toHaveTextContent(/acme dental/i);
+    expect(banner).toHaveTextContent(/tenant_admin/i);
   });
 
   it('shows a not-found page for unknown routes when authenticated', async () => {

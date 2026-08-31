@@ -104,9 +104,47 @@ export class FakeNocoDbApi implements NocoDbApi {
     Object.assign(record, values);
   }
 
+  /**
+   * PATCH keyed by whatever the caller sends. Mirrors the real API: the key
+   * may be NocoDB's own `Id` or an external table's own primary key.
+   */
+  async patchRecord(tableId: string, values: Record<string, unknown>): Promise<void> {
+    const table = this.byId(tableId);
+    const { Id, ...rest } = values;
+    const keyField = table.columns.find((c) => c.column_name === 'iUserId') ? 'iUserId' : null;
+    const record = table.records.find((r) =>
+      Id !== undefined ? r.Id === Id : keyField && r[keyField] === rest[keyField],
+    );
+    if (!record) throw new Error(`Record not found in ${table.info.table_name}`);
+    const known = new Set(table.columns.map((c) => c.column_name));
+    for (const key of Object.keys(rest)) {
+      if (!known.has(key)) throw new Error(`Unknown column ${key} in ${table.info.table_name}`);
+    }
+    Object.assign(record, rest);
+  }
+
   /** Test-only helpers. */
   tableByName(name: string): FakeTable | undefined {
     return [...this.tables.values()].find((t) => t.info.table_name === name);
+  }
+
+  /** Seeds an arbitrary (external-source style) table with rows. */
+  async seedTable(
+    tableName: string,
+    columns: string[],
+    rows: Array<Record<string, unknown>>,
+  ): Promise<NocoTableInfo> {
+    const info = await this.createTable({
+      table_name: tableName,
+      title: tableName,
+      columns: columns.map((name) => ({
+        column_name: name,
+        title: name,
+        uidt: 'SingleLineText' as const,
+      })),
+    });
+    for (const row of rows) await this.createRecord(info.id, row);
+    return info;
   }
 
   private byId(tableId: string): FakeTable {

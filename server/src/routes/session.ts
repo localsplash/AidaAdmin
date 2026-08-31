@@ -26,6 +26,18 @@ export function sessionRoutes(config: AppConfig, deps: AppDeps): Router {
           );
           selectedTenant =
             allowed.find((t) => t.tenantId === req.session!.selectedTenantId) ?? null;
+        } else if (!req.session.superAdmin) {
+          // Someone who belongs to exactly one tenant has nothing to choose
+          // between: put them in that context instead of showing them a
+          // picker with one entry. A Super Admin is excluded on purpose —
+          // "no tenant selected" is a meaningful state for them.
+          const allowed = await selectableTenants(deps, req.session.iUserId, false);
+          if (allowed.length === 1) {
+            selectedTenant = allowed[0] ?? null;
+            if (selectedTenant && req.sessionSid) {
+              await deps.sessionStore.setSelectedTenant(req.sessionSid, selectedTenant.tenantId);
+            }
+          }
         }
         const session: SessionView = {
           authenticated: true,

@@ -54,6 +54,10 @@ export interface TenantUser {
   identity_user_id: number;
   role: string;
   enabled: boolean;
+  /** Joined from the central directory; null when it is unreachable. */
+  email: string | null;
+  display_name: string | null;
+  claimed: boolean | null;
 }
 
 export interface DirectoryUser {
@@ -61,6 +65,7 @@ export interface DirectoryUser {
   email: string | null;
   displayName: string | null;
   claimed: boolean;
+  lastLoginAt?: string | null;
 }
 
 export interface Extension {
@@ -130,6 +135,8 @@ export interface Appearance {
 
 export interface ExtensionInput {
   tenantId: string;
+  /** The one platform user who answers this extension, if any. */
+  identityUserId?: number | null;
   extensionNumber: string;
   displayName: string;
   callerIdName?: string | null;
@@ -176,12 +183,19 @@ export const adminApi = {
     call<{ tenant: Tenant }>(`/admin/tenants/${tenantId}`, 'PUT', { ...input, expectedRevision }),
 
   listTenantUsers: (tenantId: string) =>
-    call<{ users: TenantUser[] }>(`/admin/tenants/${tenantId}/users`, 'GET'),
+    call<{ users: TenantUser[]; canEditDisplayName: boolean; directoryError: string | null }>(
+      `/admin/tenants/${tenantId}/users`,
+      'GET',
+    ),
   searchDirectory: (query: string) =>
-    call<{ users: DirectoryUser[] }>(
+    call<{ users: DirectoryUser[]; canEditDisplayName: boolean; canCreate: boolean }>(
       `/admin/directory/users?query=${encodeURIComponent(query)}`,
       'GET',
     ),
+  updateDirectoryUser: (identityUserId: number, displayName: string | null) =>
+    call<{ user: DirectoryUser }>(`/admin/directory/users/${identityUserId}`, 'PUT', {
+      displayName,
+    }),
   ensureDirectoryUser: (email: string, displayName: string | null) =>
     call<{ user: DirectoryUser }>('/admin/directory/users', 'POST', { email, displayName }),
   saveTenantUser: (tenantId: string, identityUserId: number, role: string, enabled: boolean) =>

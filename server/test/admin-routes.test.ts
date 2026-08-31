@@ -172,24 +172,129 @@ async function createTenant(slug = 'acme') {
   return res.body.tenant as { id: string; revision: number };
 }
 
+/** A signed-in non-super-admin, optionally holding a role in one tenant. */
+async function memberSession(
+  iUserId: number,
+  membership?: { tenantId: string; role: 'TENANT_ADMIN' | 'USER' },
+) {
+  if (membership) {
+    await ctx.deps.repos!.tenantUsers.save(membership.tenantId, iUserId, membership.role, true);
+  }
+  const sid = await ctx.deps.sessionStore.create({
+    iUserId,
+    email: null,
+    displayName: null,
+    superAdmin: false,
+    provider: null,
+  });
+  const session = await request(ctx.app)
+    .get('/api/session')
+    .set('Cookie', [`aida.sid=${sid}`]);
+  const csrf = /aida\.csrf=([^;]+)/.exec(session.headers['set-cookie']?.[0] ?? '')?.[1] as string;
+  const cookies = [`aida.sid=${sid}`, `aida.csrf=${csrf}`];
+  return {
+    cookies,
+    get: (path: string) => request(ctx.app).get(path).set('Cookie', cookies),
+    put: (path: string, body: unknown) =>
+      request(ctx.app)
+        .put(path)
+        .set('Cookie', cookies)
+        .set('x-csrf-token', csrf)
+        .send(body as object),
+    post: (path: string, body: unknown) =>
+      request(ctx.app)
+        .post(path)
+        .set('Cookie', cookies)
+        .set('x-csrf-token', csrf)
+        .send(body as object),
+  };
+}
+
 describe('authorization', () => {
   it('requires a session', async () => {
     const res = await request(ctx.app).get('/admin/tenants');
     expect(res.status).toBe(401);
   });
 
-  it('requires Super Admin', async () => {
-    const sid = await ctx.deps.sessionStore.create({
-      iUserId: 2,
-      email: null,
-      displayName: null,
-      superAdmin: false,
-      provider: null,
+  it('shows a plain member no tenants and refuses platform-wide actions', async () => {
+    const tenant = await createTenant();
+    const member = await memberSession(2, { tenantId: tenant.id, role: 'USER' });
+
+    // The list is scoped, not gated: a USER simply administers nothing.
+    const list = await member.get('/admin/tenants');
+    expect(list.status).toBe(200);
+    expect(list.body.tenants).toEqual([]);
+
+    // A USER membership is not an administrative role in their own tenant.
+    expect((await member.get(`/admin/tenants/${tenant.id}/extensions`)).status).toBe(403);
+    expect(
+      (
+        await member.post('/admin/tenants', {
+          name: 'X',
+          slug: 'x',
+          asteriskContext: 'x',
+          enabled: true,
+        })
+      ).status,
+    ).toBe(403);
+  });
+
+  it('lets a tenant admin administer only their own tenant', async () => {
+    const mine = await createTenant('mine');
+    const theirs = await createTenant('theirs');
+    const admin = await memberSession(3, { tenantId: mine.id, role: 'TENANT_ADMIN' });
+
+    const list = await admin.get('/admin/tenants');
+    expect(list.body.tenants.map((t: { id: string }) => t.id)).toEqual([mine.id]);
+
+    expect((await admin.get(`/admin/tenants/${mine.id}/extensions`)).status).toBe(200);
+    expect((await admin.get(`/admin/tenants/${mine.id}/profiles`)).status).toBe(200);
+    expect((await admin.get(`/admin/tenants/${mine.id}/did-routes`)).status).toBe(200);
+    expect((await admin.get(`/admin/tenants/${mine.id}/appearance`)).status).toBe(200);
+
+    // Another tenant is refused whether it is named in the path or the body.
+    expect((await admin.get(`/admin/tenants/${theirs.id}/extensions`)).status).toBe(403);
+    const crossTenant = await admin.post('/admin/extensions', {
+      tenantId: theirs.id,
+      extensionNumber: '100',
+      displayName: 'Nope',
+      enabled: true,
     });
-    const res = await request(ctx.app)
-      .get('/admin/tenants')
-      .set('Cookie', [`aida.sid=${sid}`]);
-    expect(res.status).toBe(403);
+    expect(crossTenant.status).toBe(403);
+    expect(ctx.api.tableByName('extension')!.records).toHaveLength(0);
+  });
+
+  it('keeps platform-wide actions to Super Admin', async () => {
+    const tenant = await createTenant();
+    const admin = await memberSession(4, { tenantId: tenant.id, role: 'TENANT_ADMIN' });
+    expect((await admin.put('/admin/super-admins/42', { enabled: true })).status).toBe(403);
+    expect(
+      (
+        await admin.post('/admin/tenants', {
+          name: 'X',
+          slug: 'x',
+          asteriskContext: 'x',
+          enabled: true,
+        })
+      ).status,
+    ).toBe(403);
+  });
+
+  it('stops a tenant admin removing their own administrator access', async () => {
+    const tenant = await createTenant();
+    // 42 is a user the fake central directory knows, so the mapping is valid.
+    const admin = await memberSession(42, { tenantId: tenant.id, role: 'TENANT_ADMIN' });
+    const demote = await admin.put(`/admin/tenants/${tenant.id}/users/42`, {
+      role: 'USER',
+      enabled: true,
+    });
+    expect(demote.status).toBe(403);
+    // A Super Admin is still free to do it.
+    const byRoot = await put(`/admin/tenants/${tenant.id}/users/42`, {
+      role: 'USER',
+      enabled: true,
+    });
+    expect(byRoot.status).toBe(200);
   });
 });
 

@@ -15,30 +15,42 @@ import type { NocoBaseInfo, NocoMetaApi } from './api.js';
  */
 export const AIDA_BASE_NAME = 'AidaAdmin';
 
+/**
+ * The platform identity base: the `id` service's own MySQL database exposed
+ * in NocoDB as an external source, carrying `id_tbl_User` and friends.
+ *
+ * Unlike AidaAdmin's base this one is NEVER created when absent. It is a
+ * view onto a database AidaAdmin does not own, so an auto-created empty base
+ * of the same name would shadow the real one and silently report that the
+ * platform has no users. Absence is reported, not papered over.
+ */
+export const IDENTITY_BASE_NAME = 'AidaIdentity';
+
 export class BaseResolutionError extends Error {}
 
-function matches(title: string): boolean {
-  return title.trim().toLowerCase() === AIDA_BASE_NAME.toLowerCase();
+function matches(title: string, name: string): boolean {
+  return title.trim().toLowerCase() === name.toLowerCase();
 }
 
-/**
- * Finds the base by name, creating it when absent. Ambiguity is never
- * resolved by guessing: two bases sharing the name is an operator error
- * that only an operator can settle.
- */
-export async function resolveBaseId(api: NocoMetaApi): Promise<string> {
-  const bases = await api.listBases();
-  const found = bases.filter((base) => matches(base.title));
-
+async function findBase(api: NocoMetaApi, name: string): Promise<NocoBaseInfo | null> {
+  const found = (await api.listBases()).filter((base) => matches(base.title, name));
   if (found.length > 1) {
     throw new BaseResolutionError(
-      `NocoDB has ${found.length} bases named ${AIDA_BASE_NAME} (ids: ${found
+      `NocoDB has ${found.length} bases named ${name} (ids: ${found
         .map((b) => b.id)
         .join(', ')}). Exactly one is required — rename or remove the duplicates.`,
     );
   }
+  return found[0] ?? null;
+}
 
-  const existing = found[0];
+/**
+ * Finds the AidaAdmin base by name, creating it when absent. Ambiguity is
+ * never resolved by guessing: two bases sharing the name is an operator
+ * error that only an operator can settle.
+ */
+export async function resolveBaseId(api: NocoMetaApi): Promise<string> {
+  const existing = await findBase(api, AIDA_BASE_NAME);
   if (existing) return existing.id;
 
   let created: NocoBaseInfo;
@@ -52,6 +64,17 @@ export async function resolveBaseId(api: NocoMetaApi): Promise<string> {
     );
   }
   return created.id;
+}
+
+/** Finds the identity base by name. Never creates it — see the constant. */
+export async function resolveIdentityBaseId(api: NocoMetaApi): Promise<string> {
+  const existing = await findBase(api, IDENTITY_BASE_NAME);
+  if (existing) return existing.id;
+  throw new BaseResolutionError(
+    `No NocoDB base named ${IDENTITY_BASE_NAME} exists. Connect the id service's ` +
+      `MySQL database to NocoDB as a base named ${IDENTITY_BASE_NAME} so its ` +
+      'user tables are readable here.',
+  );
 }
 
 /**

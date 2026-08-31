@@ -16,7 +16,7 @@ import {
 import { ValidationError } from '../nocodb/validation.js';
 import { OfficePulseError } from '../officepulse/client.js';
 import { HandsetDeliveryError } from '../provisioning/handset-delivery.js';
-import { requireSuperAdmin } from './authz.js';
+import { requireSession, requireTenantAdmin } from './authz.js';
 
 const profileBody = z.object({
   tenantId: z.string(),
@@ -123,13 +123,14 @@ function sniffImage(buffer: Buffer): 'png' | 'jpg' | null {
 
 /**
  * Assistant profiles, DID routes, and appearance (POC phase 5, issue #13).
- * Super Admin + CSRF like the rest of /admin. CRM import and conversation
- * history are future scope and have no endpoints here by design.
+ * Tenant-scoped like the rest of /admin — a Super Admin anywhere, a
+ * TENANT_ADMIN in their own tenant — with the same CSRF guard. CRM import
+ * and conversation history are future scope and have no endpoints here.
  */
 export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): Router {
   const router = Router();
 
-  router.use('/admin', requireSuperAdmin);
+  router.use('/admin', requireSession);
   router.use('/admin', (req, res, next) => {
     if (!deps.repos) {
       res.status(503).json({
@@ -147,6 +148,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
   });
 
   const repos = (): AidaConfigRepos => deps.repos!;
+  const tenantAdmin = requireTenantAdmin(deps);
 
   const audit = (
     req: Request,
@@ -168,7 +170,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
 
   // ── Assistant profiles ────────────────────────────────────────────────────
 
-  router.get('/admin/tenants/:tenantId/profiles', async (req, res, next) => {
+  router.get('/admin/tenants/:tenantId/profiles', tenantAdmin, async (req, res, next) => {
     try {
       res.json({
         profiles: await repos().assistantProfiles.listForTenant(req.params.tenantId as string),
@@ -178,7 +180,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
     }
   });
 
-  router.post('/admin/profiles', async (req, res, next) => {
+  router.post('/admin/profiles', tenantAdmin, async (req, res, next) => {
     try {
       const input = parse(profileBody, req.body, res, req);
       if (!input) return;
@@ -201,7 +203,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
     }
   });
 
-  router.put('/admin/profiles/:profileId', async (req, res, next) => {
+  router.put('/admin/profiles/:profileId', tenantAdmin, async (req, res, next) => {
     try {
       const input = parse(profileBody, req.body, res, req);
       if (!input) return;
@@ -255,7 +257,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
     return 'Destination unavailable';
   }
 
-  router.get('/admin/tenants/:tenantId/did-routes', async (req, res, next) => {
+  router.get('/admin/tenants/:tenantId/did-routes', tenantAdmin, async (req, res, next) => {
     try {
       const tenantId = req.params.tenantId as string;
       const routes = await repos().didRoutes.listForTenant(tenantId);
@@ -309,7 +311,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
     });
   }
 
-  router.post('/admin/did-routes', async (req, res, next) => {
+  router.post('/admin/did-routes', tenantAdmin, async (req, res, next) => {
     try {
       await saveDidRoute(req, res, null);
     } catch (err) {
@@ -321,7 +323,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
     }
   });
 
-  router.put('/admin/did-routes/:didRouteId', async (req, res, next) => {
+  router.put('/admin/did-routes/:didRouteId', tenantAdmin, async (req, res, next) => {
     try {
       await saveDidRoute(req, res, req.params.didRouteId as string);
     } catch (err) {
@@ -335,7 +337,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
 
   // ── Appearance (single brand) ─────────────────────────────────────────────
 
-  router.get('/admin/tenants/:tenantId/appearance', async (req, res, next) => {
+  router.get('/admin/tenants/:tenantId/appearance', tenantAdmin, async (req, res, next) => {
     try {
       res.json({
         appearance: await repos().appearance.getForTenant(req.params.tenantId as string),
@@ -345,7 +347,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
     }
   });
 
-  router.put('/admin/tenants/:tenantId/appearance', async (req, res, next) => {
+  router.put('/admin/tenants/:tenantId/appearance', tenantAdmin, async (req, res, next) => {
     try {
       const input = parse(appearanceBody, req.body, res, req);
       if (!input) return;
@@ -367,6 +369,7 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
   // checked, content-addressed filename, served from /assets.
   router.post(
     '/admin/tenants/:tenantId/appearance/logo',
+    tenantAdmin,
     express.raw({ type: ['image/png', 'image/jpeg'], limit: '512kb' }),
     async (req, res, next) => {
       try {

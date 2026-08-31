@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { adminApi, ApiError, type Extension } from '../api/admin';
+import { adminApi, ApiError, type Extension, type TenantUser } from '../api/admin';
 import { OneTimeSecret } from '../components/OneTimeSecret';
 
 interface Secret {
@@ -8,11 +8,18 @@ interface Secret {
   values: Array<{ label: string; value: string }>;
 }
 
-const EMPTY = { extensionNumber: '', displayName: '', callerIdName: '', enabled: true };
+const EMPTY = {
+  extensionNumber: '',
+  displayName: '',
+  callerIdName: '',
+  identityUserId: '',
+  enabled: true,
+};
 
 export function ExtensionsScreen() {
   const { tenantId = '' } = useParams();
   const [extensions, setExtensions] = useState<Extension[] | null>(null);
+  const [members, setMembers] = useState<TenantUser[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [secret, setSecret] = useState<Secret | null>(null);
@@ -22,10 +29,16 @@ export function ExtensionsScreen() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    adminApi
-      .listExtensions(tenantId)
-      .then((res) => setExtensions(res.extensions))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'));
+    // Settled rather than all: the tenant's people are a convenience for the
+    // owner picker, and failing to load them must not hide the extensions.
+    void Promise.allSettled([
+      adminApi.listExtensions(tenantId),
+      adminApi.listTenantUsers(tenantId),
+    ]).then(([e, u]) => {
+      if (e.status === 'fulfilled') setExtensions(e.value.extensions);
+      else setError(e.reason instanceof Error ? e.reason.message : 'Failed to load');
+      if (u.status === 'fulfilled') setMembers(u.value.users.filter((m) => m.enabled));
+    });
   }, [tenantId]);
 
   useEffect(() => {
@@ -40,6 +53,7 @@ export function ExtensionsScreen() {
       extensionNumber: extension.extension_number,
       displayName: extension.display_name,
       callerIdName: extension.caller_id_name ?? '',
+      identityUserId: extension.identity_user_id ? String(extension.identity_user_id) : '',
       enabled: extension.enabled,
     });
   };
@@ -56,6 +70,7 @@ export function ExtensionsScreen() {
     setStatus(null);
     const input = {
       tenantId,
+      identityUserId: form.identityUserId ? Number(form.identityUserId) : null,
       extensionNumber: form.extensionNumber,
       displayName: form.displayName,
       callerIdName: form.callerIdName || null,
@@ -87,6 +102,13 @@ export function ExtensionsScreen() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** One user answers an extension; one user may answer several. */
+  const personLabel = (identityUserId: number | null): string => {
+    if (!identityUserId) return '—';
+    const person = members.find((m) => m.identity_user_id === identityUserId);
+    return person?.display_name ?? person?.email ?? `#${identityUserId}`;
   };
 
   const rotate = async (extension: Extension) => {
@@ -149,6 +171,7 @@ export function ExtensionsScreen() {
             <tr>
               <th scope="col">Number</th>
               <th scope="col">Name</th>
+              <th scope="col">User</th>
               <th scope="col">Enabled</th>
               <th scope="col">Handset MAC</th>
               <th scope="col">Actions</th>
@@ -159,6 +182,7 @@ export function ExtensionsScreen() {
               <tr key={extension.id}>
                 <td>{extension.extension_number}</td>
                 <td>{extension.display_name}</td>
+                <td>{personLabel(extension.identity_user_id)}</td>
                 <td>{extension.enabled ? 'Yes' : 'No'}</td>
                 <td>{extension.provisioning_mac ?? '—'}</td>
                 <td>
@@ -208,6 +232,37 @@ export function ExtensionsScreen() {
             onChange={(e) => setForm({ ...form, displayName: e.target.value })}
           />
         </label>
+        <label>
+          User
+          <select
+            value={form.identityUserId}
+            onChange={(e) => {
+              const identityUserId = e.target.value;
+              const person = members.find((m) => String(m.identity_user_id) === identityUserId);
+              // Filling an empty display name from the person is a
+              // convenience only; an explicit one is never overwritten.
+              setForm((current) => ({
+                ...current,
+                identityUserId,
+                displayName: current.displayName || (person?.display_name ?? current.displayName),
+              }));
+            }}
+          >
+            <option value="">Nobody yet</option>
+            {members.map((member) => (
+              <option key={member.id} value={String(member.identity_user_id)}>
+                {member.display_name ?? member.email ?? `User ${member.identity_user_id}`}
+              </option>
+            ))}
+          </select>
+        </label>
+        {members.length === 0 ? (
+          <p>
+            No users are mapped to this tenant yet — add one on the{' '}
+            <Link to={`/tenants/${tenantId}/users`}>tenant users</Link> page to assign this
+            extension to a person.
+          </p>
+        ) : null}
         <label>
           Caller ID name
           <input

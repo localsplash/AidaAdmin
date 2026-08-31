@@ -1,9 +1,10 @@
 import { createApp } from './app.js';
 import { ConfigError, loadConfig } from './config.js';
 import { createDeps, migrate } from './deps.js';
+import { userDirectory } from './directory.js';
 import { buildDiagnostics } from './diagnostics.js';
 import { catchUpIdEvents } from './id/events.js';
-import { AIDA_BASE_NAME } from './nocodb/base.js';
+import { AIDA_BASE_NAME, IDENTITY_BASE_NAME } from './nocodb/base.js';
 import { upgradeSchema } from './nocodb/schema.js';
 import { createLogger } from './logger.js';
 
@@ -81,6 +82,25 @@ async function main(): Promise<void> {
         })
         .catch((err) => {
           logger.error({ err }, `NocoDB base ${AIDA_BASE_NAME} is not usable yet`);
+        });
+
+      // Probe the identity base too. It is never created here — it is a view
+      // onto id's own database — so all this can do is say plainly at boot
+      // whether the user directory will be readable and editable.
+      void userDirectory(deps)
+        .search('')
+        .then((users) => {
+          logger.info(
+            { base: IDENTITY_BASE_NAME, users: users.length },
+            'platform user directory readable',
+          );
+        })
+        .catch((err) => {
+          logger.warn(
+            { err },
+            `NocoDB base ${IDENTITY_BASE_NAME} is not readable: user display names ` +
+              'cannot be listed or edited until it is connected',
+          );
         });
     }
 

@@ -13,11 +13,18 @@ export function TenantUsersScreen() {
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState('USER');
   const [inviting, setInviting] = useState(false);
+  const [canEditNames, setCanEditNames] = useState(false);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState<{ iUserId: number; value: string } | null>(null);
 
   const load = useCallback(() => {
     adminApi
       .listTenantUsers(tenantId)
-      .then((res) => setUsers(res.users))
+      .then((res) => {
+        setUsers(res.users);
+        setCanEditNames(res.canEditDisplayName);
+        setDirectoryError(res.directoryError);
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'));
   }, [tenantId]);
 
@@ -31,7 +38,7 @@ export function TenantUsersScreen() {
     try {
       const res = await adminApi.searchDirectory(query);
       setResults(res.users);
-      setStatus(`${res.users.length} matching central user(s)`);
+      setStatus(`${res.users.length} matching platform user(s)`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Directory search failed');
     }
@@ -72,6 +79,19 @@ export function TenantUsersScreen() {
     }
   };
 
+  const saveDisplayName = async () => {
+    if (!editingName) return;
+    setError(null);
+    try {
+      await adminApi.updateDirectoryUser(editingName.iUserId, editingName.value.trim() || null);
+      setStatus(`Saved the display name for user ${editingName.iUserId}`);
+      setEditingName(null);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Could not save the display name');
+    }
+  };
+
   return (
     <section aria-labelledby="tenant-users-heading">
       <p>
@@ -80,6 +100,11 @@ export function TenantUsersScreen() {
       <h1 id="tenant-users-heading">Tenant users</h1>
       {error ? <p role="alert">{error}</p> : null}
       {status ? <p role="status">{status}</p> : null}
+      {directoryError ? (
+        <p role="alert">
+          Names and emails are unavailable: {directoryError} Roles can still be changed.
+        </p>
+      ) : null}
 
       {users === null ? (
         <p role="status">Loading…</p>
@@ -90,7 +115,8 @@ export function TenantUsersScreen() {
           <caption className="visually-hidden">Users mapped to this tenant</caption>
           <thead>
             <tr>
-              <th scope="col">Central user</th>
+              <th scope="col">Person</th>
+              <th scope="col">Email</th>
               <th scope="col">Role</th>
               <th scope="col">Enabled</th>
             </tr>
@@ -98,7 +124,48 @@ export function TenantUsersScreen() {
           <tbody>
             {users.map((user) => (
               <tr key={user.id}>
-                <td>#{user.identity_user_id}</td>
+                <td>
+                  {editingName?.iUserId === user.identity_user_id ? (
+                    <>
+                      <label>
+                        <span className="visually-hidden">
+                          Display name for user {user.identity_user_id}
+                        </span>
+                        <input
+                          value={editingName.value}
+                          onChange={(e) =>
+                            setEditingName({ ...editingName, value: e.target.value })
+                          }
+                        />
+                      </label>{' '}
+                      <button type="button" onClick={() => void saveDisplayName()}>
+                        Save name
+                      </button>{' '}
+                      <button type="button" onClick={() => setEditingName(null)}>
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      {user.display_name ?? <em>no name</em>} (#{user.identity_user_id})
+                      {user.claimed === false ? ' — not yet signed in' : ''}{' '}
+                      {canEditNames ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingName({
+                              iUserId: user.identity_user_id,
+                              value: user.display_name ?? '',
+                            })
+                          }
+                        >
+                          Edit name
+                        </button>
+                      ) : null}
+                    </>
+                  )}
+                </td>
+                <td>{user.email ?? '—'}</td>
                 <td>
                   <label>
                     <span className="visually-hidden">Role for user {user.identity_user_id}</span>
@@ -164,7 +231,7 @@ export function TenantUsersScreen() {
         </button>
       </form>
 
-      <h2 id="find-user-heading">Find an existing central user</h2>
+      <h2 id="find-user-heading">Find an existing platform user</h2>
       <form aria-labelledby="find-user-heading" onSubmit={(e) => void search(e)}>
         <label>
           Search by email or name
