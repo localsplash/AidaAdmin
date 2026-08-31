@@ -1,4 +1,5 @@
 import type {
+  NocoBaseInfo,
   NocoColumnDef,
   NocoColumnInfo,
   NocoDbApi,
@@ -19,6 +20,23 @@ interface FakeTable {
 export class FakeNocoDbApi implements NocoDbApi {
   private readonly tables = new Map<string, FakeTable>();
   private nextTableId = 1;
+  /** Bases present in the instance; tests seed these to drive resolution. */
+  bases: NocoBaseInfo[] = [{ id: 'base-1', title: 'AidaAdmin' }];
+  createdBases: string[] = [];
+  /** When set, createBase rejects — an operator token without base rights. */
+  refuseBaseCreation = false;
+
+  async listBases(): Promise<NocoBaseInfo[]> {
+    return this.bases;
+  }
+
+  async createBase(title: string): Promise<NocoBaseInfo> {
+    if (this.refuseBaseCreation) throw new Error('insufficient privileges');
+    const base = { id: `base-${this.bases.length + 1}`, title };
+    this.bases.push(base);
+    this.createdBases.push(title);
+    return base;
+  }
 
   async listTables(): Promise<NocoTableInfo[]> {
     return [...this.tables.values()].map((t) => t.info);

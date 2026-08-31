@@ -105,7 +105,6 @@ describe('preflight report', () => {
         ID_PARENT_DOMAIN: 'localsplash.ai',
         NOCODB_BASE_URL: 'https://nocodb.localsplash.ai',
         NOCODB_API_TOKEN: 'token-value',
-        NOCODB_BASE_ID: 'p1234567890',
       }),
     );
     expect(report.loginReady).toBe(true);
@@ -128,20 +127,18 @@ describe('preflight report', () => {
   });
 
   it('names the missing NocoDB variables that block tenant creation', () => {
-    // The reported case: base URL and token present, base id forgotten.
     const report = buildDiagnostics(
       loadConfig({
         ...base,
         ID_PARENT_DOMAIN: 'localsplash.ai',
         NOCODB_BASE_URL: 'https://nocodb.localsplash.ai',
-        NOCODB_API_TOKEN: 'token-value',
       }),
     );
     const finding = report.findings.find((f) => f.summary.includes('NocoDB is not configured'));
-    expect(finding?.summary).toContain('NOCODB_BASE_ID');
+    expect(finding?.summary).toContain('NOCODB_API_TOKEN');
     expect(finding?.summary).not.toContain('NOCODB_BASE_URL');
-    expect(finding?.fix).toMatch(/nocodb -w server -- create/);
-    expect(JSON.stringify(report)).not.toContain('token-value');
+    // The base id is never configuration — it is discovered by name.
+    expect(JSON.stringify(report)).not.toContain('NOCODB_BASE_ID');
   });
 
   it('warns about in-memory persistence, unsigned cookies, and a closed event receiver', () => {

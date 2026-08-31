@@ -115,19 +115,33 @@ startup fails otherwise, naming the missing variables.
 
 ## NocoDB AidaConfiguration (POC phase 3)
 
-AidaAdmin's server owns the NocoDB `AidaConfiguration` base (cloud NocoDB; configure
-`NOCODB_BASE_URL`, `NOCODB_API_TOKEN`, `NOCODB_BASE_ID` — values never live in the
-repo). Only server-side code holds the token; the browser, AidaHandset, OfficePulse,
-and Asterisk never reach NocoDB. AidaControl reads the same base at call time.
+AidaAdmin's server owns its NocoDB configuration base. Only the instance and the
+credential are configuration (`NOCODB_BASE_URL`, `NOCODB_API_TOKEN` — values never
+live in the repo). Only server-side code holds the token; the browser, AidaHandset,
+OfficePulse, and Asterisk never reach NocoDB. AidaControl reads the same base at call
+time.
+
+**The base is addressed by name, never by a configured id.** The name is hardcoded as
+`AidaAdmin` (`server/src/nocodb/base.ts`); the id is discovered at startup and held for
+the process lifetime. A base id is an opaque per-instance value nobody can know before
+the base exists, so requiring it as configuration guarantees a broken first deployment.
+On boot the server finds the base by name — matching ignores case, because NocoDB keeps
+whatever capitalisation it was created with — creates it if absent, and brings the
+schema up to date. Exactly one base may carry the name; two is an operator error the
+server refuses to resolve by guessing. A NocoDB outage at boot is not fatal or sticky:
+resolution is retried on the next configuration call.
 
 Schema automation (versioned in `server/src/nocodb/schema.ts`):
 
 ```bash
-npm run nocodb -w server -- create     # build the schema in an empty base
 npm run nocodb -w server -- validate   # drift report; exits 1 on drift
 npm run nocodb -w server -- upgrade    # additive apply; never drops or retypes
 npm run nocodb -w server -- seed       # idempotent dedicated POC records
+npm run nocodb -w server -- create     # same as upgrade; startup does this for you
 ```
+
+Startup already resolves the base and applies the schema, so none of these are
+required for a normal deployment — `validate` and `seed` remain useful by hand.
 
 Upgrades are strictly additive: missing tables/columns are created, live-only
 tables/columns are only reported, and a type mismatch is reported for a human —

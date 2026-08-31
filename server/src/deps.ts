@@ -18,6 +18,7 @@ import {
 import { HttpIdClient, type IdClient } from './id/client.js';
 import { MemoryIdentityEventStore, type IdentityEventStore } from './id/event-store.js';
 import { HttpNocoDbApi } from './nocodb/api.js';
+import { CachedBaseResolver, resolveBaseId } from './nocodb/base.js';
 import { createRepos, NocoDbTenantUserDirectory, type AidaConfigRepos } from './nocodb/repos.js';
 import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
 import {
@@ -35,6 +36,8 @@ export interface AppDeps {
   repos: AidaConfigRepos | null;
   /** Names of the NocoDB variables that are missing when repos is null. */
   missingNocoDb: ServiceEnvVar[];
+  /** Non-null whenever repos is; resolves the base id by name on demand. */
+  baseResolver: CachedBaseResolver | null;
   /** Non-null when the OfficePulse provisioning API is configured. */
   officePulse: OfficePulseClient | null;
   /** Non-null when the handset provisioning service is configured. */
@@ -45,21 +48,35 @@ export interface AppDeps {
   dbReady: () => Promise<boolean>;
 }
 
-/** All three are required together; the base id is the easiest to forget. */
-export const NOCODB_ENV_VARS: ServiceEnvVar[] = [
-  'NOCODB_BASE_URL',
-  'NOCODB_API_TOKEN',
-  'NOCODB_BASE_ID',
-];
+/**
+ * Only the instance and the credential are configuration. The base itself is
+ * addressed by name (see nocodb/base.ts) and its id is discovered at
+ * startup, so there is nothing per-deployment to look up by hand.
+ */
+export const NOCODB_ENV_VARS: ServiceEnvVar[] = ['NOCODB_BASE_URL', 'NOCODB_API_TOKEN'];
 
 export function missingNocoDbConfig(config: AppConfig): ServiceEnvVar[] {
   return NOCODB_ENV_VARS.filter((name) => !config.serviceConfig[name]);
 }
 
-function nocodbFromConfig(config: AppConfig): AidaConfigRepos | null {
-  const { NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID } = config.serviceConfig;
-  if (!NOCODB_BASE_URL || !NOCODB_API_TOKEN || !NOCODB_BASE_ID) return null;
-  return createRepos(new HttpNocoDbApi(NOCODB_BASE_URL, NOCODB_API_TOKEN, NOCODB_BASE_ID));
+export interface NocoDbSetup {
+  repos: AidaConfigRepos;
+  /** Resolves (and caches) the base id; safe to call repeatedly. */
+  baseResolver: CachedBaseResolver;
+}
+
+export function nocodbFromConfig(config: AppConfig): NocoDbSetup | null {
+  const { NOCODB_BASE_URL, NOCODB_API_TOKEN } = config.serviceConfig;
+  if (!NOCODB_BASE_URL || !NOCODB_API_TOKEN) return null;
+  // The client and the resolver share one API object: discovery uses the
+  // same credential and instance as every later call.
+  const api: HttpNocoDbApi = new HttpNocoDbApi(
+    NOCODB_BASE_URL,
+    NOCODB_API_TOKEN,
+    (): Promise<string> => resolver.resolve(),
+  );
+  const resolver: CachedBaseResolver = new CachedBaseResolver(() => resolveBaseId(api));
+  return { repos: createRepos(api), baseResolver: resolver };
 }
 
 /**
@@ -72,12 +89,14 @@ export function createDeps(config: AppConfig): AppDeps {
   const idBase = config.serviceConfig.ID_BASE_URL;
   const idClient = idBase ? new HttpIdClient(idBase) : null;
   const databaseUrl = config.serviceConfig.AIDA_ADMIN_DATABASE_URL;
-  const repos = nocodbFromConfig(config);
+  const nocodb = nocodbFromConfig(config);
+  const repos = nocodb?.repos ?? null;
   // With NocoDB configured, tenant_user backs the login directory; without
   // it there are no mappings, so non-super-admins stay denied (POC rule).
   const tenantDirectory = repos
     ? new NocoDbTenantUserDirectory(repos.tenantUsers)
     : new EmptyTenantUserDirectory();
+  const baseResolver = nocodb?.baseResolver ?? null;
   const officePulseBase = config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL;
   const officePulse = officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null;
   const handsetUrl = config.serviceConfig.HANDSET_PROVISIONING_URL;
@@ -93,6 +112,7 @@ export function createDeps(config: AppConfig): AppDeps {
       eventStore: new PostgresIdentityEventStore(pool),
       repos,
       missingNocoDb: missingNocoDbConfig(config),
+      baseResolver,
       officePulse,
       handsetDelivery,
       pool,
@@ -109,6 +129,7 @@ export function createDeps(config: AppConfig): AppDeps {
     eventStore: new MemoryIdentityEventStore(memoryDb),
     repos,
     missingNocoDb: missingNocoDbConfig(config),
+    baseResolver,
     officePulse,
     handsetDelivery,
     pool: null,

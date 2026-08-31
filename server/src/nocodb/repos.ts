@@ -31,7 +31,7 @@ export class UniqueViolationError extends Error {
 export class NocoStore {
   private tableIds = new Map<string, string>();
 
-  constructor(private readonly api: NocoDbApi) {}
+  constructor(readonly api: NocoDbApi) {}
 
   private async tableId(tableName: string): Promise<string> {
     const cached = this.tableIds.get(tableName);

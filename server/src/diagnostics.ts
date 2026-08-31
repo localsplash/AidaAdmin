@@ -188,7 +188,7 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
     findings.push({
       level: 'warning',
       summary: `NocoDB is not configured (${missingNocoDb.join(', ')}), so every /admin route answers 503 and no tenant can be created`,
-      fix: 'Set all three NocoDB variables, then build the schema with: npm run nocodb -w server -- create',
+      fix: 'Set the NocoDB instance URL and API token; the base is found by name and its schema built automatically at startup',
     });
   }
 
