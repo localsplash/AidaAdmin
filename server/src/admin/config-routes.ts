@@ -132,7 +132,15 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
   router.use('/admin', requireSuperAdmin);
   router.use('/admin', (req, res, next) => {
     if (!deps.repos) {
-      res.status(503).json({ error: 'nocodb_not_configured', correlationId: req.correlationId });
+      res.status(503).json({
+        error: 'nocodb_not_configured',
+        message:
+          deps.missingNocoDb.length > 0
+            ? `The NocoDB AidaConfiguration base is not configured: set ${deps.missingNocoDb.join(', ')}`
+            : 'The NocoDB AidaConfiguration base is not configured',
+        missingConfiguration: deps.missingNocoDb,
+        correlationId: req.correlationId,
+      });
       return;
     }
     next();

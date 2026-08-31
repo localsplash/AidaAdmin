@@ -1,5 +1,6 @@
 import type { AppConfig, ServiceEnvVar } from './config.js';
 import { parseCidrList } from './config.js';
+import { missingNocoDbConfig } from './deps.js';
 
 /**
  * Login preflight.
@@ -177,6 +178,17 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
       level: 'warning',
       summary: "id's parent-domain rule was not checked locally (ID_PARENT_DOMAIN is unset)",
       fix: "Set ID_PARENT_DOMAIN to the same value as id's PARENT_DOMAIN to have this preflight verify the redirect_uri",
+    });
+  }
+
+  // Without all three, every /admin route answers 503 and no tenant can be
+  // created — the first thing an operator tries after logging in.
+  const missingNocoDb = missingNocoDbConfig(config);
+  if (missingNocoDb.length > 0) {
+    findings.push({
+      level: 'warning',
+      summary: `NocoDB is not configured (${missingNocoDb.join(', ')}), so every /admin route answers 503 and no tenant can be created`,
+      fix: 'Set all three NocoDB variables, then build the schema with: npm run nocodb -w server -- create',
     });
   }
 
