@@ -394,3 +394,34 @@ describe('ring groups', () => {
     expect(list.body.ringGroups[0].members).toHaveLength(2);
   });
 });
+
+describe('unconfigured NocoDB', () => {
+  it('names the missing variables instead of a bare not-configured message', async () => {
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'fatal',
+      NOCODB_BASE_URL: 'https://nocodb.example.invalid',
+      NOCODB_API_TOKEN: 'token-value',
+      // NOCODB_BASE_ID deliberately absent.
+    });
+    const deps: AppDeps = createDeps(config);
+    const app = createApp(config, logger, deps);
+    const sid = await deps.sessionStore.create({
+      iUserId: 1,
+      email: null,
+      displayName: 'Root',
+      superAdmin: true,
+      provider: null,
+    });
+
+    const res = await request(app)
+      .get('/admin/tenants')
+      .set('Cookie', [`aida.sid=${sid}`]);
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe('nocodb_not_configured');
+    expect(res.body.message).toContain('NOCODB_BASE_ID');
+    expect(res.body.missingConfiguration).toEqual(['NOCODB_BASE_ID']);
+    // Names only — never the token value.
+    expect(JSON.stringify(res.body)).not.toContain('token-value');
+  });
+});

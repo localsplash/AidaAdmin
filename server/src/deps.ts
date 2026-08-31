@@ -6,7 +6,7 @@ import {
 } from './auth/session-store.js';
 import { MemoryAuthStateRepository, type AuthStateRepository } from './auth/state-store.js';
 import { EmptyTenantUserDirectory, type TenantUserDirectory } from './auth/tenant-directory.js';
-import type { AppConfig } from './config.js';
+import type { AppConfig, ServiceEnvVar } from './config.js';
 import {
   createPool,
   migrate,
@@ -33,6 +33,8 @@ export interface AppDeps {
   eventStore: IdentityEventStore;
   /** Non-null when the NocoDB AidaConfiguration base is configured. */
   repos: AidaConfigRepos | null;
+  /** Names of the NocoDB variables that are missing when repos is null. */
+  missingNocoDb: ServiceEnvVar[];
   /** Non-null when the OfficePulse provisioning API is configured. */
   officePulse: OfficePulseClient | null;
   /** Non-null when the handset provisioning service is configured. */
@@ -41,6 +43,17 @@ export interface AppDeps {
   pool: pg.Pool | null;
   /** Readiness probe for the persistence layer (always true without one). */
   dbReady: () => Promise<boolean>;
+}
+
+/** All three are required together; the base id is the easiest to forget. */
+export const NOCODB_ENV_VARS: ServiceEnvVar[] = [
+  'NOCODB_BASE_URL',
+  'NOCODB_API_TOKEN',
+  'NOCODB_BASE_ID',
+];
+
+export function missingNocoDbConfig(config: AppConfig): ServiceEnvVar[] {
+  return NOCODB_ENV_VARS.filter((name) => !config.serviceConfig[name]);
 }
 
 function nocodbFromConfig(config: AppConfig): AidaConfigRepos | null {
@@ -79,6 +92,7 @@ export function createDeps(config: AppConfig): AppDeps {
       tenantDirectory,
       eventStore: new PostgresIdentityEventStore(pool),
       repos,
+      missingNocoDb: missingNocoDbConfig(config),
       officePulse,
       handsetDelivery,
       pool,
@@ -94,6 +108,7 @@ export function createDeps(config: AppConfig): AppDeps {
     tenantDirectory,
     eventStore: new MemoryIdentityEventStore(memoryDb),
     repos,
+    missingNocoDb: missingNocoDbConfig(config),
     officePulse,
     handsetDelivery,
     pool: null,
