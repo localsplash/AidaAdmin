@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   runtimeApi,
   RuntimeApiError,
-  type ActiveCallSummary,
-  type OperationalEvent,
+  type CallDetail,
+  type Issues,
+  type RuntimeCall,
 } from '../api/runtime';
-import { emptyCallView, reduceEvents, type CallView } from '../runtime/callState';
+import { RuntimeErrorNotice } from '../components/RuntimeError';
+import { emptyCallView, PHASE_LABEL, reduceEvents, type CallView } from '../runtime/callState';
 
 const POLL_MS = 3000;
 
@@ -15,135 +18,146 @@ interface TakeoverAttempt {
   submitting: boolean;
   submitted: boolean;
   error: string | null;
+  outcome: string | null;
 }
 
 function CallPanel({
-  summary,
+  detail,
   view,
   attempt,
   onTakeover,
 }: {
-  summary: ActiveCallSummary;
+  detail: CallDetail;
   view: CallView;
   attempt: TakeoverAttempt | undefined;
   onTakeover: () => void;
 }) {
-  const command = view.commands.find(
-    (c) => c.idempotencyKey === attempt?.idempotencyKey || c.commandType === 'TAKEOVER',
-  );
-  const terminal = Boolean(command && ['COMPLETED', 'FAILED'].includes(command.status));
+  const { call, commands, participants } = detail;
+  // The durable record of takeover progress is OfficePulse's own
+  // control_command row; the attempt state only covers the round trip.
+  const command =
+    commands.find((c) => c.idempotencyKey === attempt?.idempotencyKey) ??
+    [...commands].reverse().find((c) => c.commandType === 'TAKEOVER');
+  const terminal = Boolean(command && ['completed', 'failed'].includes(command.status));
   const busy = Boolean(attempt?.submitting) || Boolean(attempt?.submitted && !terminal);
-  const takeoverDisabled = busy;
+  const ended = view.phase === 'ended' || call.endedAt !== null;
+  const present = participants.filter((p) => p.leftAt === null);
 
   return (
     <div>
       <p role="status">
-        Call state: <strong>{view.state}</strong>
-        {view.speechState ? ` — ${view.speechState} speaking` : ''}
-        {summary.callerNumber ? ` — caller ${summary.callerNumber}` : ''}
+        <strong>{PHASE_LABEL[view.phase]}</strong>
+        {call.callerNumber ? ` — caller ${call.callerNumber}` : ''} — DID {call.didE164}
+        {' — '}
+        <Link to={`/runtime/calls/${encodeURIComponent(call.id)}`}>details</Link>
       </p>
 
-      {view.transferFailedReason ? (
-        <p role="alert">Transfer failed ({view.transferFailedReason}) — Aida resumed the call.</p>
+      {view.failureReason ? (
+        <p role="alert">
+          {view.phase === 'fallback'
+            ? `Routed to the fallback destination (${view.failureReason}).`
+            : `Last attempt failed (${view.failureReason}) — the caller stays with ${
+                view.aidaPresent ? 'Aida' : 'whoever is connected'
+              }.`}
+        </p>
       ) : null}
-      {view.transcriptGap ? (
-        <p role="alert">Transcript gap detected — the missing speech is unrecoverable.</p>
+      {view.sequenceGap ? (
+        <p role="alert">
+          Some durable events are missing from this record — the timeline has a gap.
+        </p>
       ) : null}
       {attempt?.error ? <p role="alert">{attempt.error}</p> : null}
 
-      <h3>Live transcript</h3>
-      <p className="transcript-note">
-        Live view only — this transcript is not a historical record.
+      <h3>Who is on the call</h3>
+      <p>
+        Aida: {view.aidaPresent ? 'present' : 'not present'}; human:{' '}
+        {view.humanPresent ? 'connected' : 'not connected'}
+        {present.length > 0
+          ? ` — LiveKit participants: ${present.map((p) => p.identity ?? p.participantSid).join(', ')}`
+          : ''}
       </p>
-      {view.transcript.length === 0 ? (
-        <p>No speech yet.</p>
+
+      <h3>Timeline</h3>
+      {view.timeline.length === 0 ? (
+        <p>No events yet.</p>
       ) : (
         <ol className="transcript">
-          {view.transcript.map((line) => (
-            <li key={line.sequenceNumber}>
-              <strong>{line.speaker}:</strong> {line.text}
+          {view.timeline.map((entry) => (
+            <li key={entry.sequenceNumber}>
+              <strong>{entry.eventType}</strong>
+              {entry.detail ? ` — ${entry.detail}` : ''}
             </li>
           ))}
         </ol>
       )}
-
-      {view.suggestions.length > 0 ? (
-        <>
-          <h3>Aida suggestions</h3>
-          <ul>
-            {view.suggestions.map((s) => (
-              <li key={s}>{s}</li>
-            ))}
-          </ul>
-        </>
-      ) : null}
+      <p className="transcript-note">
+        Live speech is not in this record: transcripts travel over LiveKit Data and are never
+        stored.
+      </p>
 
       <h3>Take over</h3>
       {command ? (
         <p role="status">
-          Takeover {command.status.toLowerCase()}
-          {command.detail ? ` — ${command.detail}` : ''}
+          Takeover {command.status}
+          {command.result && typeof command.result.error === 'string'
+            ? ` — ${command.result.error}`
+            : command.result && typeof command.result.status === 'string'
+              ? ` — ${command.result.status}`
+              : ''}
         </p>
       ) : null}
-      <button type="button" disabled={takeoverDisabled} onClick={onTakeover}>
-        {busy ? 'Takeover in progress…' : 'Take over this call'}
+      {attempt?.outcome ? <p role="status">{attempt.outcome}</p> : null}
+      <button type="button" disabled={busy || ended} onClick={onTakeover}>
+        {busy ? 'Takeover in progress…' : ended ? 'Call ended' : 'Take over this call'}
       </button>
     </div>
   );
 }
 
 export function OperationsScreen() {
-  const [activeCalls, setActiveCalls] = useState<ActiveCallSummary[] | null>(null);
-  const [recentCalls, setRecentCalls] = useState<ActiveCallSummary[]>([]);
-  const [opsEvents, setOpsEvents] = useState<OperationalEvent[]>([]);
+  const [active, setActive] = useState<CallDetail[] | null>(null);
+  const [recent, setRecent] = useState<RuntimeCall[]>([]);
+  const [issues, setIssues] = useState<Issues | null>(null);
   const [views, setViews] = useState<Record<string, CallView>>({});
   const [attempts, setAttempts] = useState<Record<string, TakeoverAttempt>>({});
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [forbidden, setForbidden] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const viewsRef = useRef(views);
   viewsRef.current = views;
 
   const refresh = useCallback(async () => {
     try {
-      const [active, recent, ops] = await Promise.all([
-        runtimeApi.listCalls('active'),
-        runtimeApi.listCalls('recent'),
-        runtimeApi.operationalEvents(),
-      ]);
-      setForbidden(null);
+      const list = await runtimeApi.listCalls('active');
       setError(null);
-      setActiveCalls(active.calls);
-      setRecentCalls(recent.calls);
-      setOpsEvents(ops.events);
-
-      // Replay durable events per call from each call's own cursor. A
-      // reconnect simply replays from the cursor; the reducer is idempotent.
+      // Each call's full record in one round trip; the reducer is
+      // idempotent, so replaying the whole event list is always safe.
+      const details: CallDetail[] = [];
       const nextViews: Record<string, CallView> = {};
-      for (const call of active.calls) {
-        const current = viewsRef.current[call.callSessionId] ?? emptyCallView(call.callSessionId);
+      for (const call of list.calls) {
         try {
-          const { events } = await runtimeApi.listEvents(
-            call.callSessionId,
-            current.highestSequence,
-          );
-          nextViews[call.callSessionId] = reduceEvents(current, events);
+          const detail = await runtimeApi.getCall(call.id);
+          details.push(detail);
+          const current = viewsRef.current[call.id] ?? emptyCallView(call.id);
+          nextViews[call.id] = reduceEvents(current, detail.events);
         } catch {
-          nextViews[call.callSessionId] = current;
+          // A call that vanished between the list and the detail is gone.
         }
       }
+      setActive(details);
       setViews(nextViews);
       setSelectedTab((tab) =>
-        tab && active.calls.some((c) => c.callSessionId === tab)
-          ? tab
-          : (active.calls[0]?.callSessionId ?? null),
+        tab && details.some((d) => d.call.id === tab) ? tab : (details[0]?.call.id ?? null),
       );
+      const [recentList, issueList] = await Promise.allSettled([
+        runtimeApi.listCalls('recent'),
+        runtimeApi.issues(),
+      ]);
+      if (recentList.status === 'fulfilled') setRecent(recentList.value.calls);
+      if (issueList.status === 'fulfilled') setIssues(issueList.value);
     } catch (err) {
+      setError(err);
       if (err instanceof RuntimeApiError && (err.status === 403 || err.status === 401)) {
-        setForbidden(err.message);
-        setActiveCalls([]);
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to load runtime state');
+        setActive([]);
       }
     }
   }, []);
@@ -154,47 +168,53 @@ export function OperationsScreen() {
     return () => clearInterval(timer);
   }, [refresh]);
 
-  const takeover = async (call: ActiveCallSummary) => {
-    if (!window.confirm(`Take over the call ${call.callerNumber ?? call.callSessionId}?`)) return;
-    const existing = attempts[call.callSessionId];
+  const takeover = async (detail: CallDetail) => {
+    const call = detail.call;
+    if (!window.confirm(`Take over the call ${call.callerNumber ?? call.id}?`)) return;
+    const existing = attempts[call.id];
     // Debounce: an attempt in flight (or awaiting its terminal state) never
     // submits a second command.
     if (existing?.submitting || existing?.submitted) return;
     const idempotencyKey = crypto.randomUUID();
     setAttempts((a) => ({
       ...a,
-      [call.callSessionId]: { idempotencyKey, submitting: true, submitted: false, error: null },
+      [call.id]: { idempotencyKey, submitting: true, submitted: false, error: null, outcome: null },
     }));
-    const view = viewsRef.current[call.callSessionId];
     try {
-      await runtimeApi.submitCommand(
-        call.callSessionId,
-        'TAKEOVER',
-        view?.version ?? call.version ?? 0,
-        idempotencyKey,
-      );
+      const outcome = await runtimeApi.takeover(call.id, idempotencyKey);
       setAttempts((a) => ({
         ...a,
-        [call.callSessionId]: { idempotencyKey, submitting: false, submitted: true, error: null },
+        [call.id]: {
+          idempotencyKey,
+          submitting: false,
+          submitted: true,
+          error: null,
+          outcome: outcome.duplicate
+            ? `Already submitted — ${outcome.status ?? 'in progress'}`
+            : (outcome.status ?? null),
+        },
       }));
     } catch (err) {
       setAttempts((a) => ({
         ...a,
-        [call.callSessionId]: {
+        [call.id]: {
           idempotencyKey,
           submitting: false,
           submitted: false,
           error: err instanceof Error ? err.message : 'Takeover failed',
+          outcome: null,
         },
       }));
     }
   };
 
+  const forbidden =
+    error instanceof RuntimeApiError && (error.status === 403 || error.status === 401);
   if (forbidden) {
     return (
       <section aria-labelledby="ops-heading">
         <h1 id="ops-heading">Live operations</h1>
-        <p role="alert">{forbidden}</p>
+        <RuntimeErrorNotice error={error} />
       </section>
     );
   }
@@ -202,45 +222,45 @@ export function OperationsScreen() {
   return (
     <section aria-labelledby="ops-heading">
       <h1 id="ops-heading">Live operations</h1>
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? <RuntimeErrorNotice error={error} /> : null}
       <button type="button" onClick={() => void refresh()}>
         Refresh now
       </button>
 
       <h2>Active calls</h2>
-      {activeCalls === null ? (
+      {active === null ? (
         <p role="status">Loading…</p>
-      ) : activeCalls.length === 0 ? (
+      ) : active.length === 0 ? (
         <p>No active calls.</p>
       ) : (
         <>
           <div role="tablist" aria-label="Active calls" className="call-tabs">
-            {activeCalls.map((call) => (
+            {active.map(({ call }) => (
               <button
-                key={call.callSessionId}
+                key={call.id}
                 role="tab"
-                id={`tab-${call.callSessionId}`}
-                aria-selected={selectedTab === call.callSessionId}
-                aria-controls={`panel-${call.callSessionId}`}
-                onClick={() => setSelectedTab(call.callSessionId)}
+                id={`tab-${call.id}`}
+                aria-selected={selectedTab === call.id}
+                aria-controls={`panel-${call.id}`}
+                onClick={() => setSelectedTab(call.id)}
               >
-                {call.callerNumber ?? call.callSessionId}
+                {call.callerNumber ?? call.id}
               </button>
             ))}
           </div>
-          {activeCalls.map((call) => (
+          {active.map((detail) => (
             <div
-              key={call.callSessionId}
+              key={detail.call.id}
               role="tabpanel"
-              id={`panel-${call.callSessionId}`}
-              aria-labelledby={`tab-${call.callSessionId}`}
-              hidden={selectedTab !== call.callSessionId}
+              id={`panel-${detail.call.id}`}
+              aria-labelledby={`tab-${detail.call.id}`}
+              hidden={selectedTab !== detail.call.id}
             >
               <CallPanel
-                summary={call}
-                view={views[call.callSessionId] ?? emptyCallView(call.callSessionId)}
-                attempt={attempts[call.callSessionId]}
-                onTakeover={() => void takeover(call)}
+                detail={detail}
+                view={views[detail.call.id] ?? emptyCallView(detail.call.id)}
+                attempt={attempts[detail.call.id]}
+                onTakeover={() => void takeover(detail)}
               />
             </div>
           ))}
@@ -248,27 +268,42 @@ export function OperationsScreen() {
       )}
 
       <h2>Recent calls</h2>
-      {recentCalls.length === 0 ? (
+      {recent.length === 0 ? (
         <p>No recent calls.</p>
       ) : (
         <ul>
-          {recentCalls.map((call) => (
-            <li key={call.callSessionId}>
-              {call.callerNumber ?? call.callSessionId} — {call.state}
+          {recent.map((call) => (
+            <li key={call.id}>
+              <Link to={`/runtime/calls/${encodeURIComponent(call.id)}`}>
+                {call.callerNumber ?? call.id}
+              </Link>{' '}
+              — {call.state} ({call.disposition})
             </li>
           ))}
         </ul>
       )}
 
       <h2>Operational errors</h2>
-      {opsEvents.length === 0 ? (
-        <p>No operational errors.</p>
+      {!issues || (issues.failedCommands.length === 0 && issues.events.length === 0) ? (
+        <p>No operational errors{issues ? ` in the last ${issues.windowHours} hours` : ''}.</p>
       ) : (
         <ul>
-          {opsEvents.map((event) => (
-            <li key={event.id}>
-              {event.occurredAt ? `${event.occurredAt} — ` : ''}
-              {event.message ?? event.eventType ?? 'event'}
+          {issues.failedCommands.map((c) => (
+            <li key={`c-${c.callSessionId}-${c.idempotencyKey}`}>
+              {c.createdAt} — takeover failed on{' '}
+              <Link to={`/runtime/calls/${encodeURIComponent(c.callSessionId)}`}>
+                {c.callSessionId}
+              </Link>
+              {c.result && typeof c.result.error === 'string' ? `: ${c.result.error}` : ''}
+            </li>
+          ))}
+          {issues.events.map((e) => (
+            <li key={`e-${e.callSessionId}-${e.sequenceNumber}`}>
+              {e.createdAt} — {e.eventType} on{' '}
+              <Link to={`/runtime/calls/${encodeURIComponent(e.callSessionId)}`}>
+                {e.callSessionId}
+              </Link>
+              {e.payload && typeof e.payload.reason === 'string' ? `: ${e.payload.reason}` : ''}
             </li>
           ))}
         </ul>

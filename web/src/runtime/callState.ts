@@ -1,48 +1,52 @@
 /**
- * Client-side reduction of durable AidaControl call events into one call's
- * view. Events are ordered by `sequenceNumber` (unique per call session) and
- * may arrive duplicated or reordered across reconnect/replay; the reducer is
- * idempotent per sequence number, so replays never duplicate transcript
- * lines or command progress. A missing sequence number below the highest one
- * seen is a transcript gap — live-only transcripts cannot be recovered, so
- * the gap is surfaced, never papered over.
+ * Client-side reduction of OfficePulse's durable call events into one call's
+ * view. Events are ordered by `sequenceNumber` (unique per call session)
+ * and may arrive duplicated or reordered across reconnect/replay; the
+ * reducer is idempotent per sequence number. A missing number below the
+ * highest seen is a gap in the durable record and is surfaced as such.
+ *
+ * The vocabulary is OfficePulse's own (its takeover manager, orchestrator
+ * and LiveKit webhook handler): bootstrapped, fallback, screening-started,
+ * takeover-requested, ringing, answered, bridged, aida-connected,
+ * aida-drained, aida-lost, takeover-failed, hangup, human-hangup, and
+ * `livekit.<event>`. Live transcripts are NOT in this record — they travel
+ * over LiveKit Data and are never persisted — so there is no transcript here
+ * by design.
  */
 
 export interface CallEvent {
   sequenceNumber: number;
   eventType: string;
-  payload: Record<string, unknown>;
+  payload: Record<string, unknown> | null;
+  createdAt?: string;
 }
 
-export type CommandStatus =
-  'PENDING' | 'RINGING' | 'ANSWERED' | 'DRAINING' | 'COMPLETED' | 'FAILED';
+export type CallPhase =
+  | 'bootstrapping'
+  | 'screening'
+  | 'fallback'
+  | 'takeover-ringing'
+  | 'human-connected'
+  | 'ended'
+  | 'unknown';
 
-export interface CommandView {
-  idempotencyKey: string;
-  commandType: string;
-  status: CommandStatus;
-  detail: string | null;
-}
-
-export interface TranscriptLine {
+export interface TimelineEntry {
   sequenceNumber: number;
-  speaker: string;
-  text: string;
+  eventType: string;
+  at: string | null;
+  detail: string | null;
 }
 
 export interface CallView {
   callSessionId: string;
-  callerNumber: string | null;
-  state: string;
-  version: number;
-  transcript: TranscriptLine[];
-  speechState: string | null;
-  suggestions: string[];
-  commands: CommandView[];
-  /** transfer.failed reason; Aida has resumed the call. */
-  transferFailedReason: string | null;
-  /** True when a sequence gap was observed — earlier speech is unrecoverable. */
-  transcriptGap: boolean;
+  phase: CallPhase;
+  timeline: TimelineEntry[];
+  /** Why the last takeover or bootstrap did not go as configured. */
+  failureReason: string | null;
+  aidaPresent: boolean;
+  humanPresent: boolean;
+  /** True when a sequence gap was observed in the durable record. */
+  sequenceGap: boolean;
   seenSequences: Set<number>;
   highestSequence: number;
 }
@@ -50,15 +54,12 @@ export interface CallView {
 export function emptyCallView(callSessionId: string): CallView {
   return {
     callSessionId,
-    callerNumber: null,
-    state: 'UNKNOWN',
-    version: 0,
-    transcript: [],
-    speechState: null,
-    suggestions: [],
-    commands: [],
-    transferFailedReason: null,
-    transcriptGap: false,
+    phase: 'unknown',
+    timeline: [],
+    failureReason: null,
+    aidaPresent: false,
+    humanPresent: false,
+    sequenceGap: false,
     seenSequences: new Set(),
     highestSequence: 0,
   };
@@ -68,85 +69,133 @@ function str(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
 }
 
+/** A one-line human reading of an event's payload, if it has one. */
+function detailOf(eventType: string, payload: Record<string, unknown> | null): string | null {
+  if (!payload) return null;
+  const reason = str(payload.reason) ?? str(payload.error);
+  if (reason) return reason;
+  if (eventType === 'bootstrapped' && payload.profileId) {
+    return `profile ${String(payload.profileId)} rev ${String(payload.profileRevision ?? '?')}`;
+  }
+  return null;
+}
+
 export function reduceEvent(view: CallView, event: CallEvent): CallView {
   // Idempotence: a duplicated or replayed event changes nothing.
   if (view.seenSequences.has(event.sequenceNumber)) return view;
 
   const next: CallView = {
     ...view,
-    transcript: [...view.transcript],
-    suggestions: [...view.suggestions],
-    commands: [...view.commands],
+    timeline: [...view.timeline],
     seenSequences: new Set(view.seenSequences),
   };
   next.seenSequences.add(event.sequenceNumber);
   next.highestSequence = Math.max(next.highestSequence, event.sequenceNumber);
 
-  const payload = event.payload ?? {};
-  switch (event.eventType) {
-    case 'call.state': {
-      next.state = str(payload.state) ?? next.state;
-      const version = Number(payload.version);
-      if (Number.isInteger(version)) next.version = Math.max(next.version, version);
-      if (payload.callerNumber !== undefined) {
-        next.callerNumber = str(payload.callerNumber);
-      }
-      break;
-    }
-    case 'transcript.segment': {
-      const text = str(payload.text);
-      if (text) {
-        next.transcript.push({
-          sequenceNumber: event.sequenceNumber,
-          speaker: str(payload.speaker) ?? 'unknown',
-          text,
-        });
-        next.transcript.sort((a, b) => a.sequenceNumber - b.sequenceNumber);
-      }
-      break;
-    }
-    case 'speech.state':
-      next.speechState = str(payload.speaking);
-      break;
-    case 'suggestion': {
-      const text = str(payload.text);
-      if (text && !next.suggestions.includes(text)) next.suggestions.push(text);
-      break;
-    }
-    case 'command.progress': {
-      const key = str(payload.idempotencyKey);
-      const status = str(payload.status) as CommandStatus | null;
-      if (key && status) {
-        const existing = next.commands.find((c) => c.idempotencyKey === key);
-        if (existing) {
-          existing.status = status;
-          existing.detail = str(payload.detail);
-        } else {
-          next.commands.push({
-            idempotencyKey: key,
-            commandType: str(payload.commandType) ?? 'TAKEOVER',
-            status,
-            detail: str(payload.detail),
-          });
-        }
-      }
-      break;
-    }
-    case 'transfer.failed':
-      // Aida resumed the call; show the reason.
-      next.transferFailedReason = str(payload.reason) ?? 'unknown reason';
-      break;
-    default:
-      // Unknown durable events advance the cursor without local effect.
-      break;
+  const payload = event.payload ?? null;
+  next.timeline.push({
+    sequenceNumber: event.sequenceNumber,
+    eventType: event.eventType,
+    at: event.createdAt ?? null,
+    detail: detailOf(event.eventType, payload),
+  });
+  next.timeline.sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+
+  // Phase is derived from the latest event in sequence order, so a replay
+  // that arrives out of order still lands on the same answer.
+  const latest = next.timeline[next.timeline.length - 1];
+  if (latest && latest.sequenceNumber === event.sequenceNumber) {
+    applyEvent(next, event.eventType, payload);
+  } else {
+    // An older event filled in behind: recompute from the start.
+    const rebuilt = next.timeline.reduce(
+      (acc, entry) => {
+        applyEvent(acc, entry.eventType, null, entry.detail);
+        return acc;
+      },
+      { ...emptyCallView(view.callSessionId) },
+    );
+    next.phase = rebuilt.phase;
+    next.failureReason = rebuilt.failureReason;
+    next.aidaPresent = rebuilt.aidaPresent;
+    next.humanPresent = rebuilt.humanPresent;
   }
 
-  // Gap detection: any missing sequence number at or below the highest seen
-  // means live speech was lost for good.
-  next.transcriptGap = next.seenSequences.size < next.highestSequence;
+  next.sequenceGap = next.seenSequences.size < next.highestSequence;
   return next;
+}
+
+function applyEvent(
+  view: CallView,
+  eventType: string,
+  payload: Record<string, unknown> | null,
+  detail: string | null = null,
+): void {
+  const reason = detail ?? detailOf(eventType, payload);
+  switch (eventType) {
+    case 'bootstrapped':
+      view.phase = 'screening';
+      view.aidaPresent = true;
+      break;
+    case 'screening-started':
+    case 'aida-connected':
+      view.phase = view.humanPresent ? 'human-connected' : 'screening';
+      view.aidaPresent = true;
+      break;
+    case 'fallback':
+      view.phase = 'fallback';
+      view.aidaPresent = false;
+      view.failureReason = reason ?? 'fallback';
+      break;
+    case 'takeover-requested':
+    case 'ringing':
+      view.phase = 'takeover-ringing';
+      break;
+    case 'answered':
+    case 'bridged':
+      view.phase = 'human-connected';
+      view.humanPresent = true;
+      view.failureReason = null;
+      break;
+    case 'aida-drained':
+      view.aidaPresent = false;
+      break;
+    case 'aida-lost':
+      // Aida's leg dropped. The caller keeps whoever is present.
+      view.aidaPresent = false;
+      view.failureReason = reason ?? 'aida-lost';
+      if (!view.humanPresent) view.phase = 'fallback';
+      break;
+    case 'takeover-failed':
+      view.phase = view.aidaPresent ? 'screening' : 'fallback';
+      view.failureReason = reason ?? 'takeover-failed';
+      break;
+    case 'human-hangup':
+      view.humanPresent = false;
+      break;
+    case 'hangup':
+    case 'livekit.room_finished':
+      view.phase = 'ended';
+      view.aidaPresent = false;
+      view.humanPresent = false;
+      break;
+    default:
+      // livekit.* and unknown durable events advance the cursor only.
+      break;
+  }
 }
 
 export function reduceEvents(view: CallView, events: CallEvent[]): CallView {
   return events.reduce(reduceEvent, view);
 }
+
+/** Human labels for the phases, used by every screen that shows one. */
+export const PHASE_LABEL: Record<CallPhase, string> = {
+  bootstrapping: 'Bootstrapping',
+  screening: 'Aida screening',
+  fallback: 'Routed to fallback destination',
+  'takeover-ringing': 'Takeover — ringing',
+  'human-connected': 'Human connected',
+  ended: 'Ended',
+  unknown: 'Unknown',
+};

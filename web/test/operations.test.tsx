@@ -1,14 +1,53 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OperationsScreen } from '../src/screens/OperationsScreen';
-import type { CallEvent } from '../src/runtime/callState';
+import type { CallDetail, RuntimeCall, RuntimeEvent } from '../src/api/runtime';
+
+function call(id: string, callerNumber: string, overrides: Partial<RuntimeCall> = {}): RuntimeCall {
+  return {
+    id,
+    asteriskLinkedId: `l-${id}`,
+    officePulseInstanceId: 'op',
+    tenantId: 'ten-1',
+    didE164: '+15105550100',
+    callerNumber,
+    config: {
+      didRouteId: 'r',
+      didRouteRevision: 1,
+      profileId: 'p',
+      profileRevision: 1,
+      tenantRevision: 1,
+    },
+    roomName: `aida-${id}`,
+    agentParticipantSid: null,
+    destinationType: 'EXTENSION',
+    destinationId: 'ext-1',
+    disposition: 'SCREEN',
+    state: 'screening',
+    version: 1,
+    createdAt: '2026-09-02T10:00:00.000Z',
+    endedAt: null,
+    ...overrides,
+  };
+}
+
+const ev = (
+  sequenceNumber: number,
+  eventType: string,
+  payload: Record<string, unknown> | null = null,
+): RuntimeEvent => ({
+  sequenceNumber,
+  eventType,
+  payload,
+  createdAt: 't',
+});
 
 interface Upstream {
-  activeCalls: Array<{ callSessionId: string; callerNumber: string | null; state: string }>;
-  eventsByCall: Record<string, CallEvent[]>;
+  active: CallDetail[];
   commands: Array<{ url: string; body: Record<string, unknown> }>;
-  forbid?: boolean;
+  failWith?: { status: number; body: unknown };
 }
 
 function mockRuntime(upstream: Upstream) {
@@ -18,24 +57,28 @@ function mockRuntime(upstream: Upstream) {
       const url = String(input);
       const respond = (status: number, body: unknown) =>
         new Response(JSON.stringify(body), { status });
-      if (upstream.forbid) {
-        return respond(403, { error: 'forbidden', message: 'Select a tenant first' });
-      }
+      if (upstream.failWith) return respond(upstream.failWith.status, upstream.failWith.body);
       if (url.includes('/runtime/calls?state=active')) {
-        return respond(200, { calls: upstream.activeCalls });
+        return respond(200, { calls: upstream.active.map((d) => d.call) });
       }
       if (url.includes('/runtime/calls?state=recent')) return respond(200, { calls: [] });
-      if (url.includes('/runtime/operational-events')) return respond(200, { events: [] });
-      const eventsMatch = /\/runtime\/calls\/([^/]+)\/events\?since=(\d+)/.exec(url);
-      if (eventsMatch) {
-        const since = Number(eventsMatch[2]);
-        const all = upstream.eventsByCall[eventsMatch[1] as string] ?? [];
-        return respond(200, { events: all.filter((e) => e.sequenceNumber > since) });
+      if (url.includes('/runtime/issues')) {
+        return respond(200, {
+          windowHours: 24,
+          failedCommands: [],
+          events: [],
+          dependenciesDown: [],
+        });
       }
-      const commandMatch = /\/runtime\/calls\/([^/]+)\/commands$/.exec(url);
+      const commandMatch = /\/runtime\/calls\/([^/?]+)\/commands$/.exec(url);
       if (commandMatch && init?.method === 'POST') {
         upstream.commands.push({ url, body: JSON.parse(String(init.body)) });
-        return respond(200, { accepted: true });
+        return respond(202, { accepted: true, duplicate: false, status: 'ringing' });
+      }
+      const detailMatch = /\/runtime\/calls\/([^/?]+)\?/.exec(url);
+      if (detailMatch) {
+        const detail = upstream.active.find((d) => d.call.id === detailMatch[1]);
+        return detail ? respond(200, detail) : respond(404, { error: 'call_not_found' });
       }
       return respond(404, {});
     }),
@@ -47,72 +90,106 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const seg = (sequenceNumber: number, text: string): CallEvent => ({
-  sequenceNumber,
-  eventType: 'transcript.segment',
-  payload: { speaker: 'caller', text },
+const detail = (
+  c: RuntimeCall,
+  events: RuntimeEvent[],
+  commands: CallDetail['commands'] = [],
+): CallDetail => ({
+  call: c,
+  events,
+  commands,
+  participants: [],
 });
 
 describe('OperationsScreen', () => {
   it('keeps simultaneous calls isolated in their own tabs', async () => {
     mockRuntime({
-      activeCalls: [
-        { callSessionId: 'call-a', callerNumber: '+15105550001', state: 'SCREENING' },
-        { callSessionId: 'call-b', callerNumber: '+15105550002', state: 'SCREENING' },
+      active: [
+        detail(call('call-a', '+15105550001'), [ev(1, 'bootstrapped'), ev(2, 'ringing')]),
+        detail(call('call-b', '+15105550002'), [
+          ev(1, 'fallback', { reason: 'nocodb-unavailable' }),
+        ]),
       ],
-      eventsByCall: {
-        'call-a': [seg(1, 'alpha words')],
-        'call-b': [seg(1, 'bravo words')],
-      },
       commands: [],
     });
-    render(<OperationsScreen />);
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
     const panelA = await screen.findByRole('tabpanel', { name: '+15105550001' });
-    expect(within(panelA).getByText(/alpha words/)).toBeInTheDocument();
-    expect(within(panelA).queryByText(/bravo words/)).not.toBeInTheDocument();
+    expect(within(panelA).getByText(/takeover — ringing/i)).toBeInTheDocument();
+    expect(within(panelA).queryByText(/nocodb-unavailable/)).not.toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('tab', { name: '+15105550002' }));
     const panelB = screen.getByRole('tabpanel', { name: '+15105550002' });
-    expect(within(panelB).getByText(/bravo words/)).toBeInTheDocument();
-    expect(within(panelB).queryByText(/alpha words/)).not.toBeInTheDocument();
+    expect(within(panelB).getByRole('alert')).toHaveTextContent(/nocodb-unavailable/);
+    expect(within(panelB).queryByText(/takeover — ringing/i)).not.toBeInTheDocument();
   });
 
-  it('never renders anything when the runtime is forbidden', async () => {
-    mockRuntime({ activeCalls: [], eventsByCall: {}, commands: [], forbid: true });
-    render(<OperationsScreen />);
+  it('renders nothing but the refusal when the runtime is forbidden', async () => {
+    mockRuntime({
+      active: [],
+      commands: [],
+      failWith: {
+        status: 403,
+        body: { error: 'tenant_not_selected', message: 'Select a tenant first' },
+      },
+    });
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
     expect(await screen.findByRole('alert')).toHaveTextContent(/select a tenant/i);
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
-  it('submits a takeover once with confirmation, version, and idempotency key', async () => {
-    const upstream: Upstream = {
-      activeCalls: [{ callSessionId: 'call-a', callerNumber: '+15105550001', state: 'SCREENING' }],
-      eventsByCall: {
-        'call-a': [
-          {
-            sequenceNumber: 1,
-            eventType: 'call.state',
-            payload: { state: 'SCREENING', version: 5 },
-          },
-        ],
+  it('names the missing variable when the runtime database is not configured', async () => {
+    mockRuntime({
+      active: [],
+      commands: [],
+      failWith: {
+        status: 503,
+        body: {
+          error: 'runtime_db_not_configured',
+          message: 'The OfficePulse runtime database is not configured',
+          missingConfiguration: ['OFFICEPULSE_RUNTIME_DATABASE_URL'],
+        },
       },
+    });
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(/OFFICEPULSE_RUNTIME_DATABASE_URL/);
+  });
+
+  it('submits a takeover once, with an idempotency key and no destination', async () => {
+    const upstream: Upstream = {
+      active: [detail(call('call-a', '+15105550001'), [ev(1, 'bootstrapped')])],
       commands: [],
     };
     mockRuntime(upstream);
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<OperationsScreen />);
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
     const user = userEvent.setup();
-    const button = await screen.findByRole('button', { name: /take over this call/i });
-    await user.click(button);
+    await user.click(await screen.findByRole('button', { name: /take over this call/i }));
     await waitFor(() => expect(upstream.commands).toHaveLength(1));
     expect(confirmSpy).toHaveBeenCalled();
     const body = upstream.commands[0]!.body;
     expect(body.commandType).toBe('TAKEOVER');
-    expect(body.expectedCallVersion).toBe(5);
     expect(typeof body.idempotencyKey).toBe('string');
+    expect(body).not.toHaveProperty('destinationId');
+    expect(body).not.toHaveProperty('expectedCallVersion');
 
-    // The button is disabled after submission — a second click cannot happen.
+    // Disabled after submission — a second click cannot happen.
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /takeover in progress/i })).toBeDisabled(),
     );
@@ -121,52 +198,65 @@ describe('OperationsScreen', () => {
 
   it('does not submit when the confirmation is declined', async () => {
     const upstream: Upstream = {
-      activeCalls: [{ callSessionId: 'call-a', callerNumber: '+15105550001', state: 'SCREENING' }],
-      eventsByCall: {},
+      active: [detail(call('call-a', '+15105550001'), [ev(1, 'bootstrapped')])],
       commands: [],
     };
     mockRuntime(upstream);
     vi.spyOn(window, 'confirm').mockReturnValue(false);
-    render(<OperationsScreen />);
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /take over this call/i }));
     expect(upstream.commands).toHaveLength(0);
   });
 
-  it('shows failed transfers with Aida resumed, transcript gaps, and takeover progress states', async () => {
+  it('shows takeover progress from the durable command record, failures, and gaps', async () => {
     mockRuntime({
-      activeCalls: [{ callSessionId: 'call-a', callerNumber: '+15105550001', state: 'SCREENING' }],
-      eventsByCall: {
-        'call-a': [
-          seg(1, 'hello'),
-          // Sequence 2 is missing: the gap must be surfaced.
-          {
-            sequenceNumber: 3,
-            eventType: 'command.progress',
-            payload: { idempotencyKey: 'k1', commandType: 'TAKEOVER', status: 'RINGING' },
-          },
-          {
-            sequenceNumber: 4,
-            eventType: 'transfer.failed',
-            payload: { reason: 'destination did not answer' },
-          },
-        ],
-      },
+      active: [
+        detail(
+          call('call-a', '+15105550001'),
+          [
+            ev(1, 'bootstrapped'),
+            // Sequence 2 is missing: the gap must be surfaced.
+            ev(3, 'takeover-failed', { reason: 'destination did not answer' }),
+          ],
+          [
+            {
+              idempotencyKey: 'k1',
+              commandType: 'TAKEOVER',
+              payload: null,
+              status: 'failed',
+              result: { error: 'no-answer' },
+              createdAt: 't',
+              completedAt: 't',
+            },
+          ],
+        ),
+      ],
       commands: [],
     });
-    render(<OperationsScreen />);
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
     expect(
-      await screen.findByText(/transfer failed \(destination did not answer\) — aida resumed/i),
+      await screen.findByText(/last attempt failed \(destination did not answer\)/i),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(/transcript gap detected — the missing speech is unrecoverable/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/takeover ringing/i)).toBeInTheDocument();
+    expect(screen.getByText(/timeline has a gap/i)).toBeInTheDocument();
+    expect(screen.getByText(/takeover failed — no-answer/i)).toBeInTheDocument();
   });
 
-  it('marks historical conversations as coming soon', async () => {
-    mockRuntime({ activeCalls: [], eventsByCall: {}, commands: [] });
-    render(<OperationsScreen />);
+  it('marks historical conversations as coming soon and says where transcripts live', async () => {
+    mockRuntime({ active: [], commands: [] });
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
     expect(
       await screen.findByRole('heading', { name: /historical conversations/i }),
     ).toBeInTheDocument();

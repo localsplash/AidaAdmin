@@ -29,10 +29,15 @@ const envSchema = z.object({
 });
 
 /**
- * External-service configuration consumed by later POC phases (id login,
- * NocoDB writes, OfficePulse provisioning, AidaControl proxying). None of it
- * is needed to run unit tests, but production startup requires every variable
- * to be present. Values are never logged — only names.
+ * External-service configuration (id login, NocoDB writes, the OfficePulse
+ * private API and its runtime database). None of it is needed to run unit
+ * tests, but production startup requires every variable to be present.
+ * Values are never logged — only names.
+ *
+ * There is no AidaControl: for the POC OfficePulseAidaIntegration is the
+ * call orchestrator (its issue #9). AidaAdmin reads its `aida_officepulse`
+ * runtime database through a read-only account and sends commands to the
+ * same private HTTP API that handles provisioning.
  */
 export const SERVICE_ENV_VARS = [
   'PUBLIC_BASE_URL',
@@ -46,9 +51,8 @@ export const SERVICE_ENV_VARS = [
   'NOCODB_BASE_URL',
   'NOCODB_API_TOKEN',
   'OFFICEPULSE_PROVISIONING_BASE_URL',
+  'OFFICEPULSE_RUNTIME_DATABASE_URL',
   'HANDSET_PROVISIONING_URL',
-  'AIDACONTROL_BASE_URL',
-  'AIDACONTROL_TRUSTED_SERVER_CIDRS',
 ] as const;
 
 export type ServiceEnvVar = (typeof SERVICE_ENV_VARS)[number];

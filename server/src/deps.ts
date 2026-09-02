@@ -22,6 +22,7 @@ import { CachedBaseResolver, resolveBaseId, resolveIdentityBaseId } from './noco
 import { NocoIdentityStore } from './nocodb/identity.js';
 import { createRepos, NocoDbTenantUserDirectory, type AidaConfigRepos } from './nocodb/repos.js';
 import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
+import { MysqlRuntimeReader, parseMysqlUrl, type RuntimeReader } from './officepulse/runtime-db.js';
 import {
   HttpHandsetProvisioningDelivery,
   type HandsetProvisioningDelivery,
@@ -47,8 +48,13 @@ export interface AppDeps {
    * fields that must agree is one too many.
    */
   identityStore: NocoIdentityStore | null;
-  /** Non-null when the OfficePulse provisioning API is configured. */
+  /** Non-null when the OfficePulse private API is configured. */
   officePulse: OfficePulseClient | null;
+  /**
+   * Read-only view of OfficePulse's `aida_officepulse` runtime database.
+   * Non-null when OFFICEPULSE_RUNTIME_DATABASE_URL is set.
+   */
+  runtimeReader: RuntimeReader | null;
   /** Non-null when the handset provisioning service is configured. */
   handsetDelivery: HandsetProvisioningDelivery | null;
   /** Non-null when PostgreSQL persistence is configured. */
@@ -135,6 +141,10 @@ export function createDeps(config: AppConfig): AppDeps {
   const officePulse = officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null;
   const handsetUrl = config.serviceConfig.HANDSET_PROVISIONING_URL;
   const handsetDelivery = handsetUrl ? new HttpHandsetProvisioningDelivery(handsetUrl) : null;
+  // A malformed URL throws here, at boot, naming the variable — not on the
+  // first runtime page view.
+  const runtimeUrl = config.serviceConfig.OFFICEPULSE_RUNTIME_DATABASE_URL;
+  const runtimeReader = runtimeUrl ? new MysqlRuntimeReader(parseMysqlUrl(runtimeUrl)) : null;
 
   if (databaseUrl) {
     const pool = createPool(databaseUrl);
@@ -149,6 +159,7 @@ export function createDeps(config: AppConfig): AppDeps {
       baseResolver,
       identityStore,
       officePulse,
+      runtimeReader,
       handsetDelivery,
       pool,
       dbReady: () => ping(pool),
@@ -167,6 +178,7 @@ export function createDeps(config: AppConfig): AppDeps {
     baseResolver,
     identityStore,
     officePulse,
+    runtimeReader,
     handsetDelivery,
     pool: null,
     dbReady: async () => true,

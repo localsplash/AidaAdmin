@@ -14,6 +14,8 @@ import { DidRoutesScreen } from './screens/DidRoutesScreen';
 import { ExtensionsScreen } from './screens/ExtensionsScreen';
 import { ProfilesScreen } from './screens/ProfilesScreen';
 import { RingGroupsScreen } from './screens/RingGroupsScreen';
+import { RuntimeScreen } from './screens/RuntimeScreen';
+import { CallDetailScreen } from './screens/CallDetailScreen';
 import { TenantsScreen } from './screens/TenantsScreen';
 import { TenantUsersScreen } from './screens/TenantUsersScreen';
 
@@ -105,6 +107,9 @@ function AuthenticatedShell({
             <NavLink to="/tenants">Tenants</NavLink>
           ) : null}
           {session.selectedTenant ? <NavLink to="/operations">Live operations</NavLink> : null}
+          {session.user.superAdmin || session.selectedTenant?.role === 'TENANT_ADMIN' ? (
+            <NavLink to="/runtime">Runtime</NavLink>
+          ) : null}
         </nav>
         <span className="app-user">{session.user.displayName ?? session.user.email ?? 'User'}</span>
         <button type="button" className="logout-button" onClick={() => void handleLogout()}>
@@ -123,6 +128,8 @@ function AuthenticatedShell({
           <Route path="/tenants/:tenantId/did-routes" element={<DidRoutesScreen />} />
           <Route path="/tenants/:tenantId/appearance" element={<AppearanceScreen />} />
           <Route path="/operations" element={<OperationsScreen />} />
+          <Route path="/runtime" element={<RuntimeScreen session={session} />} />
+          <Route path="/runtime/calls/:callSessionId" element={<CallDetailScreen />} />
           <Route path="/forbidden" element={<ForbiddenScreen />} />
           <Route path="*" element={<NotFoundScreen />} />
         </Routes>
