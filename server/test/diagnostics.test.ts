@@ -95,6 +95,9 @@ describe('preflight report', () => {
     ID_BASE_URL: 'https://id.localsplash.ai',
     SESSION_SECRET: 'x'.repeat(32),
     AIDA_ADMIN_DATABASE_URL: 'postgresql://localhost/aida_admin',
+    OFFICEPULSE_PROVISIONING_BASE_URL: 'http://officepulse.internal:8085',
+    OFFICEPULSE_RUNTIME_DATABASE_URL:
+      'mysql://aidaadmin_ro:pw@officepulse-db:3306/aida_officepulse',
     ID_EVENT_SOURCE_CIDRS: '10.0.0.0/8',
   };
 

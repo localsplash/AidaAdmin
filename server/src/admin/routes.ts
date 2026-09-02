@@ -10,6 +10,11 @@ import { BaseResolutionError } from '../nocodb/base.js';
 import { ConflictError, NotFoundError, UniqueViolationError } from '../nocodb/repos.js';
 import { ValidationError } from '../nocodb/validation.js';
 import { OfficePulseError } from '../officepulse/client.js';
+import {
+  extensionCreatePayload,
+  extensionUpdatePayload,
+  ringGroupPayload,
+} from '../officepulse/payloads.js';
 import { HandsetDeliveryError } from '../provisioning/handset-delivery.js';
 import {
   requireAnyTenantAdmin,
@@ -503,17 +508,9 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
       }
       // OfficePulse generates the SIP secret and returns it exactly once; it
       // is relayed to the administrator and never persisted or logged here.
-      const provisioned = await deps.officePulse.provisionExtension({
-        requestId: extension.id as string,
-        tenantId: input.tenantId,
-        extensionId: extension.id as string,
-        extensionNumber: extension.extension_number as string,
-        context: extension.asterisk_context as string,
-        displayName: extension.display_name as string,
-        callerIdName: (extension.caller_id_name as string | null) ?? null,
-        callerIdNumber: (extension.caller_id_number as string | null) ?? null,
-        provisioningProfile: (extension.provisioning_profile as string | null) ?? null,
-      });
+      const provisioned = await deps.officePulse.provisionExtension(
+        extensionCreatePayload(extension, input.tenantId),
+      );
       res.status(201).json({
         extension,
         sipUsername: provisioned.sipUsername,
@@ -545,15 +542,10 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
       );
       await audit(req, 'extension.update', 'extension', extension.id as string, input.tenantId);
       if (deps.officePulse) {
-        await deps.officePulse.updateProvisionedExtension(extension.id as string, {
-          extensionNumber: extension.extension_number as string,
-          context: extension.asterisk_context as string,
-          displayName: extension.display_name as string,
-          callerIdName: (extension.caller_id_name as string | null) ?? null,
-          callerIdNumber: (extension.caller_id_number as string | null) ?? null,
-          provisioningProfile: (extension.provisioning_profile as string | null) ?? null,
-          enabled: Boolean(extension.enabled),
-        });
+        await deps.officePulse.updateProvisionedExtension(
+          extension.id as string,
+          extensionUpdatePayload(extension),
+        );
       }
       res.json({ extension });
     } catch (err) {
@@ -710,17 +702,10 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
       const ext = await repos().extensions.get(tenantId, member.extension_id as string);
       numbers.push(ext.extension_number as string);
     }
-    await deps.officePulse.provisionRingGroup(group.id as string, {
-      tenantId,
-      virtualExtension: group.virtual_extension as string,
-      context: group.asterisk_context as string,
-      memberExtensions: numbers,
-      ringTimeoutSeconds: Number(group.ring_timeout_seconds ?? 20),
-      musicOnHoldClass: (group.music_on_hold_class as string | null) ?? null,
-      callerIdName: (group.caller_id_name as string | null) ?? null,
-      callerIdNumber: (group.caller_id_number as string | null) ?? null,
-      enabled: Boolean(group.enabled),
-    });
+    await deps.officePulse.provisionRingGroup(
+      group.id as string,
+      ringGroupPayload(tenantId, group, numbers),
+    );
   }
 
   router.post('/admin/ring-groups', tenantAdmin, async (req, res, next) => {

@@ -9,8 +9,8 @@ import type { IdentityEffects, IdentityEventStore } from '../id/event-store.js';
 
 /**
  * AidaAdmin's own PostgreSQL database (`aida_admin` on the existing server;
- * a dedicated database and credential, fully separate from AidaControl's
- * `aida_runtime`). Holds durable sessions, single-use login states, and the
+ * a dedicated database and credential, fully separate from OfficePulse's
+ * `aida_officepulse`). Holds durable sessions, single-use login states, and the
  * identity-event log/checkpoint, so container restarts lose nothing.
  */
 

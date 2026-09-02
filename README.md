@@ -3,7 +3,7 @@
 Administration UI and backend-for-frontend for the Aida Office POC. A React/TypeScript
 single-page application is served by a Node.js (Express) server that owns every
 credentialed integration — `id` sessions, NocoDB writes, OfficePulse provisioning, and
-AidaControl runtime proxying. The browser talks only to same-origin AidaAdmin endpoints
+OfficePulse runtime reads and actions. The browser talks only to same-origin AidaAdmin endpoints
 and never receives service credentials.
 
 Normative specification:
@@ -79,7 +79,7 @@ enter without a tenant mapping; every other user needs an enabled `tenant_user` 
 
 Sessions, single-use login states, and the identity-event log live in AidaAdmin's own
 PostgreSQL database (`AIDA_ADMIN_DATABASE_URL` — the `aida_admin` database with its own
-credential on the existing server, fully separate from AidaControl's `aida_runtime`).
+credential on the existing server, fully separate from OfficePulse's `aida_officepulse`).
 The browser holds only an opaque, httpOnly, signed session cookie; the database stores
 a hash of it, never the value. The additive schema (`admin_session`, `auth_state`,
 `identity_event`, `identity_event_checkpoint`) is migrated automatically at startup.
@@ -118,8 +118,8 @@ startup fails otherwise, naming the missing variables.
 AidaAdmin's server owns its NocoDB configuration base. Only the instance and the
 credential are configuration (`NOCODB_BASE_URL`, `NOCODB_API_TOKEN` — values never
 live in the repo). Only server-side code holds the token; the browser, AidaHandset,
-OfficePulse, and Asterisk never reach NocoDB. AidaControl reads the same base at call
-time.
+OfficePulse, and Asterisk never reach NocoDB. OfficePulse reads the same base at call
+time (read-only, by name).
 
 **The base is addressed by name, never by a configured id.** The name is hardcoded as
 `AidaAdmin` (`server/src/nocodb/base.ts`); the id is discovered at startup and held for
@@ -238,25 +238,41 @@ logo upload (PNG/JPEG only, magic-byte checked, 512 KB cap, content-addressed na
 served from `/assets`; `ASSET_STORAGE_DIR` sets the storage location). CRM import and
 conversation history are visibly marked as future scope.
 
-## Staff runtime proxy to AidaControl (POC phase 6)
+## Runtime visibility and actions (issue #29)
 
-AidaAdmin is the only browser/session boundary for staff runtime operations. The
-browser calls same-origin `/runtime/*` routes (CSRF-protected); the server resolves
-the session, the selected tenant (`POST /api/session/tenant`, validated against the
-caller's memberships — Super Admins may select any enabled tenant), and the
-`tenant_user` role **before every proxy call**, re-checking membership each time so a
-revoked or disabled mapping fails immediately.
+For the POC there is no AidaControl: **OfficePulseAidaIntegration is the call
+orchestrator** (its issue #9) and the sole writer of its `aida_officepulse` runtime
+database. AidaAdmin gives Super Admins and tenant administrators enough visibility to
+deploy and debug real calls without shell or database access, along two doors:
 
-The proxy is an explicit allowlist — active/recent calls, call detail, event replay,
-takeover/guide commands (`TAKEOVER`/`GUIDE` only), and operational events; nothing
-else is forwarded. Requests to AidaControl originate from an IPv4 inside
-`AIDACONTROL_TRUSTED_SERVER_CIDRS` (a deployment property enforced by AidaControl)
-and carry verified `X-Aida-Identity-User-Id`, `X-Aida-Tenant-Id`, `X-Aida-Role`,
-`X-Aida-Session-Id` (the SHA-256 session reference — never the cookie value), and
-`X-Aida-Correlation-Id`. Browser-supplied `X-Aida-*` headers are stripped
-unconditionally. There is no `STAFF_TOKEN_SECRET` or AidaAdmin-to-AidaControl shared
-secret. Upstream timeouts (10 s) and unavailability surface as safe, user-visible
-504/502 responses with the correlation id.
+|                                                                                                                                                         | Door                                                                                 | Credential                                                                                        | Why                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Reads — calls, timelines, takeover progress, LiveKit participants, dependency status, provisioning history, webhook deliveries, DID fail-safes, orphans | `OFFICEPULSE_RUNTIME_DATABASE_URL` → `aida_officepulse`                              | the **read-only** `aidaadmin_ro` account from OfficePulse's `deploy/sql/grants.sql` (SELECT only) | one query answers what a proxy would need several calls for, and it works when OfficePulse's API is down |
+| Actions — takeover, dependency test, retry provisioning                                                                                                 | `OFFICEPULSE_PROVISIONING_BASE_URL` → `/v1/calls/*`, `/readyz`, `/v1/provisioning/*` | private-LAN CIDR trust enforced by OfficePulse                                                    | commands stay HTTP actions; AidaAdmin never writes a runtime table                                       |
+
+Read-only is a property of the grant, not of good behaviour: the reader also puts every
+pooled connection in `READ ONLY` transaction mode and a test asserts it issues nothing but
+`SELECT`. Column names are OfficePulse's verbatim (`deploy/sql/runtime-schema.sql`).
+
+Scope: call views are scoped to the selected tenant for everyone — another tenant's call
+is "not found", never "forbidden" — and a `USER` sees caller numbers masked to the last
+four digits. Dependencies, webhook deliveries, orphans and the unfiltered call list are
+Super Admin. The takeover body carries no destination: OfficePulse routes to the
+destination pinned on the call at bootstrap, so a command cannot redirect a call. Every
+action is audited with the actor, call, idempotency key and OfficePulse's answer.
+
+**Orphans are detected, not cleaned.** OfficePulse exposes no cleanup endpoint and this
+service will not write to its tables, so the orphans view shows lost calls and who is
+still marked present, and nothing more.
+
+**Live transcripts are not here.** They travel over LiveKit Data and OfficePulse never
+persists them (no transcript table exists by design). The runtime record holds the call
+lifecycle — bootstrap, screening, takeover, bridge, drain, hangup — which is what the
+live-operations and call-detail screens show. Subscribing the browser to LiveKit Data
+needs a viewer token endpoint and is not part of this work.
+
+`npm run doctor -w server` and the startup log report whether each door is configured
+and reachable.
 
 ## Live operations (POC phase 7)
 
@@ -277,7 +293,7 @@ command reaches a terminal state; ringing/answered/draining/completed/failed sta
 render from `command.progress` events. A `transfer.failed` event shows the reason and
 that Aida resumed the call. Historical conversations are marked "Coming soon" — no
 transcript-history UI exists. Browser acceptance against the deployed non-production
-`id`, NocoDB, AidaControl, and OfficePulse services remains the final gate once those
+`id`, NocoDB, and OfficePulse services remains the final gate once those
 environments are configured.
 
 ## Troubleshooting login
@@ -320,5 +336,5 @@ This repository is being built in the ordered phases tracked as GitHub issues:
 3. **#11 NocoDB AidaAdmin schema and repositories — done**
 4. **#12 Tenants, users, extensions, ring groups, provisioning — done**
 5. **#13 Assistant profiles, DID routes, appearance — done**
-6. **#9 AidaControl runtime proxy over CIDR trust — done**
+6. **#9 Runtime proxy — superseded: OfficePulse runtime reads and actions (issue #29) — done**
 7. **#14 Live operations and takeover UI — this change**

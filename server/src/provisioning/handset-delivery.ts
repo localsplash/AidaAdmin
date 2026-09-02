@@ -2,7 +2,7 @@
  * Delivery of one-time handset enrollment material to the existing HTTPS
  * provisioning service (the Grandstream MAC-address provisioning record).
  * The plaintext enrollment token flows only through this call; AidaAdmin
- * stores its hash and AidaControl consumes it at enrollment.
+ * stores its hash and OfficePulse consumes it at enrollment.
  *
  * The existing service's API is deployment configuration
  * (HANDSET_PROVISIONING_URL); the POC payload is the documented value set

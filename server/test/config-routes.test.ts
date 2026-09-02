@@ -8,40 +8,11 @@ import { loadConfig } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
 import { createRepos } from '../src/nocodb/repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
-import {
-  OfficePulseError,
-  type OfficePulseClient,
-  type ProvisionDidRequest,
-} from '../src/officepulse/client.js';
 import { createLogger } from '../src/logger.js';
+import { FakeOfficePulse } from './helpers/fake-officepulse.js';
 import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
 
 const logger = createLogger({ logLevel: 'fatal' });
-
-class FakeOfficePulse implements OfficePulseClient {
-  dids: Array<{ id: string; req: ProvisionDidRequest }> = [];
-  failNext = false;
-
-  private check() {
-    if (this.failNext) {
-      this.failNext = false;
-      throw new OfficePulseError('pbx down', 503);
-    }
-  }
-
-  async provisionExtension(): Promise<never> {
-    throw new Error('unused');
-  }
-  async updateProvisionedExtension() {}
-  async rotateProvisionedExtensionSecret(): Promise<never> {
-    throw new Error('unused');
-  }
-  async provisionRingGroup() {}
-  async provisionDid(id: string, req: ProvisionDidRequest) {
-    this.check();
-    this.dids.push({ id, req });
-  }
-}
 
 interface Ctx {
   app: ReturnType<typeof createApp>;
@@ -177,12 +148,19 @@ describe('DID routes', () => {
     expect(res.status).toBe(201);
     expect(res.body.didRoute.did_e164).toBe('+15105550100');
     expect(res.body.didRoute.fallbackPreview).toBe('Extension 100 — Front Desk');
-    expect(ctx.officePulse.dids[0]?.req).toEqual({
+    // The destination travels with the DID so OfficePulse can project the
+    // local fail-safe (its issue #9); without it the DID has no fallback.
+    const sent = ctx.officePulse.dids[0]!.body;
+    expect(sent).toMatchObject({
       didE164: '+15105550100',
       context: 'acme',
       fastAgiPath: '/bootstrap',
       enabled: true,
+      tenantId: ctx.tenantId,
+      destinationType: 'EXTENSION',
     });
+    expect(typeof sent.destinationId).toBe('string');
+    expect(sent.destinationId).not.toBe('');
   });
 
   it('rejects an invalid DID and a duplicate route', async () => {

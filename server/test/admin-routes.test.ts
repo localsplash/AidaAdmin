@@ -7,56 +7,14 @@ import type { DirectoryUser, IdClient, IdEvent, IdRedeemResult } from '../src/id
 import { createRepos } from '../src/nocodb/repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import type {
-  OfficePulseClient,
-  ProvisionExtensionRequest,
-  ProvisionRingGroupRequest,
-} from '../src/officepulse/client.js';
-import { OfficePulseError } from '../src/officepulse/client.js';
-import type {
   HandsetEnrollmentDelivery,
   HandsetProvisioningDelivery,
 } from '../src/provisioning/handset-delivery.js';
 import { createLogger } from '../src/logger.js';
+import { FakeOfficePulse } from './helpers/fake-officepulse.js';
 import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
 
 const logger = createLogger({ logLevel: 'fatal' });
-
-class FakeOfficePulse implements OfficePulseClient {
-  provisioned: ProvisionExtensionRequest[] = [];
-  ringGroups: ProvisionRingGroupRequest[] = [];
-  failNext = false;
-
-  private check() {
-    if (this.failNext) {
-      this.failNext = false;
-      throw new OfficePulseError('pbx down', 503);
-    }
-  }
-
-  async provisionExtension(req: ProvisionExtensionRequest) {
-    this.check();
-    this.provisioned.push(req);
-    return { sipUsername: `sip-${req.extensionNumber}`, sipSecret: 'one-time-sip-secret' };
-  }
-
-  async updateProvisionedExtension() {
-    this.check();
-  }
-
-  async rotateProvisionedExtensionSecret() {
-    this.check();
-    return { sipSecret: 'rotated-sip-secret' };
-  }
-
-  async provisionRingGroup(_id: string, req: ProvisionRingGroupRequest) {
-    this.check();
-    this.ringGroups.push(req);
-  }
-
-  async provisionDid() {
-    this.check();
-  }
-}
 
 class FakeHandsetDelivery implements HandsetProvisioningDelivery {
   deliveries: HandsetEnrollmentDelivery[] = [];
@@ -490,8 +448,8 @@ describe('ring groups', () => {
       enabled: true,
     });
     expect(res.status).toBe(201);
-    expect(ctx.officePulse.ringGroups[0]?.memberExtensions).toEqual(['100', '101']);
-    expect(ctx.officePulse.ringGroups[0]?.ringTimeoutSeconds).toBe(20);
+    expect(ctx.officePulse.ringGroups[0]!.body.memberExtensions).toEqual(['100', '101']);
+    expect(ctx.officePulse.ringGroups[0]!.body.ringTimeoutSeconds).toBe(20);
 
     const list = await request(ctx.app)
       .get(`/admin/tenants/${tenant.id}/ring-groups`)

@@ -1,68 +1,90 @@
 import { describe, expect, it } from 'vitest';
-import { emptyCallView, reduceEvents, type CallEvent } from '../src/runtime/callState';
+import { emptyCallView, reduceEvent, reduceEvents, type CallEvent } from '../src/runtime/callState';
 
-const seg = (sequenceNumber: number, text: string, speaker = 'caller'): CallEvent => ({
-  sequenceNumber,
-  eventType: 'transcript.segment',
-  payload: { speaker, text },
-});
+const ev = (
+  sequenceNumber: number,
+  eventType: string,
+  payload: Record<string, unknown> | null = null,
+): CallEvent => ({ sequenceNumber, eventType, payload, createdAt: `t${sequenceNumber}` });
 
-describe('call event reducer', () => {
-  it('applies duplicate and reordered events exactly once, in order', () => {
-    const events = [seg(2, 'second'), seg(1, 'first'), seg(2, 'second'), seg(3, 'third')];
-    const view = reduceEvents(emptyCallView('c1'), events);
-    expect(view.transcript.map((l) => l.text)).toEqual(['first', 'second', 'third']);
-    expect(view.transcriptGap).toBe(false);
+describe('call state reducer (OfficePulse vocabulary)', () => {
+  it('follows a screened call through takeover to hangup', () => {
+    let view = emptyCallView('c1');
+    view = reduceEvent(view, ev(1, 'bootstrapped', { profileId: 'p1', profileRevision: 2 }));
+    expect(view.phase).toBe('screening');
+    expect(view.aidaPresent).toBe(true);
+    expect(view.timeline[0]!.detail).toBe('profile p1 rev 2');
 
-    // A full replay after reconnect changes nothing.
-    const replayed = reduceEvents(view, events);
-    expect(replayed.transcript).toHaveLength(3);
-  });
-
-  it('marks a sequence gap as unrecoverable', () => {
-    const view = reduceEvents(emptyCallView('c1'), [seg(1, 'first'), seg(4, 'later')]);
-    expect(view.transcriptGap).toBe(true);
-    expect(view.transcript.map((l) => l.text)).toEqual(['first', 'later']);
-  });
-
-  it('tracks call state, version, speech state, and suggestions', () => {
-    const view = reduceEvents(emptyCallView('c1'), [
-      {
-        sequenceNumber: 1,
-        eventType: 'call.state',
-        payload: { state: 'SCREENING', version: 3, callerNumber: '+15105550100' },
-      },
-      { sequenceNumber: 2, eventType: 'speech.state', payload: { speaking: 'aida' } },
-      { sequenceNumber: 3, eventType: 'suggestion', payload: { text: 'Offer a callback' } },
-      { sequenceNumber: 4, eventType: 'suggestion', payload: { text: 'Offer a callback' } },
+    view = reduceEvents(view, [
+      ev(2, 'aida-connected'),
+      ev(3, 'takeover-requested'),
+      ev(4, 'ringing'),
     ]);
-    expect(view.state).toBe('SCREENING');
-    expect(view.version).toBe(3);
-    expect(view.callerNumber).toBe('+15105550100');
-    expect(view.speechState).toBe('aida');
-    expect(view.suggestions).toEqual(['Offer a callback']);
+    expect(view.phase).toBe('takeover-ringing');
+
+    view = reduceEvents(view, [ev(5, 'answered'), ev(6, 'bridged'), ev(7, 'aida-drained')]);
+    expect(view.phase).toBe('human-connected');
+    expect(view.humanPresent).toBe(true);
+    expect(view.aidaPresent).toBe(false);
+
+    view = reduceEvent(view, ev(8, 'hangup'));
+    expect(view.phase).toBe('ended');
+    expect(view.humanPresent).toBe(false);
   });
 
-  it('keys command progress on the idempotency key so replays never duplicate commands', () => {
-    const progress = (sequenceNumber: number, status: string): CallEvent => ({
-      sequenceNumber,
-      eventType: 'command.progress',
-      payload: { idempotencyKey: 'k1', commandType: 'TAKEOVER', status },
-    });
+  it('records why a takeover failed and leaves the caller with Aida', () => {
     const view = reduceEvents(emptyCallView('c1'), [
-      progress(1, 'PENDING'),
-      progress(2, 'RINGING'),
-      progress(2, 'RINGING'),
-      progress(3, 'ANSWERED'),
+      ev(1, 'bootstrapped'),
+      ev(2, 'ringing'),
+      ev(3, 'takeover-failed', { reason: 'no-answer' }),
     ]);
-    expect(view.commands).toHaveLength(1);
-    expect(view.commands[0]?.status).toBe('ANSWERED');
+    expect(view.phase).toBe('screening');
+    expect(view.aidaPresent).toBe(true);
+    expect(view.failureReason).toBe('no-answer');
   });
 
-  it('surfaces failed transfers with Aida resuming', () => {
+  it('shows a fallback with its reason', () => {
     const view = reduceEvents(emptyCallView('c1'), [
-      { sequenceNumber: 1, eventType: 'transfer.failed', payload: { reason: 'no answer' } },
+      ev(1, 'fallback', { reason: 'livekit-unavailable' }),
     ]);
-    expect(view.transferFailedReason).toBe('no answer');
+    expect(view.phase).toBe('fallback');
+    expect(view.failureReason).toBe('livekit-unavailable');
+    expect(view.aidaPresent).toBe(false);
+  });
+
+  it('is idempotent and order-independent across replays', () => {
+    const events = [ev(1, 'bootstrapped'), ev(2, 'ringing'), ev(3, 'answered'), ev(4, 'hangup')];
+    const forward = reduceEvents(emptyCallView('c1'), events);
+    const shuffled = reduceEvents(emptyCallView('c1'), [
+      events[3]!,
+      events[1]!,
+      events[0]!,
+      events[2]!,
+    ]);
+    const replayed = reduceEvents(forward, events);
+    for (const view of [shuffled, replayed]) {
+      expect(view.phase).toBe('ended');
+      expect(view.timeline.map((t) => t.sequenceNumber)).toEqual([1, 2, 3, 4]);
+      expect(view.timeline).toHaveLength(4);
+    }
+  });
+
+  it('surfaces a gap in the durable record', () => {
+    const view = reduceEvents(emptyCallView('c1'), [ev(1, 'bootstrapped'), ev(3, 'ringing')]);
+    expect(view.sequenceGap).toBe(true);
+    const filled = reduceEvent(view, ev(2, 'aida-connected'));
+    expect(filled.sequenceGap).toBe(false);
+    expect(filled.phase).toBe('takeover-ringing');
+  });
+
+  it('ignores livekit.* and unknown events beyond the cursor', () => {
+    const view = reduceEvents(emptyCallView('c1'), [
+      ev(1, 'bootstrapped'),
+      ev(2, 'livekit.participant_joined'),
+      ev(3, 'something-new'),
+    ]);
+    expect(view.phase).toBe('screening');
+    expect(view.highestSequence).toBe(3);
+    expect(reduceEvent(view, ev(4, 'livekit.room_finished')).phase).toBe('ended');
   });
 });

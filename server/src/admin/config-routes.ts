@@ -15,6 +15,7 @@ import {
 } from '../nocodb/repos.js';
 import { ValidationError } from '../nocodb/validation.js';
 import { OfficePulseError } from '../officepulse/client.js';
+import { didPayload } from '../officepulse/payloads.js';
 import { HandsetDeliveryError } from '../provisioning/handset-delivery.js';
 import { requireSession, requireTenantAdmin } from './authz.js';
 
@@ -297,14 +298,12 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
       await audit(req, 'did_route.update', 'did_route', route.id as string, input.tenantId);
     }
     if (deps.officePulse) {
-      // Inbound order is DID -> disclosure -> screening -> destination; the
-      // realtime dialplan rows send the DID to the FastAGI bootstrap.
-      await deps.officePulse.provisionDid(route.id as string, {
-        didE164: route.did_e164 as string,
-        context: tenant.asterisk_context as string,
-        fastAgiPath: '/bootstrap',
-        enabled: Boolean(route.enabled),
-      });
+      // The destination travels with the DID so OfficePulse can project a
+      // local fail-safe for it (see officepulse/payloads.ts).
+      await deps.officePulse.provisionDid(
+        route.id as string,
+        didPayload(input.tenantId, route, tenant.asterisk_context as string),
+      );
     }
     res.status(routeId === null ? 201 : 200).json({
       didRoute: { ...route, fallbackPreview: await destinationPreview(input.tenantId, route) },

@@ -10,7 +10,8 @@ const fullProductionEnv = (): NodeJS.ProcessEnv => {
   for (const name of REQUIRED_CIDR_VARS) {
     env[name] = '10.0.0.0/8, 192.0.2.10/32';
   }
-  env.AIDACONTROL_TRUSTED_SERVER_CIDRS = '10.0.0.0/8';
+  env.OFFICEPULSE_RUNTIME_DATABASE_URL =
+    'mysql://aidaadmin_ro:pw@db.example.invalid:3306/aida_officepulse';
   return env;
 };
 
@@ -46,8 +47,8 @@ describe('loadConfig', () => {
 
   it('treats blank service values as missing', () => {
     const env = fullProductionEnv();
-    env.AIDACONTROL_BASE_URL = '   ';
-    expect(() => loadConfig(env)).toThrowError(/AIDACONTROL_BASE_URL/);
+    env.OFFICEPULSE_RUNTIME_DATABASE_URL = '   ';
+    expect(() => loadConfig(env)).toThrowError(/OFFICEPULSE_RUNTIME_DATABASE_URL/);
   });
 
   it('rejects the e2e fake session in production', () => {
