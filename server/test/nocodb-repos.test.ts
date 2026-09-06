@@ -1,3 +1,4 @@
+import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { NocoRecord } from '../src/nocodb/api.js';
 import {
@@ -8,7 +9,7 @@ import {
   NotFoundError,
   UniqueViolationError,
   type AidaConfigRepos,
-} from '../src/nocodb/repos.js';
+} from './helpers/legacy-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import { ValidationError } from '../src/nocodb/validation.js';
 import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
@@ -21,6 +22,7 @@ let tenantB: NocoRecord;
 beforeEach(async () => {
   api = new FakeNocoDbApi();
   await upgradeSchema(api);
+  await seedLegacyDirectory(api);
   repos = createRepos(api);
   tenantA = await repos.tenants.create({
     name: 'Tenant A',

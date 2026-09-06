@@ -5,7 +5,7 @@ export const STATE_TTL_MS = 10 * 60 * 1000;
 /**
  * Single-use login state values (CSRF protection for the /authorize
  * round-trip). A state is valid for one callback within the TTL; replaying a
- * consumed or expired state fails. Backed by PostgreSQL (`auth_state`) when
+ * consumed or expired state fails. Backed by MySQL (`admin_tbl_AuthState`) when
  * configured, memory otherwise.
  */
 export interface AuthStateRepository {

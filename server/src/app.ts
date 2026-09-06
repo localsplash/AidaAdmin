@@ -12,6 +12,7 @@ import { tenantSelectionRoutes } from './auth/tenant-selection.js';
 import { runtimeRoutes } from './runtime/routes.js';
 import type { AppConfig } from './config.js';
 import { createDeps, type AppDeps } from './deps.js';
+import { identityActor } from './id/context.js';
 import { idEventRoutes } from './id/events.js';
 import type { Logger } from './logger.js';
 import { correlationMiddleware } from './middleware/correlation.js';
@@ -52,9 +53,9 @@ export function createApp(
     next();
   });
 
-  app.use(sessionMiddleware(deps.sessionStore));
-
   app.use(healthRoutes(config, deps));
+  app.use(sessionMiddleware(deps.sessionStore));
+  app.use((req, _res, next) => identityActor.run({ token: req.sessionSid }, next));
 
   // Trusted-network surface (id webhooks), guarded by CIDR policy — not by
   // the browser CSRF token.

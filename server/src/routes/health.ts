@@ -21,10 +21,12 @@ export function healthRoutes(config: AppConfig, deps: AppDeps): Router {
         ? 'ok'
         : 'unreachable'
       : 'not_configured';
-    const ready = configReady && databaseReady;
+    const platformConfigReady = (await deps.configReady?.()) ?? true;
+    const ready = configReady && databaseReady && platformConfigReady;
     res.status(ready ? 200 : 503).json({
       status: ready ? 'ready' : 'not_ready',
       database: databaseReady ? 'ok' : 'unreachable',
+      platformConfig: platformConfigReady ? 'ok' : 'unavailable',
       runtimeDatabase,
       missingConfiguration: config.missingServiceConfig,
     });

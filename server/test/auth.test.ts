@@ -1,3 +1,4 @@
+import { IdentitySessionRepository } from '../src/auth/session-store.js';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
@@ -16,10 +17,21 @@ const AUTH_ENV: NodeJS.ProcessEnv = {
 
 class FakeIdClient implements IdClient {
   redeemCalls: Array<{ code: string; redirectUri: string }> = [];
+  revoked = false;
+  async introspectSession() {
+    return this.revoked
+      ? { active: false as const }
+      : { active: true as const, user: this.result.user, tenants: [], selectedTenantId: null };
+  }
+  async revokeSession() {
+    this.revoked = true;
+  }
+  async selectTenant() {}
   result: IdRedeemResult = {
     user: { iUserId: 42, email: 'person@example.invalid', displayName: 'Pat', superAdmin: true },
     identity: { provider: 'google', subject: 'sub-1' },
     identities: [],
+    appSession: { token: 'central-session-token' },
   };
 
   async redeemCode(code: string, redirectUri: string): Promise<IdRedeemResult> {
@@ -48,7 +60,11 @@ class FakeIdClient implements IdClient {
 
 function authApp(idClient: IdClient = new FakeIdClient()) {
   const config = loadConfig(AUTH_ENV);
-  const deps: AppDeps = { ...createDeps(config), idClient };
+  const deps: AppDeps = {
+    ...createDeps(config),
+    idClient,
+    sessionStore: new IdentitySessionRepository(idClient),
+  };
   return { app: createApp(config, createLogger(config), deps), deps };
 }
 
@@ -152,6 +168,7 @@ describe('login callback', () => {
       },
       identity: { provider: 'google', subject: 'sub-7' },
       identities: [],
+      appSession: { token: 'central-session-token' },
     };
     const { app } = authApp(idClient);
     const { state, cookies } = await startLogin(app);
@@ -165,7 +182,7 @@ describe('login callback', () => {
 });
 
 describe('logout', () => {
-  it('revokes the local session', async () => {
+  it('revokes the central application session', async () => {
     const { app } = authApp();
     const { state, cookies } = await startLogin(app);
     const cb = await request(app)

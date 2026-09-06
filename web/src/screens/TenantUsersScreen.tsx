@@ -13,6 +13,7 @@ export function TenantUsersScreen() {
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState('USER');
   const [inviting, setInviting] = useState(false);
+  const [canManageDirectory, setCanManageDirectory] = useState(false);
   const [canEditNames, setCanEditNames] = useState(false);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<{ iUserId: number; value: string } | null>(null);
@@ -23,6 +24,7 @@ export function TenantUsersScreen() {
       .then((res) => {
         setUsers(res.users);
         setCanEditNames(res.canEditDisplayName);
+        setCanManageDirectory(res.canManageDirectory ?? false);
         setDirectoryError(res.directoryError);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'));
@@ -200,61 +202,70 @@ export function TenantUsersScreen() {
         </table>
       )}
 
-      <h2 id="add-user-heading">Add a user by email</h2>
-      <p>
-        Any email address can be added — it does not need to already exist. The person gains access
-        the first time they sign in with that address through identity.
-      </p>
-      <form aria-labelledby="add-user-heading" onSubmit={(e) => void invite(e)}>
-        <label>
-          Email
-          <input
-            required
-            type="email"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-          />
-        </label>
-        <label>
-          Display name (optional)
-          <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
-        </label>
-        <label>
-          Role
-          <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
-            <option value="TENANT_ADMIN">TENANT_ADMIN</option>
-            <option value="USER">USER</option>
-          </select>
-        </label>
-        <button type="submit" disabled={inviting}>
-          {inviting ? 'Adding…' : 'Add user'}
-        </button>
-      </form>
+      {canManageDirectory ? (
+        <>
+          <h2 id="add-user-heading">Add a user by email</h2>
+          <p>
+            Any email address can be added — it does not need to already exist. The person gains
+            access the first time they sign in with that address through identity.
+          </p>
+          <form aria-labelledby="add-user-heading" onSubmit={(e) => void invite(e)}>
+            <label>
+              Email
+              <input
+                required
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+              />
+            </label>
+            <label>
+              Display name (optional)
+              <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
+            </label>
+            <label>
+              Role
+              <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+                <option value="TENANT_ADMIN">TENANT_ADMIN</option>
+                <option value="USER">USER</option>
+              </select>
+            </label>
+            <button type="submit" disabled={inviting}>
+              {inviting ? 'Adding…' : 'Add user'}
+            </button>
+          </form>
 
-      <h2 id="find-user-heading">Find an existing platform user</h2>
-      <form aria-labelledby="find-user-heading" onSubmit={(e) => void search(e)}>
-        <label>
-          Search by email or name
-          <input value={query} onChange={(e) => setQuery(e.target.value)} />
-        </label>
-        <button type="submit">Search</button>
-      </form>
-      {results.length > 0 ? (
-        <ul>
-          {results.map((user) => (
-            <li key={user.iUserId}>
-              #{user.iUserId} {user.displayName ?? user.email ?? '(no name)'}
-              {user.claimed ? '' : ' (not yet signed in)'}{' '}
-              <button type="button" onClick={() => void assign(user.iUserId, 'TENANT_ADMIN')}>
-                Make tenant admin
-              </button>{' '}
-              <button type="button" onClick={() => void assign(user.iUserId, 'USER')}>
-                Make user
-              </button>
-            </li>
-          ))}
-        </ul>
-      ) : null}
+          <h2 id="find-user-heading">Find an existing platform user</h2>
+          <form aria-labelledby="find-user-heading" onSubmit={(e) => void search(e)}>
+            <label>
+              Search by email or name
+              <input value={query} onChange={(e) => setQuery(e.target.value)} />
+            </label>
+            <button type="submit">Search</button>
+          </form>
+          {results.length > 0 ? (
+            <ul>
+              {results.map((user) => (
+                <li key={user.iUserId}>
+                  #{user.iUserId} {user.displayName ?? user.email ?? '(no name)'}
+                  {user.claimed ? '' : ' (not yet signed in)'}{' '}
+                  <button type="button" onClick={() => void assign(user.iUserId, 'TENANT_ADMIN')}>
+                    Make tenant admin
+                  </button>{' '}
+                  <button type="button" onClick={() => void assign(user.iUserId, 'USER')}>
+                    Make user
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : (
+        <p>
+          A platform administrator can add people to this business. You can manage the existing
+          members above.
+        </p>
+      )}
     </section>
   );
 }

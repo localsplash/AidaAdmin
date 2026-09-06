@@ -35,7 +35,7 @@ const envSchema = z.object({
  * Values are never logged — only names.
  *
  * There is no AidaControl: for the POC OfficePulseAidaIntegration is the
- * call orchestrator (its issue #9). AidaAdmin reads its `aida_officepulse`
+ * call orchestrator (its issue #9). AidaAdmin reads its `aida_db`
  * runtime database through a read-only account and sends commands to the
  * same private HTTP API that handles provisioning.
  */
@@ -44,6 +44,7 @@ export const SERVICE_ENV_VARS = [
   'SESSION_SECRET',
   'AIDA_ADMIN_DATABASE_URL',
   'ID_BASE_URL',
+  'ID_CLIENT_SECRET',
   'ID_TRUSTED_APP_CIDRS',
   'ID_EVENT_SOURCE_CIDRS',
   'ID_TRUSTED_PROXY_CIDRS',
@@ -101,7 +102,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   for (const name of SERVICE_ENV_VARS) {
     const value = env[name];
     if (value === undefined || value.trim() === '') {
-      missingServiceConfig.push(name);
+      if (name !== 'ID_CLIENT_SECRET' && name !== 'HANDSET_PROVISIONING_URL')
+        missingServiceConfig.push(name);
     } else {
       serviceConfig[name] = value;
     }

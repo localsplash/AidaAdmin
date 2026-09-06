@@ -25,7 +25,6 @@ export function ExtensionsScreen() {
   const [secret, setSecret] = useState<Secret | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [editing, setEditing] = useState<Extension | null>(null);
-  const [macByExtension, setMacByExtension] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -126,14 +125,12 @@ export function ExtensionsScreen() {
   };
 
   const enroll = async (extension: Extension) => {
-    const mac = macByExtension[extension.id] ?? '';
     setError(null);
     try {
-      const res = await adminApi.issueEnrollment(extension.id, tenantId, mac);
+      const res = await adminApi.issueEnrollment(extension.id, tenantId);
       setSecret({
         title: `Handset enrollment for ${extension.extension_number}`,
         values: [
-          { label: 'Device ID', value: res.deviceId },
           { label: 'Enrollment token', value: res.enrollmentToken },
           { label: 'Expires', value: res.expiresAt },
         ],
@@ -192,16 +189,6 @@ export function ExtensionsScreen() {
                   <button type="button" onClick={() => void rotate(extension)}>
                     Rotate SIP secret
                   </button>{' '}
-                  <label>
-                    MAC
-                    <input
-                      value={macByExtension[extension.id] ?? ''}
-                      onChange={(e) =>
-                        setMacByExtension({ ...macByExtension, [extension.id]: e.target.value })
-                      }
-                      placeholder="AA:BB:CC:DD:EE:FF"
-                    />
-                  </label>{' '}
                   <button type="button" onClick={() => void enroll(extension)}>
                     Issue handset enrollment
                   </button>

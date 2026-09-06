@@ -1,3 +1,4 @@
+import { identityActor } from './context.js';
 /**
  * Server-to-server client for the `id` identity service (normative
  * specification §2.1). Trust is TLS plus source-IPv4 allowlisting enforced by
@@ -21,6 +22,7 @@ export interface IdRedeemResult {
   };
   identity: IdIdentity;
   identities: IdIdentity[];
+  appSession?: { token: string };
 }
 
 export interface IdEvent {
@@ -30,7 +32,35 @@ export interface IdEvent {
   data: Record<string, unknown>;
 }
 
+export interface PlatformTenant {
+  iTenantId: number;
+  name: string;
+  slug: string;
+  role: 'TENANT_ADMIN' | 'USER' | 'SUPER_ADMIN';
+  bEnabled: boolean;
+}
+export interface PlatformMembership {
+  iUserId: number;
+  email: string | null;
+  displayName: string | null;
+  role: 'TENANT_ADMIN' | 'USER';
+  bEnabled: boolean;
+}
+export type SessionIntrospection =
+  | { active: false }
+  | {
+      active: true;
+      user: IdRedeemResult['user'];
+      tenants: PlatformTenant[];
+      selectedTenantId?: number | null;
+    };
+
 export interface IdClient {
+  introspectSession?(token: string): Promise<SessionIntrospection>;
+  revokeSession?(token: string): Promise<void>;
+  selectTenant?(token: string, iTenantId: number | null): Promise<void>;
+  updateDirectoryUser?(iUserId: number, displayName: string | null): Promise<DirectoryUser>;
+
   redeemCode(code: string, redirectUri: string): Promise<IdRedeemResult>;
   listEvents(since: number): Promise<IdEvent[]>;
   registerWebhook(name: string, webhookUrl: string): Promise<void>;
@@ -65,15 +95,67 @@ export class IdClientError extends Error {
 }
 
 export class HttpIdClient implements IdClient {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly clientSecret?: string,
+  ) {}
 
   private async request(path: string, init?: RequestInit): Promise<unknown> {
-    const res = await fetch(new URL(path, this.baseUrl), init);
+    const headers = new Headers(init?.headers);
+    if (this.clientSecret) headers.set('X-Id-Client-Secret', this.clientSecret);
+    if (path.startsWith('/api/directory/')) {
+      const token = identityActor.getStore()?.token;
+      if (!token)
+        throw new IdClientError('Identity directory requires an authenticated actor', 401);
+      headers.set('Authorization', `Bearer ${token}`);
+    }
+    const res = await fetch(new URL(path, this.baseUrl), {
+      ...init,
+      headers,
+      signal: AbortSignal.timeout(10_000),
+      redirect: 'error',
+    });
     if (!res.ok) {
       // Do not include the response body: it is not ours to log.
-      throw new IdClientError(`id request ${path} failed`, res.status);
+      throw new IdClientError(`id request ${path.split('?')[0]} failed`, res.status);
     }
-    return res.json();
+    return res.status === 204 ? null : res.json();
+  }
+
+  async introspectSession(token: string): Promise<SessionIntrospection> {
+    return (await this.request('/api/sessions/introspect', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })) as SessionIntrospection;
+  }
+
+  async revokeSession(token: string): Promise<void> {
+    await this.request('/api/sessions/revoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  async selectTenant(token: string, iTenantId: number | null): Promise<void> {
+    await this.request('/api/sessions/select-tenant', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token, iTenantId }),
+    });
+  }
+
+  async directoryRequest<T>(path: string, method = 'GET', data?: unknown): Promise<T> {
+    return (await this.request(`/api/directory/${path}`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      ...(data === undefined ? {} : { body: JSON.stringify(data) }),
+    })) as T;
+  }
+
+  async updateDirectoryUser(iUserId: number, displayName: string | null): Promise<DirectoryUser> {
+    return this.directoryRequest(`users/${iUserId}`, 'PATCH', { displayName });
   }
 
   async redeemCode(code: string, redirectUri: string): Promise<IdRedeemResult> {
@@ -113,12 +195,21 @@ export class HttpIdClient implements IdClient {
   }
 
   async searchDirectoryUsers(query: string, limit = 25): Promise<DirectoryUser[]> {
-    const params = new URLSearchParams({ query, limit: String(limit) });
-    const body = (await this.request(`/api/directory/users?${params}`)) as {
-      items?: DirectoryUser[];
-      list?: DirectoryUser[];
-    };
-    return body.items ?? body.list ?? [];
+    const results: DirectoryUser[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      const params = new URLSearchParams({ query, limit: String(limit) });
+      if (cursor) params.set('cursor', cursor);
+      const body = (await this.request(`/api/directory/users?${params}`)) as {
+        items?: DirectoryUser[];
+        nextCursor?: string | null;
+      };
+      results.push(...(body.items ?? []));
+      if (!body.nextCursor) return results;
+      if (body.nextCursor === cursor)
+        throw new IdClientError('Identity directory pagination did not advance');
+      cursor = body.nextCursor;
+    }
   }
 
   async registerWebhook(name: string, webhookUrl: string): Promise<void> {

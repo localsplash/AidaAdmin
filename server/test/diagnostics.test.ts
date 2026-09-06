@@ -118,7 +118,7 @@ describe('preflight report', () => {
     const report = buildDiagnostics(loadConfig({ ...base, ID_PARENT_DOMAIN: 'localsplash.com' }));
     expect(report.loginReady).toBe(false);
     const finding = report.findings.find((f) => f.summary.includes('reject this redirect_uri'));
-    expect(finding?.fix).toMatch(/PARENT_DOMAIN in id's NocoDB oAuthConfig/);
+    expect(finding?.fix).toMatch(/PARENT_DOMAIN in Identity's PlatformConfig/);
   });
 
   it('flags missing login configuration without printing values', () => {

@@ -21,7 +21,7 @@ export class FakeNocoDbApi implements NocoDbApi {
   private readonly tables = new Map<string, FakeTable>();
   private nextTableId = 1;
   /** Bases present in the instance; tests seed these to drive resolution. */
-  bases: NocoBaseInfo[] = [{ id: 'base-1', title: 'AidaAdmin' }];
+  bases: NocoBaseInfo[] = [{ id: 'base-1', title: 'PlatformConfig' }];
   createdBases: string[] = [];
   /** When set, createBase rejects — an operator token without base rights. */
   refuseBaseCreation = false;

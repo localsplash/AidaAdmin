@@ -170,7 +170,7 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
       findings.push({
         level: 'error',
         summary: `id will reject this redirect_uri: ${verdict.reason}`,
-        fix: "Set PARENT_DOMAIN in id's NocoDB oAuthConfig table (base id) to the apex domain these apps live under, with no surrounding whitespace",
+        fix: "Set PARENT_DOMAIN in Identity's PlatformConfig settings to the apex domain these apps live under, with no surrounding whitespace",
       });
     }
   } else if (callbackUri) {
@@ -203,8 +203,8 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
     findings.push({
       level: 'warning',
       summary:
-        'AIDA_ADMIN_DATABASE_URL is not set: sessions, login states, and the identity-event cursor are in memory and are lost on restart',
-      fix: 'Point AIDA_ADMIN_DATABASE_URL at the aida_admin PostgreSQL database',
+        'AIDA_ADMIN_DATABASE_URL is not set: OAuth state and the identity-event cursor are in memory; application sessions remain in Identity',
+      fix: 'Point AIDA_ADMIN_DATABASE_URL at the dedicated aida_admin_db MySQL database',
     });
   }
   if (!config.serviceConfig.OFFICEPULSE_RUNTIME_DATABASE_URL) {
@@ -212,7 +212,7 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
       level: 'warning',
       summary:
         'OFFICEPULSE_RUNTIME_DATABASE_URL is not set, so the runtime views (calls, dependencies, provisioning history) answer 503',
-      fix: "Point OFFICEPULSE_RUNTIME_DATABASE_URL at aida_officepulse as the read-only aidaadmin_ro account from OfficePulse's deploy/sql/grants.sql",
+      fix: "Point OFFICEPULSE_RUNTIME_DATABASE_URL at aida_db as the read-only aidaadmin_ro account from OfficePulse's deploy/sql/grants.sql",
     });
   }
   if (!config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL) {

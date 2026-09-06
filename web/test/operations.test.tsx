@@ -187,7 +187,7 @@ describe('OperationsScreen', () => {
     expect(body.commandType).toBe('TAKEOVER');
     expect(typeof body.idempotencyKey).toBe('string');
     expect(body).not.toHaveProperty('destinationId');
-    expect(body).not.toHaveProperty('expectedCallVersion');
+    expect(body.expectedCallVersion).toBe(1);
 
     // Disabled after submission — a second click cannot happen.
     await waitFor(() =>

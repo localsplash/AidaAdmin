@@ -1,13 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { NocoDbApi, NocoRecord, NocoWhere } from './api.js';
-import { AIDA_SCHEMA, UNIQUE_RULES } from './schema.js';
-import type { TenantUserDirectory } from '../auth/tenant-directory.js';
+import { LOGICAL_SCHEMA, FIELD_NAMES, TABLE_NAMES, UNIQUE_RULES } from './schema.js';
 import {
   normalizeE164,
   normalizeMac,
   requireNonEmpty,
   validateContext,
-  validateSlug,
   ValidationError,
 } from './validation.js';
 
@@ -20,13 +18,13 @@ export class UniqueViolationError extends Error {
 }
 
 /**
- * Table-name-addressed access to the AidaAdmin base with the
+ * Table-name-addressed access to the PlatformConfig base with the
  * cross-cutting rules every repository shares: logical UUID ids, ISO
  * timestamps, optimistic `revision` checks, uniqueness enforcement, and —
  * where a tenant id is given — tenant scope in every query. NocoDB cannot
  * express conditional updates, so the revision check is read-compare-write;
- * the POC accepts that window and the revision number still detects lost
- * updates across concurrent editors.
+ * this POC uses a single administrative writer. Concurrent editors require
+ * a backing store with compare-and-swap before that guarantee is possible.
  */
 export class NocoStore {
   private tableIds = new Map<string, string>();
@@ -34,6 +32,7 @@ export class NocoStore {
   constructor(readonly api: NocoDbApi) {}
 
   private async tableId(tableName: string): Promise<string> {
+    tableName = TABLE_NAMES[tableName] ?? tableName;
     const cached = this.tableIds.get(tableName);
     if (cached) return cached;
     const tables = await this.api.listTables();
@@ -44,7 +43,24 @@ export class NocoStore {
   }
 
   async list(tableName: string, where: NocoWhere[] = []): Promise<NocoRecord[]> {
-    return this.api.listRecords(await this.tableId(tableName), where);
+    const physical = TABLE_NAMES[tableName] !== undefined;
+    const rows = await this.api.listRecords(
+      await this.tableId(tableName),
+      where.map((filter) => ({
+        ...filter,
+        field: physical ? (FIELD_NAMES[filter.field] ?? filter.field) : filter.field,
+      })),
+    );
+    if (!physical) return rows;
+    return rows.map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([field, value]) => {
+          const logical =
+            Object.entries(FIELD_NAMES).find(([, actual]) => actual === field)?.[0] ?? field;
+          return [logical, logical === 'tenant_id' && value != null ? String(value) : value];
+        }),
+      ),
+    );
   }
 
   async getById(tableName: string, id: string, tenantId?: string): Promise<NocoRecord> {
@@ -77,17 +93,41 @@ export class NocoStore {
     }
   }
 
+  private physicalValues(
+    tableName: string,
+    values: Record<string, unknown>,
+  ): Record<string, unknown> {
+    if (!TABLE_NAMES[tableName]) return values;
+    if (
+      values.tenant_id != null &&
+      (!Number.isSafeInteger(Number(values.tenant_id)) || Number(values.tenant_id) < 1)
+    ) {
+      throw new ValidationError(
+        'tenantId',
+        'A positive platform tenant ID is required; map legacy IDs explicitly',
+      );
+    }
+    return Object.fromEntries(
+      Object.entries(values).map(([field, value]) => [
+        FIELD_NAMES[field] ?? field,
+        field === 'tenant_id' && value != null ? Number(value) : value,
+      ]),
+    );
+  }
+
   async create(tableName: string, values: Record<string, unknown>): Promise<NocoRecord> {
     await this.assertUnique(tableName, values);
     const now = new Date().toISOString();
     // Immutable tables (audit_log) have no updated_at/revision columns.
     const columns = new Set(
-      AIDA_SCHEMA.find((t) => t.table_name === tableName)?.columns.map((c) => c.column_name) ?? [],
+      LOGICAL_SCHEMA.find((t) => t.table_name === tableName)?.columns.map((c) => c.column_name) ??
+        [],
     );
     const record: Record<string, unknown> = { id: randomUUID(), created_at: now, ...values };
     if (columns.has('updated_at')) record.updated_at = now;
     if (columns.has('revision')) record.revision = 1;
-    await this.api.createRecord(await this.tableId(tableName), record);
+    const valuesToStore = this.physicalValues(tableName, record);
+    await this.api.createRecord(await this.tableId(tableName), valuesToStore);
     return record as NocoRecord;
   }
 
@@ -111,7 +151,11 @@ export class NocoStore {
       updated_at: new Date().toISOString(),
       revision: expectedRevision + 1,
     };
-    await this.api.updateRecord(await this.tableId(tableName), existing.Id as number, values);
+    await this.api.updateRecord(
+      await this.tableId(tableName),
+      existing.Id as number,
+      this.physicalValues(tableName, values),
+    );
     return { ...merged, ...values } as NocoRecord;
   }
 }
@@ -126,25 +170,6 @@ export interface AuditEntry {
   correlationId?: string;
 }
 
-/** Append-only: there is deliberately no update or delete path. */
-export class AuditLog {
-  constructor(private readonly store: NocoStore) {}
-
-  async append(entry: AuditEntry): Promise<void> {
-    await this.store.create('audit_log', {
-      tenant_id: entry.tenantId,
-      actor_identity_user_id: entry.actorIdentityUserId,
-      action: entry.action,
-      entity_type: entry.entityType,
-      entity_id: entry.entityId,
-      details: JSON.stringify(entry.details ?? {}),
-      correlation_id: entry.correlationId ?? null,
-    });
-  }
-}
-
-// ─── Entity repositories ────────────────────────────────────────────────────
-
 export interface TenantInput {
   name: string;
   slug: string;
@@ -153,100 +178,25 @@ export interface TenantInput {
   callerIdNumber?: string | null | undefined;
   enabled: boolean;
 }
-
-function tenantValues(input: TenantInput): Record<string, unknown> {
-  return {
-    name: requireNonEmpty('name', input.name),
-    slug: validateSlug('slug', input.slug),
-    asterisk_context: validateContext('asteriskContext', input.asteriskContext),
-    caller_id_name: input.callerIdName ?? null,
-    caller_id_number: input.callerIdNumber
-      ? normalizeE164('callerIdNumber', input.callerIdNumber)
-      : null,
-    enabled: input.enabled,
-  };
-}
-
-export class TenantRepository {
-  constructor(private readonly store: NocoStore) {}
-
-  list(): Promise<NocoRecord[]> {
-    return this.store.list('tenant');
-  }
-
-  get(tenantId: string): Promise<NocoRecord> {
-    return this.store.getById('tenant', tenantId);
-  }
-
-  async create(input: TenantInput): Promise<NocoRecord> {
-    return this.store.create('tenant', tenantValues(input));
-  }
-
-  async update(
-    tenantId: string,
-    expectedRevision: number,
-    input: TenantInput,
-  ): Promise<NocoRecord> {
-    return this.store.update('tenant', tenantId, expectedRevision, tenantValues(input));
-  }
-}
-
 export type TenantUserRole = 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'USER';
-
-export class TenantUserRepository {
-  constructor(private readonly store: NocoStore) {}
-
-  listForTenant(tenantId: string): Promise<NocoRecord[]> {
-    return this.store.list('tenant_user', [{ field: 'tenant_id', op: 'eq', value: tenantId }]);
-  }
-
-  listForUser(identityUserId: number): Promise<NocoRecord[]> {
-    return this.store.list('tenant_user', [
-      { field: 'identity_user_id', op: 'eq', value: identityUserId },
-    ]);
-  }
-
-  /**
-   * Upserts the (tenant, user) mapping. tenant_id is null only for the
-   * SUPER_ADMIN role record.
-   */
-  async save(
+export interface TenantRepository {
+  list(): Promise<NocoRecord[]>;
+  get(tenantId: string): Promise<NocoRecord>;
+  create(input: TenantInput): Promise<NocoRecord>;
+  update(tenantId: string, expectedRevision: number, input: TenantInput): Promise<NocoRecord>;
+}
+export interface TenantUserRepository {
+  listForTenant(tenantId: string): Promise<NocoRecord[]>;
+  listForUser(iUserId: number): Promise<NocoRecord[]>;
+  save(
     tenantId: string | null,
-    identityUserId: number,
+    iUserId: number,
     role: TenantUserRole,
     enabled: boolean,
-  ): Promise<NocoRecord> {
-    if (role === 'SUPER_ADMIN' ? tenantId !== null : tenantId === null) {
-      throw new ValidationError('role', 'tenant_id is null exactly when role is SUPER_ADMIN');
-    }
-    const where: NocoWhere[] = [{ field: 'identity_user_id', op: 'eq', value: identityUserId }];
-    if (tenantId !== null) where.push({ field: 'tenant_id', op: 'eq', value: tenantId });
-    const existing = (await this.store.list('tenant_user', where)).find((r) =>
-      tenantId === null ? !r.tenant_id : r.tenant_id === tenantId,
-    );
-    if (existing) {
-      return this.store.update('tenant_user', existing.id as string, Number(existing.revision), {
-        role,
-        enabled,
-      });
-    }
-    return this.store.create('tenant_user', {
-      tenant_id: tenantId,
-      identity_user_id: identityUserId,
-      role,
-      enabled,
-    });
-  }
+  ): Promise<NocoRecord>;
 }
-
-/** The real phase-2 login directory, backed by tenant_user. */
-export class NocoDbTenantUserDirectory implements TenantUserDirectory {
-  constructor(private readonly tenantUsers: TenantUserRepository) {}
-
-  async hasEnabledMembership(iUserId: number): Promise<boolean> {
-    const rows = await this.tenantUsers.listForUser(iUserId);
-    return rows.some((r) => Boolean(r.enabled));
-  }
+export interface AuditLog {
+  append(entry: AuditEntry): Promise<void>;
 }
 
 export interface ExtensionInput {
@@ -658,27 +608,30 @@ export class AppearanceRepository {
 
 export interface AidaConfigRepos {
   store: NocoStore;
-  tenants: TenantRepository;
-  tenantUsers: TenantUserRepository;
+  tenants: Pick<TenantRepository, 'list' | 'get' | 'create' | 'update'>;
+  tenantUsers: Pick<TenantUserRepository, 'listForTenant' | 'listForUser' | 'save'>;
   extensions: ExtensionRepository;
   ringGroups: RingGroupRepository;
   assistantProfiles: AssistantProfileRepository;
   didRoutes: DidRouteRepository;
   appearance: AppearanceRepository;
-  audit: AuditLog;
+  audit: Pick<AuditLog, 'append'>;
 }
 
-export function createRepos(api: NocoDbApi): AidaConfigRepos {
+export function createRepos(
+  api: NocoDbApi,
+  authority: Pick<AidaConfigRepos, 'tenants' | 'tenantUsers' | 'audit'>,
+): AidaConfigRepos {
   const store = new NocoStore(api);
   return {
     store,
-    tenants: new TenantRepository(store),
-    tenantUsers: new TenantUserRepository(store),
+    tenants: authority.tenants,
+    tenantUsers: authority.tenantUsers,
     extensions: new ExtensionRepository(store),
     ringGroups: new RingGroupRepository(store),
     assistantProfiles: new AssistantProfileRepository(store),
     didRoutes: new DidRouteRepository(store),
     appearance: new AppearanceRepository(store),
-    audit: new AuditLog(store),
+    audit: authority.audit,
   };
 }

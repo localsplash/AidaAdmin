@@ -1,10 +1,11 @@
+import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
 import type { DirectoryUser, IdClient, IdEvent, IdRedeemResult } from '../src/id/client.js';
-import { createRepos } from '../src/nocodb/repos.js';
+import { createRepos } from './helpers/legacy-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import type {
   HandsetEnrollmentDelivery,
@@ -71,6 +72,7 @@ beforeEach(async () => {
   const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
+  await seedLegacyDirectory(api);
   const officePulse = new FakeOfficePulse();
   const handset = new FakeHandsetDelivery();
   const deps: AppDeps = {
@@ -219,7 +221,7 @@ describe('authorization', () => {
       enabled: true,
     });
     expect(crossTenant.status).toBe(403);
-    expect(ctx.api.tableByName('extension')!.records).toHaveLength(0);
+    expect(ctx.api.tableByName('aida_tbl_Extension')!.records).toHaveLength(0);
   });
 
   it('keeps platform-wide actions to Super Admin', async () => {
@@ -329,11 +331,10 @@ describe('tenant users and directory', () => {
     expect(ensured.body.user.claimed).toBe(false);
   });
 
-  it('grants and revokes Super Admin', async () => {
+  it('refuses to grant a platform privilege through local membership', async () => {
     const res = await put('/admin/super-admins/42', { enabled: true });
-    expect(res.status).toBe(200);
-    expect(res.body.tenantUser.role).toBe('SUPER_ADMIN');
-    expect(res.body.tenantUser.tenant_id).toBeNull();
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('identity_managed_privilege');
   });
 });
 
@@ -351,7 +352,7 @@ describe('extensions and provisioning', () => {
     expect(res.body.sipSecret).toBe('one-time-sip-secret');
     expect(res.body.secretShownOnce).toBe(true);
     // The secret exists nowhere in NocoDB — not in any table's records.
-    for (const table of ['extension', 'audit_log']) {
+    for (const table of ['aida_tbl_Extension', 'audit_log']) {
       expect(JSON.stringify(ctx.api.tableByName(table)!.records)).not.toContain(
         'one-time-sip-secret',
       );
@@ -371,7 +372,7 @@ describe('extensions and provisioning', () => {
     expect(res.status).toBe(502);
     expect(res.body.error).toBe('provisioning_failed');
     // The intended record was saved; no background reconciliation exists.
-    expect(ctx.api.tableByName('extension')!.records).toHaveLength(1);
+    expect(ctx.api.tableByName('aida_tbl_Extension')!.records).toHaveLength(1);
   });
 
   it('rotates the SIP secret and bumps the device credential version on reprovision', async () => {
@@ -389,14 +390,14 @@ describe('extensions and provisioning', () => {
     });
     expect(res.status).toBe(200);
     expect(res.body.sipSecret).toBe('rotated-sip-secret');
-    const stored = ctx.api.tableByName('extension')!.records[0]!;
+    const stored = ctx.api.tableByName('aida_tbl_Extension')!.records[0]!;
     expect(stored.device_credential_version).toBe(2);
-    expect(JSON.stringify(ctx.api.tableByName('extension')!.records)).not.toContain(
+    expect(JSON.stringify(ctx.api.tableByName('aida_tbl_Extension')!.records)).not.toContain(
       'rotated-sip-secret',
     );
   });
 
-  it('issues a one-time handset enrollment: hash stored, plaintext delivered once', async () => {
+  it('delegates handset grants to the runtime without storing token state in config', async () => {
     const tenant = await createTenant();
     const created = await post('/admin/extensions', {
       tenantId: tenant.id,
@@ -414,14 +415,12 @@ describe('extensions and provisioning', () => {
     expect(token.length).toBeGreaterThan(20);
     expect(res.body.tokenShownOnce).toBe(true);
 
-    const stored = ctx.api.tableByName('extension')!.records[0]!;
-    expect(stored.provisioning_mac).toBe('AABBCCDDEE01');
+    const stored = ctx.api.tableByName('aida_tbl_Extension')!.records[0]!;
     expect(stored.enrollment_token_hash).not.toBe(token);
-    expect(JSON.stringify(ctx.api.tableByName('extension')!.records)).not.toContain(token);
+    expect(JSON.stringify(ctx.api.tableByName('aida_tbl_Extension')!.records)).not.toContain(token);
 
-    expect(ctx.handset.deliveries).toHaveLength(1);
-    expect(ctx.handset.deliveries[0]?.enrollmentToken).toBe(token);
-    expect(ctx.handset.deliveries[0]?.deviceId).toBe(res.body.deviceId);
+    expect(ctx.officePulse.enrollments).toEqual([{ iTenantId: Number(tenant.id), extensionId }]);
+    expect(ctx.handset.deliveries).toHaveLength(0);
   });
 });
 

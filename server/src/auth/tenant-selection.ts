@@ -1,3 +1,4 @@
+import { identityActor } from '../id/context.js';
 import { Router } from 'express';
 import type { AppDeps } from '../deps.js';
 import type { Logger } from '../logger.js';
@@ -16,6 +17,19 @@ export async function selectableTenants(
   iUserId: number,
   superAdmin: boolean,
 ): Promise<SelectableTenant[]> {
+  const token = identityActor.getStore()?.token;
+  if (token && deps.idClient?.introspectSession) {
+    const live = await deps.idClient.introspectSession(token);
+    if (!live.active || live.user.iUserId !== iUserId) return [];
+    return live.tenants
+      .filter((t) => t.bEnabled)
+      .map((t) => ({
+        tenantId: String(t.iTenantId),
+        name: t.name,
+        slug: t.slug,
+        role: live.user.superAdmin ? ('SUPER_ADMIN' as const) : t.role,
+      }));
+  }
   if (!deps.repos) return [];
   if (superAdmin) {
     const tenants = await deps.repos.tenants.list();

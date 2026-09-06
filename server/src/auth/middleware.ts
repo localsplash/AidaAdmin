@@ -10,8 +10,8 @@ declare module 'express-serve-static-core' {
     sessionSid: string | null;
     /**
      * Non-secret session identifier (SHA-256 of the cookie value — the same
-     * value PostgreSQL stores). Safe to forward for audit correlation; the
-     * cookie value itself never leaves this process.
+     * audit correlation value). Safe to forward for audit correlation; the
+     * cookie value is forwarded only to Identity over its trusted API.
      */
     sessionRef: string | null;
   }

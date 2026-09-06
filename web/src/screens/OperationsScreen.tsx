@@ -181,7 +181,7 @@ export function OperationsScreen() {
       [call.id]: { idempotencyKey, submitting: true, submitted: false, error: null, outcome: null },
     }));
     try {
-      const outcome = await runtimeApi.takeover(call.id, idempotencyKey);
+      const outcome = await runtimeApi.takeover(call.id, idempotencyKey, undefined, call.version);
       setAttempts((a) => ({
         ...a,
         [call.id]: {

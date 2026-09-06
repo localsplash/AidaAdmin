@@ -258,7 +258,12 @@ describe('TenantUsersScreen', () => {
       if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
         return {
           status: 200,
-          body: { users: [], canEditDisplayName: true, directoryError: null },
+          body: {
+            users: [],
+            canEditDisplayName: true,
+            canManageDirectory: true,
+            directoryError: null,
+          },
         };
       }
       if (url === '/admin/directory/users' && method === 'POST') {
@@ -308,7 +313,12 @@ describe('TenantUsersScreen', () => {
       if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
         return {
           status: 200,
-          body: { users: [], canEditDisplayName: true, directoryError: null },
+          body: {
+            users: [],
+            canEditDisplayName: true,
+            canManageDirectory: true,
+            directoryError: null,
+          },
         };
       }
       if (url.startsWith('/admin/directory/users?') && method === 'GET') {
@@ -350,7 +360,12 @@ describe('platform user display names', () => {
       if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
         return {
           status: 200,
-          body: { users: [MEMBER], canEditDisplayName: true, directoryError: null },
+          body: {
+            users: [MEMBER],
+            canEditDisplayName: true,
+            canManageDirectory: true,
+            directoryError: null,
+          },
         };
       }
       if (url === '/admin/directory/users/42' && method === 'PUT') {
@@ -383,6 +398,7 @@ describe('platform user display names', () => {
           body: {
             users: [MEMBER],
             canEditDisplayName: false,
+            canManageDirectory: true,
             directoryError: 'No NocoDB base named AidaIdentity exists.',
           },
         };
@@ -406,7 +422,12 @@ describe('extension owner', () => {
       if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
         return {
           status: 200,
-          body: { users: [MEMBER], canEditDisplayName: true, directoryError: null },
+          body: {
+            users: [MEMBER],
+            canEditDisplayName: true,
+            canManageDirectory: true,
+            directoryError: null,
+          },
         };
       }
       if (url.endsWith('/admin/extensions') && method === 'POST') {

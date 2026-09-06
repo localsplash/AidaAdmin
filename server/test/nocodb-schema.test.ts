@@ -20,38 +20,44 @@ describe('schema automation', () => {
 
   it('adds missing columns additively', async () => {
     const api = new FakeNocoDbApi();
-    const tenantDef = AIDA_SCHEMA.find((t) => t.table_name === 'tenant')!;
+    const tenantDef = AIDA_SCHEMA.find((t) => t.table_name === 'aida_tbl_TenantProfile')!;
     await api.createTable({
       ...tenantDef,
       columns: tenantDef.columns.filter((c) => c.column_name !== 'caller_id_number'),
     });
     const drift = await reportDrift(api);
-    expect(drift.missingColumns).toContainEqual({ table: 'tenant', column: 'caller_id_number' });
+    expect(drift.missingColumns).toContainEqual({
+      table: 'aida_tbl_TenantProfile',
+      column: 'caller_id_number',
+    });
 
     const result = await upgradeSchema(api);
-    expect(result.addedColumns).toContainEqual({ table: 'tenant', column: 'caller_id_number' });
+    expect(result.addedColumns).toContainEqual({
+      table: 'aida_tbl_TenantProfile',
+      column: 'caller_id_number',
+    });
     expect((await reportDrift(api)).missingColumns).toEqual([]);
   });
 
   it('reports type mismatches without retyping', async () => {
     const api = new FakeNocoDbApi();
-    const tenantDef = AIDA_SCHEMA.find((t) => t.table_name === 'tenant')!;
+    const tenantDef = AIDA_SCHEMA.find((t) => t.table_name === 'aida_tbl_TenantProfile')!;
     await api.createTable({
       ...tenantDef,
       columns: tenantDef.columns.map((c) =>
-        c.column_name === 'enabled' ? { ...c, uidt: 'SingleLineText' as const } : c,
+        c.column_name === 'iTenantId' ? { ...c, uidt: 'SingleLineText' as const } : c,
       ),
     });
     const before = await upgradeSchema(api);
     expect(before.typeMismatches).toContainEqual({
-      table: 'tenant',
-      column: 'enabled',
-      expected: 'Checkbox',
+      table: 'aida_tbl_TenantProfile',
+      column: 'iTenantId',
+      expected: 'Number',
       actual: 'SingleLineText',
     });
     // The live column keeps its (wrong) type: strictly additive, never retyped.
-    const columns = await api.listColumns(api.tableByName('tenant')!.info.id);
-    expect(columns.find((c) => c.column_name === 'enabled')?.uidt).toBe('SingleLineText');
+    const columns = await api.listColumns(api.tableByName('aida_tbl_TenantProfile')!.info.id);
+    expect(columns.find((c) => c.column_name === 'iTenantId')?.uidt).toBe('SingleLineText');
   });
 
   it('reports live-only tables and columns without dropping them', async () => {
@@ -76,7 +82,7 @@ describe('schema automation', () => {
       }
     }
     // The enrollment token is stored as a hash only.
-    const extension = AIDA_SCHEMA.find((t) => t.table_name === 'extension')!;
+    const extension = AIDA_SCHEMA.find((t) => t.table_name === 'aida_tbl_Extension')!;
     expect(extension.columns.some((c) => c.column_name === 'enrollment_token_hash')).toBe(true);
     expect(extension.columns.some((c) => c.column_name === 'enrollment_token')).toBe(false);
   });

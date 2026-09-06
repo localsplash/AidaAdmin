@@ -1,9 +1,10 @@
+import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig, SERVICE_ENV_VARS } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
-import { createRepos } from '../src/nocodb/repos.js';
+import { createRepos } from './helpers/legacy-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import { createLogger } from '../src/logger.js';
 import { presentCaller } from '../src/runtime/routes.js';
@@ -72,6 +73,7 @@ beforeEach(async () => {
   const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
+  await seedLegacyDirectory(api);
   const repos = createRepos(api);
   const runtime = new FakeRuntimeReader();
   const officePulse = new FakeOfficePulse();

@@ -1,12 +1,8 @@
 import type { NocoColumnDef, NocoDbApi, NocoTableDef } from './api.js';
 
-/**
- * Canonical AidaAdmin base schema (normative specification §1.2), plus:
- * - `revision` on mutable tables for optimistic-revision checks,
- * - `configuration_source`, `appearance`, and the immutable `audit_log`
- *   required by POC phase 3 (issue #11).
- * SIP secrets have no column anywhere by design; the extension table stores
- * only the enrollment token HASH, never an issued token.
+/** Aida-owned voice configuration in shared PlatformConfig. Enrollment hash
+ * columns are retained for explicit legacy inspection; new grants live in
+ * OfficePulse. Tenant identity, membership and audit are not stored here.
  */
 
 const text = (name: string): NocoColumnDef => ({
@@ -29,24 +25,18 @@ const dt = (name: string): NocoColumnDef => ({ column_name: name, title: name, u
 
 const common = [text('id'), dt('created_at'), dt('updated_at'), num('revision')];
 
-export const AIDA_SCHEMA: NocoTableDef[] = [
+export const LOGICAL_SCHEMA: NocoTableDef[] = [
   {
-    table_name: 'tenant',
-    title: 'tenant',
+    table_name: 'tenant_profile',
+    title: 'tenant_profile',
     columns: [
       ...common,
-      text('name'),
-      text('slug'),
+      num('tenant_id'),
+      text('legacy_tenant_id'),
       text('asterisk_context'),
       text('caller_id_name'),
       text('caller_id_number'),
-      bool('enabled'),
     ],
-  },
-  {
-    table_name: 'tenant_user',
-    title: 'tenant_user',
-    columns: [...common, text('tenant_id'), num('identity_user_id'), text('role'), bool('enabled')],
   },
   {
     table_name: 'extension',
@@ -147,23 +137,34 @@ export const AIDA_SCHEMA: NocoTableDef[] = [
       text('primary_color'),
     ],
   },
-  {
-    // Immutable: the repository only ever appends; there is no update path.
-    table_name: 'audit_log',
-    title: 'audit_log',
-    columns: [
-      text('id'),
-      dt('created_at'),
-      text('tenant_id'),
-      num('actor_identity_user_id'),
-      text('action'),
-      text('entity_type'),
-      text('entity_id'),
-      longText('details'),
-      text('correlation_id'),
-    ],
-  },
 ];
+
+/** Physical PlatformConfig names; browser and OfficePulse wire fields remain stable. */
+export const TABLE_NAMES: Record<string, string> = {
+  tenant_profile: 'aida_tbl_TenantProfile',
+  extension: 'aida_tbl_Extension',
+  ring_group: 'aida_tbl_RingGroup',
+  ring_group_member: 'aida_tbl_RingGroupMember',
+  assistant_profile: 'aida_tbl_AssistantProfile',
+  did_route: 'aida_tbl_DidRoute',
+  configuration_source: 'aida_tbl_ConfigurationSource',
+  appearance: 'aida_tbl_Appearance',
+};
+export const FIELD_NAMES: Record<string, string> = {
+  tenant_id: 'iTenantId',
+  identity_user_id: 'iUserId',
+};
+export const AIDA_SCHEMA: NocoTableDef[] = LOGICAL_SCHEMA.map((table) => ({
+  ...table,
+  table_name: TABLE_NAMES[table.table_name]!,
+  title: TABLE_NAMES[table.table_name]!,
+  columns: table.columns.map((column) => ({
+    ...column,
+    column_name: FIELD_NAMES[column.column_name] ?? column.column_name,
+    title: FIELD_NAMES[column.column_name] ?? column.title,
+    ...(column.column_name === 'tenant_id' ? { uidt: 'Number' as const } : {}),
+  })),
+}));
 
 /**
  * Logical uniqueness rules (spec §1.2). NocoDB exposes no multi-column
@@ -171,8 +172,7 @@ export const AIDA_SCHEMA: NocoTableDef[] = [
  * write and `validate` documents them.
  */
 export const UNIQUE_RULES: Record<string, string[][]> = {
-  tenant: [['slug'], ['asterisk_context']],
-  tenant_user: [['tenant_id', 'identity_user_id']],
+  tenant_profile: [['tenant_id'], ['asterisk_context']],
   extension: [['tenant_id', 'extension_number'], ['device_id'], ['provisioning_mac']],
   ring_group: [['tenant_id', 'virtual_extension']],
   ring_group_member: [['ring_group_id', 'extension_id']],

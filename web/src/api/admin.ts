@@ -183,10 +183,12 @@ export const adminApi = {
     call<{ tenant: Tenant }>(`/admin/tenants/${tenantId}`, 'PUT', { ...input, expectedRevision }),
 
   listTenantUsers: (tenantId: string) =>
-    call<{ users: TenantUser[]; canEditDisplayName: boolean; directoryError: string | null }>(
-      `/admin/tenants/${tenantId}/users`,
-      'GET',
-    ),
+    call<{
+      users: TenantUser[];
+      canEditDisplayName: boolean;
+      canManageDirectory?: boolean;
+      directoryError: string | null;
+    }>(`/admin/tenants/${tenantId}/users`, 'GET'),
   searchDirectory: (query: string) =>
     call<{ users: DirectoryUser[]; canEditDisplayName: boolean; canCreate: boolean }>(
       `/admin/directory/users?query=${encodeURIComponent(query)}`,
@@ -224,11 +226,11 @@ export const adminApi = {
       tenantId,
       reprovisionDevice,
     }),
-  issueEnrollment: (extensionId: string, tenantId: string, provisioningMac: string) =>
-    call<{ deviceId: string; enrollmentToken: string; expiresAt: string }>(
+  issueEnrollment: (extensionId: string, tenantId: string) =>
+    call<{ enrollmentToken: string; expiresAt: string }>(
       `/admin/extensions/${extensionId}/handset-enrollment`,
       'POST',
-      { tenantId, provisioningMac },
+      { tenantId },
     ),
 
   listRingGroups: (tenantId: string) =>

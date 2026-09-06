@@ -79,6 +79,7 @@ export interface ProvisionDidRequest {
 /** The one staff command OfficePulse acts on; DRAIN_ACK is the agent's. */
 export interface CallCommandRequest {
   commandType: 'TAKEOVER';
+  expectedCallVersion?: number | undefined;
   idempotencyKey: string;
   ringTimeoutSeconds?: number | undefined;
   musicOnHoldClass?: string | undefined;
@@ -108,6 +109,10 @@ export interface OfficePulseReadiness {
 }
 
 export interface OfficePulseClient {
+  issueDeviceEnrollment?(
+    iTenantId: number,
+    extensionId: string,
+  ): Promise<{ enrollmentToken: string; expiresIn: number }>;
   provisionExtension(req: ProvisionExtensionRequest): Promise<ProvisionExtensionResult>;
   updateProvisionedExtension(extensionId: string, req: UpdateExtensionRequest): Promise<void>;
   rotateProvisionedExtensionSecret(
@@ -173,6 +178,16 @@ export class HttpOfficePulseClient implements OfficePulseClient {
     return parsed;
   }
 
+  async issueDeviceEnrollment(
+    iTenantId: number,
+    extensionId: string,
+  ): Promise<{ enrollmentToken: string; expiresIn: number }> {
+    return (await this.request('/v1/provisioning/device-enrollments', 'POST', {
+      iTenantId,
+      extensionId,
+    })) as { enrollmentToken: string; expiresIn: number };
+  }
+
   async provisionExtension(req: ProvisionExtensionRequest): Promise<ProvisionExtensionResult> {
     return (await this.request(
       '/v1/provisioning/extensions',
@@ -212,7 +227,7 @@ export class HttpOfficePulseClient implements OfficePulseClient {
     req: CallCommandRequest,
   ): Promise<UpstreamOutcome> {
     const outcome = await this.fetchJson(
-      `/v1/calls/${encodeURIComponent(callSessionId)}/commands`,
+      `/v1/admin/calls/${encodeURIComponent(callSessionId)}/commands`,
       'POST',
       req,
     );

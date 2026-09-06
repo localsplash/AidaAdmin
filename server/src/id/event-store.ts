@@ -6,9 +6,8 @@ import type { MemoryAuthDb } from '../auth/session-store.js';
  * bind these to the same transaction that records the event, so an event is
  * marked processed only when every persistent change committed with it.
  *
- * Phase 3+: when NocoDB tenant_user mappings exist, `user.merged` must also
- * repoint those before the event commits as processed — add that effect here
- * and complete it inside process(), never after the 2xx.
+ * Production sessions are centralized, so MySQL receipts have no local
+ * session effects. The methods are retained for isolated in-memory tests.
  */
 export interface IdentityEffects {
   revokeUserSessions(iUserId: number): Promise<number>;
@@ -30,6 +29,8 @@ export interface IdentityEventStore {
   ): Promise<'applied' | 'duplicate'>;
   /** Last durably processed event id — the catch-up `since` value. */
   checkpoint(): Promise<number>;
+  /** Advanced only by ordered replay, never by potentially out-of-order webhooks. */
+  advanceReplayCursor?(eventId: number): Promise<void>;
 }
 
 export class MemoryIdentityEventStore implements IdentityEventStore {
