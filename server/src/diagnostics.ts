@@ -24,7 +24,7 @@ export function resolveCallbackUri(config: AppConfig): string | null {
 
 /** The exact /authorize URL the browser is redirected to, without state. */
 export function resolveAuthorizeUrl(config: AppConfig): string | null {
-  const idBase = config.serviceConfig.ID_BASE_URL;
+  const idBase = config.serviceConfig.ID_PUBLIC_BASE_URL ?? config.serviceConfig.ID_BASE_URL;
   const redirectUri = resolveCallbackUri(config);
   if (!idBase || !redirectUri) return null;
   try {

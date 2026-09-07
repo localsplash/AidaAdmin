@@ -34,7 +34,7 @@ export function authRoutes(config: AppConfig, logger: Logger, deps: AppDeps): Ro
 
   router.get('/api/auth/login', async (req, res, next) => {
     try {
-      const idBase = config.serviceConfig.ID_BASE_URL;
+      const idBase = config.serviceConfig.ID_PUBLIC_BASE_URL ?? config.serviceConfig.ID_BASE_URL;
       const redirectUri = callbackUri(config);
       if (!idBase || !redirectUri || !deps.idClient) {
         // Name what is missing so the operator does not have to guess.

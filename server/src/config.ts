@@ -44,6 +44,7 @@ export const SERVICE_ENV_VARS = [
   'SESSION_SECRET',
   'AIDA_ADMIN_DATABASE_URL',
   'ID_BASE_URL',
+  'ID_PUBLIC_BASE_URL',
   'ID_CLIENT_SECRET',
   'ID_TRUSTED_APP_CIDRS',
   'ID_EVENT_SOURCE_CIDRS',
@@ -102,7 +103,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   for (const name of SERVICE_ENV_VARS) {
     const value = env[name];
     if (value === undefined || value.trim() === '') {
-      if (name !== 'ID_CLIENT_SECRET' && name !== 'HANDSET_PROVISIONING_URL')
+      if (
+        name !== 'ID_CLIENT_SECRET' &&
+        name !== 'ID_PUBLIC_BASE_URL' &&
+        name !== 'HANDSET_PROVISIONING_URL'
+      )
         missingServiceConfig.push(name);
     } else {
       serviceConfig[name] = value;

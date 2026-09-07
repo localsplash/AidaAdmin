@@ -78,6 +78,18 @@ async function startLogin(app: ReturnType<typeof authApp>['app']) {
 }
 
 describe('login redirect', () => {
+  it('uses the public Identity origin for the browser while retaining the private client origin', async () => {
+    const config = loadConfig({
+      ...AUTH_ENV,
+      ID_BASE_URL: 'http://identity-preview:3200',
+      ID_PUBLIC_BASE_URL: 'https://identity-preview.example.invalid',
+    });
+    const app = createApp(config, createLogger(config), createDeps(config));
+    const { location } = await startLogin(app);
+    expect(location.origin).toBe('https://identity-preview.example.invalid');
+    expect(config.serviceConfig.ID_BASE_URL).toBe('http://identity-preview:3200');
+  });
+
   it('redirects to id /authorize with state and the exact callback', async () => {
     const { app } = authApp();
     const { location, state } = await startLogin(app);

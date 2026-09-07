@@ -22,7 +22,8 @@ describe('loadConfig', () => {
     expect(config.nodeEnv).toBe('test');
     expect(config.missingServiceConfig).toEqual(
       SERVICE_ENV_VARS.filter(
-        (name) => !['ID_CLIENT_SECRET', 'HANDSET_PROVISIONING_URL'].includes(name),
+        (name) =>
+          !['ID_CLIENT_SECRET', 'ID_PUBLIC_BASE_URL', 'HANDSET_PROVISIONING_URL'].includes(name),
       ),
     );
   });
