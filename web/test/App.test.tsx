@@ -13,7 +13,11 @@ const authenticatedSession: SessionView = {
 function mockSessionResponse(status: number, body: unknown) {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify(body), { status })),
+    vi.fn(async (url: RequestInfo | URL) =>
+      String(url) === '/api/session/tenants'
+        ? new Response(JSON.stringify({ tenants: [] }), { status: 200 })
+        : new Response(JSON.stringify(body), { status }),
+    ),
   );
 }
 
