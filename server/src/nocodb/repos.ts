@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { NocoDbApi, NocoRecord, NocoWhere } from './api.js';
+import { tableByCanonicalName } from './api.js';
 import { LOGICAL_SCHEMA, FIELD_NAMES, TABLE_NAMES, UNIQUE_RULES } from './schema.js';
 import {
   normalizeE164,
@@ -36,9 +37,9 @@ export class NocoStore {
     const cached = this.tableIds.get(tableName);
     if (cached) return cached;
     const tables = await this.api.listTables();
-    for (const table of tables) this.tableIds.set(table.table_name, table.id);
-    const id = this.tableIds.get(tableName);
+    const id = tableByCanonicalName(tables, tableName)?.id;
     if (!id) throw new NotFoundError(`NocoDB table ${tableName} does not exist (run upgrade)`);
+    this.tableIds.set(tableName, id);
     return id;
   }
 

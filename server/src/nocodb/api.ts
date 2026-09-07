@@ -27,6 +27,16 @@ export interface NocoTableInfo {
   title: string;
 }
 
+/** NocoDB-owned sources prefix SQL names while retaining canonical API titles. */
+export function tableByCanonicalName(
+  tables: NocoTableInfo[],
+  name: string,
+): NocoTableInfo | undefined {
+  const matches = tables.filter((table) => table.table_name === name || table.title === name);
+  if (matches.length > 1) throw new Error(`Ambiguous NocoDB table ${name}`);
+  return matches[0];
+}
+
 export interface NocoColumnInfo {
   id: string;
   column_name: string;

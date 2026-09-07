@@ -1,4 +1,5 @@
 import type { NocoColumnDef, NocoDbApi, NocoTableDef } from './api.js';
+import { tableByCanonicalName } from './api.js';
 
 /** Aida-owned voice configuration in shared PlatformConfig. Enrollment hash
  * columns are retained for explicit legacy inspection; new grants live in
@@ -202,31 +203,40 @@ const SYSTEM_COLUMNS = new Set([
 
 export async function reportDrift(api: NocoDbApi): Promise<DriftReport> {
   const live = await api.listTables();
-  const liveByName = new Map(live.map((t) => [t.table_name, t]));
   const canonicalNames = new Set(AIDA_SCHEMA.map((t) => t.table_name));
 
   const report: DriftReport = {
     missingTables: [],
     missingColumns: [],
     typeMismatches: [],
-    extraTables: live.map((t) => t.table_name).filter((name) => !canonicalNames.has(name)),
+    extraTables: live
+      .filter((table) => !canonicalNames.has(table.table_name) && !canonicalNames.has(table.title))
+      .map((table) => table.table_name),
     extraColumns: [],
     inSync: false,
   };
 
   for (const table of AIDA_SCHEMA) {
-    const liveTable = liveByName.get(table.table_name);
+    const liveTable = tableByCanonicalName(live, table.table_name);
     if (!liveTable) {
       report.missingTables.push(table.table_name);
       continue;
     }
     const liveColumns = (await api.listColumns(liveTable.id)).filter(
-      (c) => !c.system && !SYSTEM_COLUMNS.has(c.column_name),
+      (c) =>
+        !c.system &&
+        c.uidt !== 'ID' &&
+        !SYSTEM_COLUMNS.has(c.title) &&
+        !SYSTEM_COLUMNS.has(c.column_name),
     );
-    const liveByCol = new Map(liveColumns.map((c) => [c.column_name, c]));
     const canonicalCols = new Set(table.columns.map((c) => c.column_name));
     for (const col of table.columns) {
-      const liveCol = liveByCol.get(col.column_name);
+      const matching = liveColumns.filter(
+        (liveCol) => liveCol.title === col.title || liveCol.column_name === col.column_name,
+      );
+      if (matching.length > 1)
+        throw new Error(`Ambiguous NocoDB column ${table.table_name}.${col.column_name}`);
+      const liveCol = matching[0];
       if (!liveCol) {
         report.missingColumns.push({ table: table.table_name, column: col.column_name });
       } else if (liveCol.uidt !== col.uidt) {
@@ -239,7 +249,7 @@ export async function reportDrift(api: NocoDbApi): Promise<DriftReport> {
       }
     }
     for (const liveCol of liveColumns) {
-      if (!canonicalCols.has(liveCol.column_name)) {
+      if (!canonicalCols.has(liveCol.column_name) && !canonicalCols.has(liveCol.title)) {
         report.extraColumns.push({ table: table.table_name, column: liveCol.column_name });
       }
     }
@@ -279,9 +289,8 @@ export async function upgradeSchema(api: NocoDbApi): Promise<UpgradeResult> {
 
   if (drift.missingColumns.length > 0) {
     const live = await api.listTables();
-    const liveByName = new Map(live.map((t) => [t.table_name, t]));
     for (const missing of drift.missingColumns) {
-      const liveTable = liveByName.get(missing.table);
+      const liveTable = tableByCanonicalName(live, missing.table);
       const def = AIDA_SCHEMA.find((t) => t.table_name === missing.table)?.columns.find(
         (c) => c.column_name === missing.column,
       );

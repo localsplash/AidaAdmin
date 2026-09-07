@@ -1,8 +1,54 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AIDA_SCHEMA, reportDrift, upgradeSchema } from '../src/nocodb/schema.js';
+import { NocoStore } from '../src/nocodb/repos.js';
 import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
 
 describe('schema automation', () => {
+  it('recognizes canonical API titles when NocoDB prefixes SQL table and column names', async () => {
+    const api = new FakeNocoDbApi();
+    await upgradeSchema(api);
+    const tables = await api.listTables();
+    const listColumns = api.listColumns.bind(api);
+    vi.spyOn(api, 'listTables').mockResolvedValue(
+      tables.map((table) => ({ ...table, table_name: `nc_preview___${table.table_name}` })),
+    );
+    vi.spyOn(api, 'listColumns').mockImplementation(async (tableId) => [
+      { id: 'system-id', column_name: 'id', title: 'Id', uidt: 'ID' },
+      {
+        id: 'system-created',
+        column_name: 'created_at',
+        title: 'CreatedAt',
+        uidt: 'CreatedTime',
+        system: true,
+      },
+      ...(await listColumns(tableId)).map((column) => ({
+        ...column,
+        column_name: ['id', 'created_at', 'updated_at'].includes(column.column_name)
+          ? `${column.column_name}1`
+          : column.column_name,
+      })),
+    ]);
+    expect((await reportDrift(api)).inSync).toBe(true);
+    expect((await upgradeSchema(api)).createdTables).toEqual([]);
+    const store = new NocoStore(api);
+    const profile = await store.create('tenant_profile', {
+      tenant_id: 1,
+      asterisk_context: 'preview',
+    });
+    expect((await store.getById('tenant_profile', String(profile.id), '1')).tenant_id).toBe('1');
+  });
+
+  it('rejects ambiguous canonical table titles before changing the schema', async () => {
+    const api = new FakeNocoDbApi();
+    await upgradeSchema(api);
+    await api.createTable({
+      table_name: 'duplicate_voice_profile',
+      title: 'aida_tbl_TenantProfile',
+      columns: [],
+    });
+    await expect(upgradeSchema(api)).rejects.toThrow('Ambiguous NocoDB table');
+  });
+
   it('creates every table in an empty base', async () => {
     const api = new FakeNocoDbApi();
     const result = await upgradeSchema(api);
