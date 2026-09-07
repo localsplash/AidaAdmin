@@ -7,6 +7,7 @@ import {
   LoadingScreen,
   LoginRequiredScreen,
 } from './components/StatusScreens';
+import { TenantPage } from './components/TenantPage';
 import { TenantContextBanner } from './components/TenantContextBanner';
 import { AppearanceScreen } from './screens/AppearanceScreen';
 import { OperationsScreen } from './screens/OperationsScreen';
@@ -100,12 +101,7 @@ function AuthenticatedShell({
           <NavLink to="/" end>
             Dashboard
           </NavLink>
-          {/* The tenants list is scoped server-side, so it is the way in for
-              both roles: every tenant for a Super Admin, their own for a
-              tenant administrator. */}
-          {session.user.superAdmin || session.selectedTenant?.role === 'TENANT_ADMIN' ? (
-            <NavLink to="/tenants">Tenants</NavLink>
-          ) : null}
+          {session.user.superAdmin ? <NavLink to="/tenants">Tenants</NavLink> : null}
           {session.selectedTenant ? <NavLink to="/operations">Live operations</NavLink> : null}
           {session.user.superAdmin || session.selectedTenant?.role === 'TENANT_ADMIN' ? (
             <NavLink to="/runtime">Runtime</NavLink>
@@ -117,16 +113,73 @@ function AuthenticatedShell({
         </button>
       </header>
       <TenantContextBanner session={session} onTenantChanged={onSessionChanged} />
+      {session.selectedTenant ? (
+        <nav className="tenant-navigation" aria-label="Tenant management">
+          {TENANT_SCREENS.map((item) => (
+            <NavLink
+              key={item.path}
+              to={`/tenants/${session.selectedTenant!.tenantId}/${item.path}`}
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </nav>
+      ) : null}
       <main id="main-content" className="app-main">
-        <Routes>
+        <Routes key={session.selectedTenant?.tenantId ?? 'platform'}>
           <Route path="/" element={<DashboardScreen session={session} />} />
-          <Route path="/tenants" element={<TenantsScreen canCreate={session.user.superAdmin} />} />
-          <Route path="/tenants/:tenantId/users" element={<TenantUsersScreen />} />
-          <Route path="/tenants/:tenantId/extensions" element={<ExtensionsScreen />} />
-          <Route path="/tenants/:tenantId/ring-groups" element={<RingGroupsScreen />} />
-          <Route path="/tenants/:tenantId/profiles" element={<ProfilesScreen />} />
-          <Route path="/tenants/:tenantId/did-routes" element={<DidRoutesScreen />} />
-          <Route path="/tenants/:tenantId/appearance" element={<AppearanceScreen />} />
+          <Route
+            path="/tenants"
+            element={session.user.superAdmin ? <TenantsScreen /> : <ForbiddenScreen />}
+          />
+          <Route
+            path="/tenants/:tenantId/users"
+            element={
+              <TenantPage session={session} onChanged={onSessionChanged}>
+                <TenantUsersScreen />
+              </TenantPage>
+            }
+          />
+          <Route
+            path="/tenants/:tenantId/extensions"
+            element={
+              <TenantPage session={session} onChanged={onSessionChanged}>
+                <ExtensionsScreen />
+              </TenantPage>
+            }
+          />
+          <Route
+            path="/tenants/:tenantId/ring-groups"
+            element={
+              <TenantPage session={session} onChanged={onSessionChanged}>
+                <RingGroupsScreen />
+              </TenantPage>
+            }
+          />
+          <Route
+            path="/tenants/:tenantId/profiles"
+            element={
+              <TenantPage session={session} onChanged={onSessionChanged}>
+                <ProfilesScreen />
+              </TenantPage>
+            }
+          />
+          <Route
+            path="/tenants/:tenantId/did-routes"
+            element={
+              <TenantPage session={session} onChanged={onSessionChanged}>
+                <DidRoutesScreen />
+              </TenantPage>
+            }
+          />
+          <Route
+            path="/tenants/:tenantId/appearance"
+            element={
+              <TenantPage session={session} onChanged={onSessionChanged}>
+                <AppearanceScreen />
+              </TenantPage>
+            }
+          />
           <Route path="/operations" element={<OperationsScreen />} />
           <Route path="/runtime" element={<RuntimeScreen session={session} />} />
           <Route path="/runtime/calls/:callSessionId" element={<CallDetailScreen />} />

@@ -180,10 +180,9 @@ describe('authorization', () => {
     const tenant = await createTenant();
     const member = await memberSession(2, { tenantId: tenant.id, role: 'USER' });
 
-    // The list is scoped, not gated: a USER simply administers nothing.
+    // Tenant administration is a Super Admin surface.
     const list = await member.get('/admin/tenants');
-    expect(list.status).toBe(200);
-    expect(list.body.tenants).toEqual([]);
+    expect(list.status).toBe(403);
 
     // A USER membership is not an administrative role in their own tenant.
     expect((await member.get(`/admin/tenants/${tenant.id}/extensions`)).status).toBe(403);
@@ -205,7 +204,7 @@ describe('authorization', () => {
     const admin = await memberSession(3, { tenantId: mine.id, role: 'TENANT_ADMIN' });
 
     const list = await admin.get('/admin/tenants');
-    expect(list.body.tenants.map((t: { id: string }) => t.id)).toEqual([mine.id]);
+    expect(list.status).toBe(403);
 
     expect((await admin.get(`/admin/tenants/${mine.id}/extensions`)).status).toBe(200);
     expect((await admin.get(`/admin/tenants/${mine.id}/profiles`)).status).toBe(200);

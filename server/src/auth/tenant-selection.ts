@@ -2,7 +2,7 @@ import { identityActor } from '../id/context.js';
 import { Router } from 'express';
 import type { AppDeps } from '../deps.js';
 import type { Logger } from '../logger.js';
-import { requireSession } from '../admin/authz.js';
+import { requireSuperAdmin } from '../admin/authz.js';
 
 export interface SelectableTenant {
   tenantId: string;
@@ -22,7 +22,7 @@ export async function selectableTenants(
     const live = await deps.idClient.introspectSession(token);
     if (!live.active || live.user.iUserId !== iUserId) return [];
     return live.tenants
-      .filter((t) => t.bEnabled)
+      .filter((t) => t.bEnabled && (live.user.superAdmin || t.role === 'TENANT_ADMIN'))
       .map((t) => ({
         tenantId: String(t.iTenantId),
         name: t.name,
@@ -43,7 +43,7 @@ export async function selectableTenants(
       }));
   }
   const memberships = (await deps.repos.tenantUsers.listForUser(iUserId)).filter(
-    (m) => m.enabled && m.tenant_id,
+    (m) => m.enabled && m.tenant_id && m.role === 'TENANT_ADMIN',
   );
   const result: SelectableTenant[] = [];
   for (const membership of memberships) {
@@ -66,7 +66,7 @@ export async function selectableTenants(
 export function tenantSelectionRoutes(logger: Logger, deps: AppDeps): Router {
   const router = Router();
 
-  router.get('/api/session/tenants', requireSession, async (req, res, next) => {
+  router.get('/api/session/tenants', requireSuperAdmin, async (req, res, next) => {
     try {
       const session = req.session!;
       res.json({ tenants: await selectableTenants(deps, session.iUserId, session.superAdmin) });
@@ -76,7 +76,7 @@ export function tenantSelectionRoutes(logger: Logger, deps: AppDeps): Router {
   });
 
   // CSRF-protected by the /api mutation guard.
-  router.post('/api/session/tenant', requireSession, async (req, res, next) => {
+  router.post('/api/session/tenant', requireSuperAdmin, async (req, res, next) => {
     try {
       const session = req.session!;
       const tenantId = (req.body as Record<string, unknown> | undefined)?.tenantId;

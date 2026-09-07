@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
-import type { IdClient, IdEvent, IdRedeemResult } from '../src/id/client.js';
+import type { IdClient, IdEvent, IdRedeemResult, PlatformTenant } from '../src/id/client.js';
 import { createLogger } from '../src/logger.js';
 
 const AUTH_ENV: NodeJS.ProcessEnv = {
@@ -18,10 +18,16 @@ const AUTH_ENV: NodeJS.ProcessEnv = {
 class FakeIdClient implements IdClient {
   redeemCalls: Array<{ code: string; redirectUri: string }> = [];
   revoked = false;
+  tenants: PlatformTenant[] = [];
   async introspectSession() {
     return this.revoked
       ? { active: false as const }
-      : { active: true as const, user: this.result.user, tenants: [], selectedTenantId: null };
+      : {
+          active: true as const,
+          user: this.result.user,
+          tenants: this.tenants,
+          selectedTenantId: null,
+        };
   }
   async revokeSession() {
     this.revoked = true;
@@ -226,4 +232,32 @@ describe('credential hygiene', () => {
     expect(body).not.toContain('SECRET');
     expect(body).not.toContain('id.example.invalid');
   });
+});
+
+describe('central admin admission', () => {
+  it.each(['TENANT_ADMIN', 'USER'] as const)(
+    'admits only administrative membership: %s',
+    async (role) => {
+      const client = new FakeIdClient();
+      client.result.user.superAdmin = false;
+      client.tenants = [{ iTenantId: 1, name: 'Business', slug: 'business', bEnabled: true, role }];
+      const { app } = authApp(client);
+      const { state, cookies } = await startLogin(app);
+      const callback = await request(app)
+        .get(`/api/auth/callback?code=code&state=${encodeURIComponent(state)}`)
+        .set('Cookie', cookies);
+      expect(callback.headers.location).toBe(role === 'TENANT_ADMIN' ? '/' : '/?login=denied');
+      expect(client.revoked).toBe(role === 'USER');
+      if (role === 'TENANT_ADMIN') {
+        const sessionCookies = callback.headers['set-cookie'] as unknown as string[];
+        const session = await request(app).get('/api/session').set('Cookie', sessionCookies);
+        expect(session.status).toBe(200);
+        expect(session.body.selectedTenant.tenantId).toBe('1');
+        client.tenants[0]!.role = 'USER';
+        expect((await request(app).get('/api/session').set('Cookie', sessionCookies)).status).toBe(
+          401,
+        );
+      }
+    },
+  );
 });

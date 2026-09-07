@@ -105,7 +105,11 @@ export function authRoutes(config: AppConfig, logger: Logger, deps: AppDeps): Ro
           return;
         }
         const live = await deps.idClient.introspectSession(central);
-        if (!live.active || (!live.user.superAdmin && !live.tenants.some((t) => t.bEnabled))) {
+        if (
+          !live.active ||
+          (!live.user.superAdmin &&
+            !live.tenants.some((t) => t.bEnabled && t.role === 'TENANT_ADMIN'))
+        ) {
           await deps.idClient.revokeSession?.(central);
           failLogin(res, 'denied');
           return;

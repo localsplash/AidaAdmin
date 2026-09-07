@@ -80,7 +80,7 @@ describe('central authorization with PlatformConfig voice profiles', () => {
     const app = createApp(config, createLogger(config), deps);
     const cookie = ['aida.sid=central-token', 'aida.csrf=csrf-token'];
     const list = () => request(app).get('/admin/tenants').set('Cookie', cookie);
-    expect((await list()).body.tenants.map((t: { id: string }) => t.id)).toEqual(['11']);
+    expect((await list()).status).toBe(403);
     const denied = await request(app)
       .post('/admin/extensions')
       .set('Cookie', cookie)

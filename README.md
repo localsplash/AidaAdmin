@@ -21,11 +21,18 @@ request introspects that token, so membership removal and session/privilege
 revocation take effect on the next request. Tenant selection is stored in the
 central application session. An Identity outage denies authenticated work.
 
-SUPER_ADMIN can see every business. TENANT_ADMIN administers its enabled
-businesses; USER is limited to the existing staff runtime surfaces. Global user
-search/create/edit is SUPER_ADMIN-only for the POC. Tenant membership lists
-include authorized user names and emails. SUPER_ADMIN grants are controlled by
-Identity and cannot be created as tenant membership rows.
+SUPER_ADMIN can see every business and assign Super Admin, Tenant Admin or User.
+TENANT_ADMIN can add users by email and assign Tenant Admin or User in its own
+enabled tenant. USER cannot sign in to AidaAdmin. Only Super Admins see the
+Tenants menu and tenant selector; selecting a tenant updates both the central
+session and the current tenant page. Tenant Admins enter their tenant automatically.
+
+Users are listed with names, email addresses, roles and status. Add User is
+expandable; Edit saves the profile and role together through Identity. Linked
+sign-in emails are read-only; pending-user email addresses can be corrected.
+Extensions, ring groups and DID routes use record tables and expandable editors.
+Identity enforces the role hierarchy on the server, including live demotion and
+last-administrator protection. Global directory search remains Super Admin-only.
 
 ## Setup
 

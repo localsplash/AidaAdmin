@@ -120,3 +120,19 @@ describe('App shell', () => {
     expect(await screen.findByRole('button', { name: /sign out/i })).toBeInTheDocument();
   });
 });
+
+describe('tenant admin navigation', () => {
+  it.each(['/', '/tenants'])('hides tenant management and the selector at %s', async (path) => {
+    mockSessionResponse(200, {
+      ...authenticatedSession,
+      user: { ...authenticatedSession.user, superAdmin: false },
+      selectedTenant: { tenantId: '1', name: 'Own business', slug: 'own', role: 'TENANT_ADMIN' },
+    });
+    renderApp(path);
+    await screen.findByText('Ada Admin');
+    expect(screen.queryByRole('link', { name: 'Tenants' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Switch tenant')).not.toBeInTheDocument();
+    if (path === '/tenants')
+      expect(screen.getByRole('heading', { name: /access denied/i })).toBeInTheDocument();
+  });
+});

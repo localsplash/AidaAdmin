@@ -43,7 +43,8 @@ export interface PlatformMembership {
   iUserId: number;
   email: string | null;
   displayName: string | null;
-  role: 'TENANT_ADMIN' | 'USER';
+  role: 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'USER';
+  claimed?: boolean;
   bEnabled: boolean;
 }
 export type SessionIntrospection =
@@ -56,6 +57,20 @@ export type SessionIntrospection =
     };
 
 export interface IdClient {
+  manageTenantMember?(
+    tenantId: string,
+    userId: number,
+    input: {
+      role: string;
+      enabled: boolean;
+      displayName?: string | null | undefined;
+      email?: string | undefined;
+    },
+  ): Promise<PlatformMembership>;
+  addTenantMember?(
+    tenantId: string,
+    input: { email: string; displayName: string | null; role: string; enabled: boolean },
+  ): Promise<PlatformMembership>;
   introspectSession?(token: string): Promise<SessionIntrospection>;
   revokeSession?(token: string): Promise<void>;
   selectTenant?(token: string, iTenantId: number | null): Promise<void>;
@@ -89,6 +104,7 @@ export class IdClientError extends Error {
   constructor(
     message: string,
     readonly status?: number,
+    readonly publicMessage?: string,
   ) {
     super(message);
   }
@@ -117,7 +133,19 @@ export class HttpIdClient implements IdClient {
     });
     if (!res.ok) {
       // Do not include the response body: it is not ours to log.
-      throw new IdClientError(`id request ${path.split('?')[0]} failed`, res.status);
+      const body = (await res.json().catch(() => ({}))) as { error?: unknown };
+      const safeMessages = new Set([
+        'Only a Super Admin can change Super Admin access',
+        'Choose a tenant role before disabling tenant membership',
+        'Assign another Super Admin before removing the last Super Admin',
+        'Assign another Tenant Admin before removing the last Tenant Admin',
+        'A linked sign-in email cannot be changed here',
+        'Another account already uses this email',
+        'Email has multiple users; reconcile explicit identities before assigning access',
+      ]);
+      const message =
+        typeof body.error === 'string' && safeMessages.has(body.error) ? body.error : undefined;
+      throw new IdClientError(`id request ${path.split('?')[0]} failed`, res.status, message);
     }
     return res.status === 204 ? null : res.json();
   }
@@ -154,6 +182,32 @@ export class HttpIdClient implements IdClient {
     })) as T;
   }
 
+  async manageTenantMember(
+    tenantId: string,
+    userId: number,
+    input: {
+      role: string;
+      enabled: boolean;
+      displayName?: string | null | undefined;
+      email?: string | undefined;
+    },
+  ): Promise<PlatformMembership> {
+    const { enabled, ...fields } = input;
+    return this.directoryRequest(`tenants/${tenantId}/memberships/${userId}`, 'PUT', {
+      ...fields,
+      bEnabled: enabled,
+    });
+  }
+  async addTenantMember(
+    tenantId: string,
+    input: { email: string; displayName: string | null; role: string; enabled: boolean },
+  ): Promise<PlatformMembership> {
+    const { enabled, ...fields } = input;
+    return this.directoryRequest(`tenants/${tenantId}/users`, 'POST', {
+      ...fields,
+      bEnabled: enabled,
+    });
+  }
   async updateDirectoryUser(iUserId: number, displayName: string | null): Promise<DirectoryUser> {
     return this.directoryRequest(`users/${iUserId}`, 'PATCH', { displayName });
   }

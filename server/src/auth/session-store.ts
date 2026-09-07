@@ -114,13 +114,17 @@ export class IdentitySessionRepository implements SessionRepository {
     if (!this.client.introspectSession) throw new Error('Identity session API is unavailable');
     const result = await this.client.introspectSession(token);
     if (!result.active) return null;
-    const tenants = result.tenants.filter((tenant) => tenant.bEnabled);
+    const tenants = result.tenants.filter(
+      (tenant) => tenant.bEnabled && (result.user.superAdmin || tenant.role === 'TENANT_ADMIN'),
+    );
     if (!result.user.superAdmin && tenants.length === 0) return null;
     return {
       ...result.user,
       provider: null,
       platformTenants: tenants,
-      selectedTenantId: result.selectedTenantId == null ? null : String(result.selectedTenantId),
+      selectedTenantId: tenants.some((t) => t.iTenantId === result.selectedTenantId)
+        ? String(result.selectedTenantId)
+        : null,
     };
   }
   async setSelectedTenant(token: string, tenantId: string | null): Promise<void> {

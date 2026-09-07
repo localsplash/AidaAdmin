@@ -125,6 +125,7 @@ export class PlatformMembershipRepository {
       enabled: member.bEnabled,
       email: member.email,
       display_name: member.displayName,
+      claimed: member.claimed,
     }));
   }
   async listForUser(iUserId: number): Promise<NocoRecord[]> {

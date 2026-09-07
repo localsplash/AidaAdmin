@@ -12,6 +12,8 @@ const EMPTY = {
   extensionNumber: '',
   displayName: '',
   callerIdName: '',
+  callerIdNumber: '',
+  provisioningProfile: '',
   identityUserId: '',
   enabled: true,
 };
@@ -26,6 +28,7 @@ export function ExtensionsScreen() {
   const [form, setForm] = useState(EMPTY);
   const [editing, setEditing] = useState<Extension | null>(null);
   const [busy, setBusy] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
 
   const load = useCallback(() => {
     // Settled rather than all: the tenant's people are a convenience for the
@@ -46,12 +49,15 @@ export function ExtensionsScreen() {
 
   const startEdit = (extension: Extension) => {
     setEditing(extension);
+    setFormOpen(true);
     setError(null);
     setStatus(null);
     setForm({
       extensionNumber: extension.extension_number,
       displayName: extension.display_name,
       callerIdName: extension.caller_id_name ?? '',
+      callerIdNumber: extension.caller_id_number ?? '',
+      provisioningProfile: extension.provisioning_profile ?? '',
       identityUserId: extension.identity_user_id ? String(extension.identity_user_id) : '',
       enabled: extension.enabled,
     });
@@ -59,6 +65,7 @@ export function ExtensionsScreen() {
 
   const cancelEdit = () => {
     setEditing(null);
+    setFormOpen(false);
     setForm(EMPTY);
   };
 
@@ -73,6 +80,8 @@ export function ExtensionsScreen() {
       extensionNumber: form.extensionNumber,
       displayName: form.displayName,
       callerIdName: form.callerIdName || null,
+      callerIdNumber: form.callerIdNumber || null,
+      provisioningProfile: form.provisioningProfile || null,
       enabled: form.enabled,
     };
     try {
@@ -107,7 +116,9 @@ export function ExtensionsScreen() {
   const personLabel = (identityUserId: number | null): string => {
     if (!identityUserId) return '—';
     const person = members.find((m) => m.identity_user_id === identityUserId);
-    return person?.display_name ?? person?.email ?? `#${identityUserId}`;
+    return (
+      [person?.display_name, person?.email].filter(Boolean).join(' — ') || `#${identityUserId}`
+    );
   };
 
   const rotate = async (extension: Extension) => {
@@ -144,7 +155,7 @@ export function ExtensionsScreen() {
   return (
     <section aria-labelledby="extensions-heading">
       <p>
-        <Link to="/tenants">← All tenants</Link>
+        <Link to="/">← Dashboard</Link>
       </p>
       <h1 id="extensions-heading">Extensions</h1>
       {error ? <p role="alert">{error}</p> : null}
@@ -199,81 +210,104 @@ export function ExtensionsScreen() {
         </table>
       )}
 
-      <h2 id="extension-form-heading">
-        {editing ? `Edit extension ${editing.extension_number}` : 'New extension'}
-      </h2>
-      <form aria-labelledby="extension-form-heading" onSubmit={(e) => void submit(e)}>
-        <label>
-          Extension number
-          <input
-            required
-            value={form.extensionNumber}
-            onChange={(e) => setForm({ ...form, extensionNumber: e.target.value })}
-          />
-        </label>
-        <label>
-          Display name
-          <input
-            required
-            value={form.displayName}
-            onChange={(e) => setForm({ ...form, displayName: e.target.value })}
-          />
-        </label>
-        <label>
-          User
-          <select
-            value={form.identityUserId}
-            onChange={(e) => {
-              const identityUserId = e.target.value;
-              const person = members.find((m) => String(m.identity_user_id) === identityUserId);
-              // Filling an empty display name from the person is a
-              // convenience only; an explicit one is never overwritten.
-              setForm((current) => ({
-                ...current,
-                identityUserId,
-                displayName: current.displayName || (person?.display_name ?? current.displayName),
-              }));
-            }}
-          >
-            <option value="">Nobody yet</option>
-            {members.map((member) => (
-              <option key={member.id} value={String(member.identity_user_id)}>
-                {member.display_name ?? member.email ?? `User ${member.identity_user_id}`}
-              </option>
-            ))}
-          </select>
-        </label>
-        {members.length === 0 ? (
-          <p>
-            No users are mapped to this tenant yet — add one on the{' '}
-            <Link to={`/tenants/${tenantId}/users`}>tenant users</Link> page to assign this
-            extension to a person.
-          </p>
-        ) : null}
-        <label>
-          Caller ID name
-          <input
-            value={form.callerIdName}
-            onChange={(e) => setForm({ ...form, callerIdName: e.target.value })}
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={form.enabled}
-            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-          />
-          Enabled
-        </label>
-        <button type="submit" disabled={busy}>
-          {busy ? 'Saving…' : editing ? 'Save extension' : 'Create and provision'}
-        </button>
-        {editing ? (
-          <button type="button" onClick={cancelEdit}>
-            Cancel edit
+      <details
+        className="record-editor"
+        open={formOpen}
+        onToggle={(e) => setFormOpen(e.currentTarget.open)}
+      >
+        <summary>{editing ? 'Edit record' : 'Add Extension…'}</summary>
+        <h2 id="extension-form-heading">
+          {editing ? `Edit extension ${editing.extension_number}` : 'New extension'}
+        </h2>
+        <form aria-labelledby="extension-form-heading" onSubmit={(e) => void submit(e)}>
+          <label>
+            Extension number
+            <input
+              required
+              value={form.extensionNumber}
+              onChange={(e) => setForm({ ...form, extensionNumber: e.target.value })}
+            />
+          </label>
+          <label>
+            Display name
+            <input
+              required
+              value={form.displayName}
+              onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+            />
+          </label>
+          <label>
+            User
+            <select
+              value={form.identityUserId}
+              onChange={(e) => {
+                const identityUserId = e.target.value;
+                const person = members.find((m) => String(m.identity_user_id) === identityUserId);
+                // Filling an empty display name from the person is a
+                // convenience only; an explicit one is never overwritten.
+                setForm((current) => ({
+                  ...current,
+                  identityUserId,
+                  displayName: current.displayName || (person?.display_name ?? current.displayName),
+                }));
+              }}
+            >
+              <option value="">Nobody yet</option>
+              {members.map((member) => (
+                <option key={member.id} value={String(member.identity_user_id)}>
+                  {[member.display_name, member.email].filter(Boolean).join(' — ') ||
+                    `User ${member.identity_user_id}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          {members.length === 0 ? (
+            <p>
+              No users are mapped to this tenant yet — add one on the{' '}
+              <Link to={`/tenants/${tenantId}/users`}>tenant users</Link> page to assign this
+              extension to a person.
+            </p>
+          ) : null}
+          <label>
+            Caller ID name
+            <input
+              value={form.callerIdName}
+              onChange={(e) => setForm({ ...form, callerIdName: e.target.value })}
+            />
+          </label>
+          <label>
+            Provisioning profile
+            <input
+              value={form.provisioningProfile}
+              onChange={(e) => setForm({ ...form, provisioningProfile: e.target.value })}
+            />
+          </label>
+          <label>
+            Caller ID number
+            <input
+              type="tel"
+              value={form.callerIdNumber}
+              onChange={(e) => setForm({ ...form, callerIdNumber: e.target.value })}
+            />
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={form.enabled}
+              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+            />
+            Enabled
+          </label>
+          <button type="submit" disabled={busy}>
+            {busy ? 'Saving…' : editing ? 'Save extension' : 'Save record'}
           </button>
-        ) : null}
-      </form>
+          {editing ? (
+            <button type="button" onClick={cancelEdit}>
+              Cancel edit
+            </button>
+          ) : null}
+        </form>
+      </details>
     </section>
   );
 }
