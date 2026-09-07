@@ -27,6 +27,16 @@ export interface NocoTableInfo {
   title: string;
 }
 
+/** NocoDB-owned sources prefix SQL names while retaining canonical API titles. */
+export function tableByCanonicalName(
+  tables: NocoTableInfo[],
+  name: string,
+): NocoTableInfo | undefined {
+  const matches = tables.filter((table) => table.table_name === name || table.title === name);
+  if (matches.length > 1) throw new Error(`Ambiguous NocoDB table ${name}`);
+  return matches[0];
+}
+
 export interface NocoColumnInfo {
   id: string;
   column_name: string;
@@ -149,12 +159,18 @@ export class HttpNocoDbApi implements NocoDbApi {
   }
 
   async listRecords(tableId: string, where: NocoWhere[], limit = 200): Promise<NocoRecord[]> {
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (where.length > 0) params.set('where', whereClause(where));
-    const body = (await this.request(`/api/v2/tables/${tableId}/records?${params}`)) as {
-      list?: NocoRecord[];
-    };
-    return body.list ?? [];
+    const records: NocoRecord[] = [];
+    for (let offset = 0; ; offset += limit) {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+      if (where.length > 0) params.set('where', whereClause(where));
+      const body = (await this.request(`/api/v2/tables/${tableId}/records?${params}`)) as {
+        list?: NocoRecord[];
+        pageInfo?: { isLastPage?: boolean };
+      };
+      const page = body.list ?? [];
+      records.push(...page);
+      if (body.pageInfo?.isLastPage === true || page.length < limit) return records;
+    }
   }
 
   async createRecord(tableId: string, values: Record<string, unknown>): Promise<NocoRecord> {

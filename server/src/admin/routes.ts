@@ -1,11 +1,10 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { AppDeps } from '../deps.js';
 import { DirectoryUnavailableError, userDirectory, type DirectoryUserView } from '../directory.js';
 import type { Logger } from '../logger.js';
 import { IdClientError } from '../id/client.js';
-import { IdentityStoreError } from '../nocodb/identity.js';
 import { BaseResolutionError } from '../nocodb/base.js';
 import { ConflictError, NotFoundError, UniqueViolationError } from '../nocodb/repos.js';
 import { ValidationError } from '../nocodb/validation.js';
@@ -15,14 +14,7 @@ import {
   extensionUpdatePayload,
   ringGroupPayload,
 } from '../officepulse/payloads.js';
-import { HandsetDeliveryError } from '../provisioning/handset-delivery.js';
-import {
-  requireAnyTenantAdmin,
-  requireSession,
-  requireSuperAdmin,
-  requireTenantAdmin,
-  tenantRole,
-} from './authz.js';
+import { requireSession, requireSuperAdmin, requireTenantAdmin, tenantRole } from './authz.js';
 
 const tenantBody = z.object({
   name: z.string(),
@@ -34,8 +26,10 @@ const tenantBody = z.object({
 });
 
 const tenantUserBody = z.object({
-  role: z.enum(['TENANT_ADMIN', 'USER']),
+  role: z.enum(['SUPER_ADMIN', 'TENANT_ADMIN', 'USER']),
   enabled: z.boolean(),
+  displayName: z.string().trim().max(255).nullable().optional(),
+  email: z.string().email().optional(),
 });
 
 const extensionBody = z.object({
@@ -63,8 +57,6 @@ const ringGroupBody = z.object({
 
 const enrollmentBody = z.object({
   tenantId: z.string(),
-  provisioningMac: z.string(),
-  ttlSeconds: z.number().int().min(60).max(86400).default(900),
 });
 
 /**
@@ -92,19 +84,14 @@ function fail(res: Response, req: Request, err: unknown): void {
         'The record was saved, but PBX provisioning failed. Fix the PBX issue and retry; nothing reconciles in the background.',
       correlationId,
     });
-  } else if (err instanceof HandsetDeliveryError) {
-    res.status(502).json({
-      error: 'handset_delivery_failed',
-      message:
-        'Enrollment was recorded, but delivery to the provisioning service failed. Issue a new enrollment to retry.',
-      correlationId,
-    });
   } else if (err instanceof IdClientError) {
-    res.status(502).json({
-      error: 'id_unavailable',
-      message: 'The identity service call failed',
-      correlationId,
-    });
+    res
+      .status(err.status && [400, 401, 403, 404, 409].includes(err.status) ? err.status : 502)
+      .json({
+        error: 'id_request_failed',
+        message: err.publicMessage ?? 'The identity service call failed',
+        correlationId,
+      });
   } else if (err instanceof DirectoryUnavailableError) {
     res.status(503).json({
       error: 'directory_not_configured',
@@ -112,10 +99,10 @@ function fail(res: Response, req: Request, err: unknown): void {
       missingConfiguration: err.missing,
       correlationId,
     });
-  } else if (err instanceof BaseResolutionError || err instanceof IdentityStoreError) {
+  } else if (err instanceof BaseResolutionError) {
     // The identity base is absent or ambiguous: an operator action, named.
     res.status(503).json({
-      error: 'identity_base_unavailable',
+      error: 'platform_config_unavailable',
       message: err.message,
       correlationId,
     });
@@ -170,8 +157,8 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
         error: 'nocodb_not_configured',
         message:
           deps.missingNocoDb.length > 0
-            ? `The NocoDB AidaAdmin base is not configured: set ${deps.missingNocoDb.join(', ')}`
-            : 'The NocoDB AidaAdmin base is not configured',
+            ? `The NocoDB PlatformConfig base is not configured: set ${deps.missingNocoDb.join(', ')}`
+            : 'The NocoDB PlatformConfig base is not configured',
         missingConfiguration: deps.missingNocoDb,
         correlationId: req.correlationId,
       });
@@ -191,15 +178,14 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
    * tenant they were never given.
    */
   async function assertTenantMember(tenantId: string, identityUserId: number): Promise<void> {
-    const memberships = await repos().tenantUsers.listForUser(identityUserId);
-    if (!memberships.some((m) => m.tenant_id === tenantId)) {
+    const memberships = await repos().tenantUsers.listForTenant(tenantId);
+    if (!memberships.some((m) => Number(m.identity_user_id) === identityUserId && m.enabled)) {
       throw new ValidationError(
         'identityUserId',
         'That user is not a member of this tenant — add them on the tenant users screen first',
       );
     }
   }
-  const anyTenantAdmin = requireAnyTenantAdmin(deps);
 
   const audit = (
     req: Request,
@@ -227,7 +213,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
    * administer, and anyone else sees none. That makes this list the natural
    * entry point to a tenant's screens for both roles.
    */
-  router.get('/admin/tenants', async (req, res, next) => {
+  router.get('/admin/tenants', requireSuperAdmin, async (req, res, next) => {
     try {
       const session = req.session!;
       const tenants = await repos().tenants.list();
@@ -263,7 +249,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.put('/admin/tenants/:tenantId', tenantAdmin, async (req, res, next) => {
+  router.put('/admin/tenants/:tenantId', requireSuperAdmin, async (req, res, next) => {
     try {
       const input = parse(tenantBody, req.body, res, req);
       if (!input) return;
@@ -283,7 +269,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
 
   // ── Central directory + tenant users ──────────────────────────────────────
 
-  router.get('/admin/directory/users', anyTenantAdmin, async (req, res, next) => {
+  router.get('/admin/directory/users', requireSuperAdmin, async (req, res, next) => {
     try {
       const query = typeof req.query.query === 'string' ? req.query.query : '';
       res.json({
@@ -300,7 +286,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  router.post('/admin/directory/users', anyTenantAdmin, async (req, res, next) => {
+  router.post('/admin/directory/users', requireSuperAdmin, async (req, res, next) => {
     try {
       const body = parse(
         z.object({ email: z.string().email(), displayName: z.string().nullish() }),
@@ -320,42 +306,41 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  /**
-   * The one platform-user field AidaAdmin may change. Everything else about
-   * a person — email, identities, credentials — belongs to id alone, and id
-   * publishes no update endpoint at all, so this write goes through the
-   * NocoDB identity base.
-   */
-  router.put('/admin/directory/users/:identityUserId', anyTenantAdmin, async (req, res, next) => {
-    try {
-      const body = parse(
-        z.object({ displayName: z.string().max(255).nullish() }),
-        req.body,
-        res,
-        req,
-      );
-      if (!body) return;
-      const identityUserId = Number(req.params.identityUserId);
-      if (!Number.isInteger(identityUserId) || identityUserId <= 0) {
-        res.status(400).json({
-          error: 'validation',
-          message: 'identityUserId must be a positive integer',
-          correlationId: req.correlationId,
-        });
-        return;
-      }
-      const displayName = body.displayName?.trim() || null;
-      const user = await directory.updateDisplayName(identityUserId, displayName);
-      await audit(req, 'directory_user.update', 'identity_user', String(identityUserId), null);
-      res.json({ user });
-    } catch (err) {
+  /** Authorized display-name edits go through Identity's audited API. */
+  router.put(
+    '/admin/directory/users/:identityUserId',
+    requireSuperAdmin,
+    async (req, res, next) => {
       try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
+        const body = parse(
+          z.object({ displayName: z.string().max(255).nullish() }),
+          req.body,
+          res,
+          req,
+        );
+        if (!body) return;
+        const identityUserId = Number(req.params.identityUserId);
+        if (!Number.isInteger(identityUserId) || identityUserId <= 0) {
+          res.status(400).json({
+            error: 'validation',
+            message: 'identityUserId must be a positive integer',
+            correlationId: req.correlationId,
+          });
+          return;
+        }
+        const displayName = body.displayName?.trim() || null;
+        const user = await directory.updateDisplayName(identityUserId, displayName);
+        await audit(req, 'directory_user.update', 'identity_user', String(identityUserId), null);
+        res.json({ user });
+      } catch (err) {
+        try {
+          fail(res, req, err);
+        } catch (unhandled) {
+          next(unhandled);
+        }
       }
-    }
-  });
+    },
+  );
 
   /**
    * The tenant's members, each resolved against the central directory so the
@@ -368,7 +353,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
       let people: DirectoryUserView[] = [];
       let directoryError: string | null = null;
       try {
-        people = await directory.search('');
+        if (req.session!.superAdmin) people = await directory.search('');
       } catch (err) {
         directoryError = err instanceof Error ? err.message : 'The user directory is unavailable';
       }
@@ -378,12 +363,18 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
           const person = byId.get(Number(user.identity_user_id));
           return {
             ...user,
-            email: person?.email ?? null,
-            display_name: person?.displayName ?? null,
-            claimed: person?.claimed ?? null,
+            email: person?.email ?? user.email ?? null,
+            display_name: person?.displayName ?? user.display_name ?? null,
+            claimed: person?.claimed ?? user.claimed ?? null,
           };
         }),
-        canEditDisplayName: directory.canEditDisplayName,
+        canEditDisplayName:
+          Boolean(deps.idClient?.manageTenantMember) ||
+          (req.session!.superAdmin && directory.canEditDisplayName),
+        canManageDirectory: Boolean(deps.idClient?.addTenantMember) || req.session!.superAdmin,
+        assignableRoles: req.session!.superAdmin
+          ? ['SUPER_ADMIN', 'TENANT_ADMIN', 'USER']
+          : ['TENANT_ADMIN', 'USER'],
         directoryError,
       });
     } catch (err) {
@@ -391,6 +382,36 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
+  router.post('/admin/tenants/:tenantId/users', tenantAdmin, async (req, res, next) => {
+    try {
+      const input = parse(
+        tenantUserBody.extend({
+          email: z.string().email(),
+          displayName: z.string().trim().max(255).nullable(),
+        }),
+        req.body,
+        res,
+        req,
+      );
+      if (!input) return;
+      if (input.role === 'SUPER_ADMIN' && !req.session!.superAdmin) {
+        res
+          .status(403)
+          .json({ error: 'forbidden', message: 'Only a Super Admin can assign that role' });
+        return;
+      }
+      if (!deps.idClient?.addTenantMember)
+        throw new DirectoryUnavailableError('Identity membership management is unavailable');
+      const user = await deps.idClient.addTenantMember(req.params.tenantId as string, input);
+      res.status(201).json({ user });
+    } catch (err) {
+      try {
+        fail(res, req, err);
+      } catch (unhandled) {
+        next(unhandled);
+      }
+    }
+  });
   router.put(
     '/admin/tenants/:tenantId/users/:identityUserId',
     tenantAdmin,
@@ -399,6 +420,12 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
         const input = parse(tenantUserBody, req.body, res, req);
         if (!input) return;
         const tenantId = req.params.tenantId as string;
+        if (input.role === 'SUPER_ADMIN' && !req.session!.superAdmin) {
+          res
+            .status(403)
+            .json({ error: 'forbidden', message: 'Only a Super Admin can assign that role' });
+          return;
+        }
         const identityUserId = Number(req.params.identityUserId);
         if (!Number.isInteger(identityUserId) || identityUserId <= 0) {
           res.status(400).json({
@@ -408,9 +435,24 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
           });
           return;
         }
+        if (deps.idClient?.manageTenantMember) {
+          const member = await deps.idClient.manageTenantMember(tenantId, identityUserId, input);
+          res.json({
+            tenantUser: {
+              identity_user_id: member.iUserId,
+              role: member.role,
+              enabled: member.bEnabled,
+            },
+          });
+          return;
+        }
         // The mapping references the central user — never copies name/email.
         await repos().tenants.get(tenantId);
-        if (directory.available && !(await directory.get(identityUserId))) {
+        if (
+          req.session!.superAdmin &&
+          directory.available &&
+          !(await directory.get(identityUserId))
+        ) {
           res
             .status(404)
             .json({ error: 'unknown_identity_user', correlationId: req.correlationId });
@@ -447,26 +489,13 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
     },
   );
 
-  router.put('/admin/super-admins/:identityUserId', requireSuperAdmin, async (req, res, next) => {
-    try {
-      const body = parse(z.object({ enabled: z.boolean() }), req.body, res, req);
-      if (!body) return;
-      const identityUserId = Number(req.params.identityUserId);
-      const mapping = await repos().tenantUsers.save(
-        null,
-        identityUserId,
-        'SUPER_ADMIN',
-        body.enabled,
-      );
-      await audit(req, 'super_admin.save', 'tenant_user', mapping.id as string, null);
-      res.json({ tenantUser: mapping });
-    } catch (err) {
-      try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
-      }
-    }
+  router.put('/admin/super-admins/:identityUserId', requireSuperAdmin, (req, res) => {
+    res.status(403).json({
+      error: 'identity_managed_privilege',
+      message:
+        'SUPER_ADMIN is managed by Identity; tenant memberships cannot grant platform privileges',
+      correlationId: req.correlationId,
+    });
   });
 
   // ── Extensions ────────────────────────────────────────────────────────────
@@ -622,35 +651,16 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
           body.tenantId,
           req.params.extensionId as string,
         );
-        if (!deps.handsetDelivery) {
-          res.status(503).json({
-            error: 'handset_provisioning_not_configured',
-            correlationId: req.correlationId,
-          });
+        if (!deps.officePulse?.issueDeviceEnrollment) {
+          res
+            .status(503)
+            .json({ error: 'officepulse_not_configured', correlationId: req.correlationId });
           return;
         }
-        const deviceId = randomUUID();
-        const enrollmentToken = randomBytes(32).toString('base64url');
-        const expiresAt = new Date(Date.now() + body.ttlSeconds * 1000).toISOString();
-        // Only the hash reaches NocoDB; the plaintext goes once to the
-        // provisioning service and once to the administrator's response.
-        const updated = await repos().extensions.recordEnrollment(
-          body.tenantId,
+        const grant = await deps.officePulse.issueDeviceEnrollment(
+          Number(body.tenantId),
           extension.id as string,
-          Number(extension.revision),
-          {
-            deviceId,
-            provisioningMac: body.provisioningMac,
-            enrollmentTokenHash: createHash('sha256').update(enrollmentToken).digest('hex'),
-            enrollmentExpiresAt: expiresAt,
-          },
         );
-        await deps.handsetDelivery.deliver({
-          deviceId,
-          provisioningMac: updated.provisioning_mac as string,
-          enrollmentToken,
-          expiresAt,
-        });
         await audit(
           req,
           'extension.handset_enrollment',
@@ -658,7 +668,11 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
           extension.id as string,
           body.tenantId,
         );
-        res.status(201).json({ deviceId, enrollmentToken, expiresAt, tokenShownOnce: true });
+        res.status(201).json({
+          enrollmentToken: grant.enrollmentToken,
+          expiresAt: new Date(Date.now() + grant.expiresIn * 1000).toISOString(),
+          tokenShownOnce: true,
+        });
       } catch (err) {
         try {
           fail(res, req, err);

@@ -1,10 +1,10 @@
 /**
- * Read-only view of OfficePulseAidaIntegration's `aida_officepulse` runtime
+ * Read-only view of OfficePulseAidaIntegration's `aida_db` runtime
  * database (its issue #9; AidaAdmin issue #29).
  *
  * OfficePulse is the sole writer of that database. AidaAdmin connects as
  * the `aidaadmin_ro` account its `deploy/sql/grants.sql` creates — SELECT
- * on `aida_officepulse.*` and nothing else — so read-only is a property of
+ * on `aida_db.*` and nothing else — so read-only is a property of
  * the grant, not of good behaviour here. Two further layers exist anyway:
  * every pooled connection is put in READ ONLY transaction mode, and this
  * module contains no statement that is not a SELECT (a test asserts it).
@@ -154,7 +154,7 @@ export interface MysqlConnectionConfig {
   database: string;
 }
 
-/** `mysql://user:password@host:3306/aida_officepulse` → connection fields. */
+/** `mysql://user:password@host:3306/aida_db` → connection fields. */
 export function parseMysqlUrl(url: string): MysqlConnectionConfig {
   let parsed: URL;
   try {
@@ -275,7 +275,7 @@ export class MysqlRuntimeReader implements RuntimeReader {
     } catch (err) {
       // Never surface the SQL or the connection string.
       throw new RuntimeDbError(
-        `aida_officepulse read failed (${(err as { code?: string }).code ?? 'unknown'})`,
+        `aida_db read failed (${(err as { code?: string }).code ?? 'unknown'})`,
       );
     }
   }

@@ -274,3 +274,120 @@ fieldset label {
   color: var(--color-muted);
   font-size: 0.9rem;
 }
+
+.tenant-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.7rem 1.5rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid #dde1e8;
+}
+.tenant-navigation a {
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  text-decoration: none;
+  color: var(--color-accent);
+}
+.tenant-navigation a[aria-current='page'] {
+  background: var(--color-banner-bg);
+  font-weight: 650;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+th {
+  background: #edf1f7;
+  font-size: 0.85rem;
+  color: #40506a;
+}
+tbody tr:hover {
+  background: #f8faff;
+}
+td button {
+  padding: 0.4rem 0.7rem;
+  border: 1px solid #c5cfde;
+  border-radius: 6px;
+  background: white;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+.list-filter {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+.list-filter input {
+  padding: 0.6rem;
+  border: 1px solid #b8c0cc;
+  border-radius: 6px;
+}
+.record-editor {
+  margin: 1.5rem 0;
+  background: white;
+  border: 1px solid #c8d4e6;
+  border-radius: 10px;
+}
+.record-editor > summary {
+  padding: 1rem 1.25rem;
+  font-weight: 650;
+  color: var(--color-accent);
+  cursor: pointer;
+}
+.record-editor > h2 {
+  margin: 1rem 1.25rem;
+  font-size: 1.1rem;
+}
+.record-editor form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-width: none;
+  padding: 0 1.25rem 1rem;
+  margin-bottom: 0;
+  gap: 1.2rem;
+}
+.record-editor fieldset,
+.record-editor .form-actions,
+.record-editor .form-notice,
+.record-editor form > p {
+  grid-column: 1/-1;
+}
+.record-editor .checkbox-label {
+  flex-direction: row;
+  align-items: center;
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.form-actions button {
+  padding: 0.6rem 1rem;
+}
+form small {
+  color: var(--color-muted);
+  font-weight: 400;
+}
+input[readonly] {
+  background: #f1f3f6;
+}
+.tenant-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.tenant-banner select {
+  margin-left: 0.7rem;
+  padding: 0.45rem;
+}
+@media (max-width: 700px) {
+  .record-editor form {
+    grid-template-columns: 1fr;
+  }
+  .app-header {
+    flex-wrap: wrap;
+  }
+}

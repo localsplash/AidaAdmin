@@ -32,7 +32,7 @@ export function sessionRoutes(config: AppConfig, deps: AppDeps): Router {
           // picker with one entry. A Super Admin is excluded on purpose —
           // "no tenant selected" is a meaningful state for them.
           const allowed = await selectableTenants(deps, req.session.iUserId, false);
-          if (allowed.length === 1) {
+          if (allowed.length >= 1) {
             selectedTenant = allowed[0] ?? null;
             if (selectedTenant && req.sessionSid) {
               await deps.sessionStore.setSelectedTenant(req.sessionSid, selectedTenant.tenantId);

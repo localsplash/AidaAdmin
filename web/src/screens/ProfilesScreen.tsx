@@ -94,7 +94,7 @@ export function ProfilesScreen() {
   return (
     <section aria-labelledby="profiles-heading">
       <p>
-        <Link to="/tenants">← All tenants</Link>
+        <Link to="/">← Dashboard</Link>
       </p>
       <h1 id="profiles-heading">Assistant profiles</h1>
       <p>

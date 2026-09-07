@@ -1,12 +1,9 @@
 import type { NocoColumnDef, NocoDbApi, NocoTableDef } from './api.js';
+import { tableByCanonicalName } from './api.js';
 
-/**
- * Canonical AidaAdmin base schema (normative specification §1.2), plus:
- * - `revision` on mutable tables for optimistic-revision checks,
- * - `configuration_source`, `appearance`, and the immutable `audit_log`
- *   required by POC phase 3 (issue #11).
- * SIP secrets have no column anywhere by design; the extension table stores
- * only the enrollment token HASH, never an issued token.
+/** Aida-owned voice configuration in shared PlatformConfig. Enrollment hash
+ * columns are retained for explicit legacy inspection; new grants live in
+ * OfficePulse. Tenant identity, membership and audit are not stored here.
  */
 
 const text = (name: string): NocoColumnDef => ({
@@ -29,24 +26,18 @@ const dt = (name: string): NocoColumnDef => ({ column_name: name, title: name, u
 
 const common = [text('id'), dt('created_at'), dt('updated_at'), num('revision')];
 
-export const AIDA_SCHEMA: NocoTableDef[] = [
+export const LOGICAL_SCHEMA: NocoTableDef[] = [
   {
-    table_name: 'tenant',
-    title: 'tenant',
+    table_name: 'tenant_profile',
+    title: 'tenant_profile',
     columns: [
       ...common,
-      text('name'),
-      text('slug'),
+      num('tenant_id'),
+      text('legacy_tenant_id'),
       text('asterisk_context'),
       text('caller_id_name'),
       text('caller_id_number'),
-      bool('enabled'),
     ],
-  },
-  {
-    table_name: 'tenant_user',
-    title: 'tenant_user',
-    columns: [...common, text('tenant_id'), num('identity_user_id'), text('role'), bool('enabled')],
   },
   {
     table_name: 'extension',
@@ -147,23 +138,34 @@ export const AIDA_SCHEMA: NocoTableDef[] = [
       text('primary_color'),
     ],
   },
-  {
-    // Immutable: the repository only ever appends; there is no update path.
-    table_name: 'audit_log',
-    title: 'audit_log',
-    columns: [
-      text('id'),
-      dt('created_at'),
-      text('tenant_id'),
-      num('actor_identity_user_id'),
-      text('action'),
-      text('entity_type'),
-      text('entity_id'),
-      longText('details'),
-      text('correlation_id'),
-    ],
-  },
 ];
+
+/** Physical PlatformConfig names; browser and OfficePulse wire fields remain stable. */
+export const TABLE_NAMES: Record<string, string> = {
+  tenant_profile: 'aida_tbl_TenantProfile',
+  extension: 'aida_tbl_Extension',
+  ring_group: 'aida_tbl_RingGroup',
+  ring_group_member: 'aida_tbl_RingGroupMember',
+  assistant_profile: 'aida_tbl_AssistantProfile',
+  did_route: 'aida_tbl_DidRoute',
+  configuration_source: 'aida_tbl_ConfigurationSource',
+  appearance: 'aida_tbl_Appearance',
+};
+export const FIELD_NAMES: Record<string, string> = {
+  tenant_id: 'iTenantId',
+  identity_user_id: 'iUserId',
+};
+export const AIDA_SCHEMA: NocoTableDef[] = LOGICAL_SCHEMA.map((table) => ({
+  ...table,
+  table_name: TABLE_NAMES[table.table_name]!,
+  title: TABLE_NAMES[table.table_name]!,
+  columns: table.columns.map((column) => ({
+    ...column,
+    column_name: FIELD_NAMES[column.column_name] ?? column.column_name,
+    title: FIELD_NAMES[column.column_name] ?? column.title,
+    ...(column.column_name === 'tenant_id' ? { uidt: 'Number' as const } : {}),
+  })),
+}));
 
 /**
  * Logical uniqueness rules (spec §1.2). NocoDB exposes no multi-column
@@ -171,8 +173,7 @@ export const AIDA_SCHEMA: NocoTableDef[] = [
  * write and `validate` documents them.
  */
 export const UNIQUE_RULES: Record<string, string[][]> = {
-  tenant: [['slug'], ['asterisk_context']],
-  tenant_user: [['tenant_id', 'identity_user_id']],
+  tenant_profile: [['tenant_id'], ['asterisk_context']],
   extension: [['tenant_id', 'extension_number'], ['device_id'], ['provisioning_mac']],
   ring_group: [['tenant_id', 'virtual_extension']],
   ring_group_member: [['ring_group_id', 'extension_id']],
@@ -202,31 +203,40 @@ const SYSTEM_COLUMNS = new Set([
 
 export async function reportDrift(api: NocoDbApi): Promise<DriftReport> {
   const live = await api.listTables();
-  const liveByName = new Map(live.map((t) => [t.table_name, t]));
   const canonicalNames = new Set(AIDA_SCHEMA.map((t) => t.table_name));
 
   const report: DriftReport = {
     missingTables: [],
     missingColumns: [],
     typeMismatches: [],
-    extraTables: live.map((t) => t.table_name).filter((name) => !canonicalNames.has(name)),
+    extraTables: live
+      .filter((table) => !canonicalNames.has(table.table_name) && !canonicalNames.has(table.title))
+      .map((table) => table.table_name),
     extraColumns: [],
     inSync: false,
   };
 
   for (const table of AIDA_SCHEMA) {
-    const liveTable = liveByName.get(table.table_name);
+    const liveTable = tableByCanonicalName(live, table.table_name);
     if (!liveTable) {
       report.missingTables.push(table.table_name);
       continue;
     }
     const liveColumns = (await api.listColumns(liveTable.id)).filter(
-      (c) => !c.system && !SYSTEM_COLUMNS.has(c.column_name),
+      (c) =>
+        !c.system &&
+        c.uidt !== 'ID' &&
+        !SYSTEM_COLUMNS.has(c.title) &&
+        !SYSTEM_COLUMNS.has(c.column_name),
     );
-    const liveByCol = new Map(liveColumns.map((c) => [c.column_name, c]));
     const canonicalCols = new Set(table.columns.map((c) => c.column_name));
     for (const col of table.columns) {
-      const liveCol = liveByCol.get(col.column_name);
+      const matching = liveColumns.filter(
+        (liveCol) => liveCol.title === col.title || liveCol.column_name === col.column_name,
+      );
+      if (matching.length > 1)
+        throw new Error(`Ambiguous NocoDB column ${table.table_name}.${col.column_name}`);
+      const liveCol = matching[0];
       if (!liveCol) {
         report.missingColumns.push({ table: table.table_name, column: col.column_name });
       } else if (liveCol.uidt !== col.uidt) {
@@ -239,7 +249,7 @@ export async function reportDrift(api: NocoDbApi): Promise<DriftReport> {
       }
     }
     for (const liveCol of liveColumns) {
-      if (!canonicalCols.has(liveCol.column_name)) {
+      if (!canonicalCols.has(liveCol.column_name) && !canonicalCols.has(liveCol.title)) {
         report.extraColumns.push({ table: table.table_name, column: liveCol.column_name });
       }
     }
@@ -279,9 +289,8 @@ export async function upgradeSchema(api: NocoDbApi): Promise<UpgradeResult> {
 
   if (drift.missingColumns.length > 0) {
     const live = await api.listTables();
-    const liveByName = new Map(live.map((t) => [t.table_name, t]));
     for (const missing of drift.missingColumns) {
-      const liveTable = liveByName.get(missing.table);
+      const liveTable = tableByCanonicalName(live, missing.table);
       const def = AIDA_SCHEMA.find((t) => t.table_name === missing.table)?.columns.find(
         (c) => c.column_name === missing.column,
       );

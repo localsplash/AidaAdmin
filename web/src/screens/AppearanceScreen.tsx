@@ -57,7 +57,7 @@ export function AppearanceScreen() {
   return (
     <section aria-labelledby="appearance-heading">
       <p>
-        <Link to="/tenants">← All tenants</Link>
+        <Link to="/">← Dashboard</Link>
       </p>
       <h1 id="appearance-heading">Appearance</h1>
       {error ? <p role="alert">{error}</p> : null}

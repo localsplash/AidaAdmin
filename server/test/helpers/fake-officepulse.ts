@@ -35,6 +35,11 @@ export class FakeOfficePulse implements OfficePulseClient {
     }
   }
 
+  enrollments: Array<{ iTenantId: number; extensionId: string }> = [];
+  async issueDeviceEnrollment(iTenantId: number, extensionId: string) {
+    this.enrollments.push({ iTenantId, extensionId });
+    return { enrollmentToken: 'runtime-issued-one-time-enrollment-token', expiresIn: 600 };
+  }
   async provisionExtension(req: ProvisionExtensionRequest) {
     this.check();
     this.provisioned.push(req);

@@ -10,10 +10,10 @@ import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
 describe('base resolution by name', () => {
   it('finds the base regardless of how it was capitalised', async () => {
     const api = new FakeNocoDbApi();
-    api.bases = [{ id: 'b-9', title: 'aidaadmin' }];
+    api.bases = [{ id: 'b-9', title: 'platformconfig' }];
     expect(await resolveBaseId(api)).toBe('b-9');
 
-    api.bases = [{ id: 'b-10', title: '  AIDAADMIN ' }];
+    api.bases = [{ id: 'b-10', title: '  PLATFORMCONFIG ' }];
     expect(await resolveBaseId(api)).toBe('b-10');
   });
 
@@ -22,7 +22,7 @@ describe('base resolution by name', () => {
     api.bases = [
       { id: 'b-1', title: 'id' },
       { id: 'b-2', title: AIDA_BASE_NAME },
-      { id: 'b-3', title: 'AidaAdminArchive' },
+      { id: 'b-3', title: 'PlatformConfigArchive' },
     ];
     expect(await resolveBaseId(api)).toBe('b-2');
   });
@@ -30,7 +30,7 @@ describe('base resolution by name', () => {
   it('creates the base when the instance has none', async () => {
     const api = new FakeNocoDbApi();
     api.bases = [];
-    const id = await resolveBaseId(api);
+    const id = await resolveBaseId(api, true);
     expect(api.createdBases).toEqual([AIDA_BASE_NAME]);
     expect(id).toBeTruthy();
   });
@@ -38,8 +38,8 @@ describe('base resolution by name', () => {
   it('refuses to guess between duplicates', async () => {
     const api = new FakeNocoDbApi();
     api.bases = [
-      { id: 'b-1', title: 'AidaAdmin' },
-      { id: 'b-2', title: 'aidaadmin' },
+      { id: 'b-1', title: 'PlatformConfig' },
+      { id: 'b-2', title: 'platformconfig' },
     ];
     await expect(resolveBaseId(api)).rejects.toBeInstanceOf(BaseResolutionError);
     await expect(resolveBaseId(api)).rejects.toThrow(/b-1, b-2/);
@@ -49,8 +49,15 @@ describe('base resolution by name', () => {
     const api = new FakeNocoDbApi();
     api.bases = [];
     api.refuseBaseCreation = true;
-    await expect(resolveBaseId(api)).rejects.toThrow(/Create a base named AidaAdmin/);
+    await expect(resolveBaseId(api, true)).rejects.toThrow(/Create a base named PlatformConfig/);
   });
+});
+
+it('never creates a missing base during a runtime read', async () => {
+  const api = new FakeNocoDbApi();
+  api.bases = [];
+  await expect(resolveBaseId(api)).rejects.toThrow('bootstrap');
+  expect(api.createdBases).toEqual([]);
 });
 
 describe('CachedBaseResolver', () => {

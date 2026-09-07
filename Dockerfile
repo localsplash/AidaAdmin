@@ -18,6 +18,7 @@ COPY web/package.json web/
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=build /app/server/dist server/dist
 COPY --from=build /app/web/dist web/dist
+RUN mkdir -p /app/data/assets && chown -R node:node /app/data
 USER node
 EXPOSE 3001
 CMD ["node", "server/dist/index.js"]

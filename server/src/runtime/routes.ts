@@ -11,7 +11,7 @@ import { RuntimeDbError, type RuntimeCallSession } from '../officepulse/runtime-
 /**
  * Runtime visibility and actions (issue #29). There is no AidaControl:
  * OfficePulseAidaIntegration orchestrates calls and owns the
- * `aida_officepulse` runtime database. AidaAdmin READS that database
+ * `aida_db` runtime database. AidaAdmin READS that database
  * through a read-only account and sends the few allowed ACTIONS to
  * OfficePulse's private HTTP API — never a proxy, never a table write.
  *
@@ -24,6 +24,7 @@ import { RuntimeDbError, type RuntimeCallSession } from '../officepulse/runtime-
 
 const commandBody = z.object({
   commandType: z.literal('TAKEOVER'),
+  expectedCallVersion: z.number().int().nonnegative().optional(),
   idempotencyKey: z.string().min(8).max(120),
   ringTimeoutSeconds: z.number().int().min(5).max(300).optional(),
   musicOnHoldClass: z.string().max(80).optional(),
@@ -124,7 +125,7 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
         error: 'runtime_db_not_configured',
         message:
           'The OfficePulse runtime database is not configured: set OFFICEPULSE_RUNTIME_DATABASE_URL ' +
-          'to the read-only aidaadmin_ro account on aida_officepulse',
+          'to the read-only aidaadmin_ro account on aida_db',
         missingConfiguration: ['OFFICEPULSE_RUNTIME_DATABASE_URL'],
         correlationId: req.correlationId,
       });
@@ -480,7 +481,7 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
       if (!deps.repos) {
         res.status(503).json({
           error: 'nocodb_not_configured',
-          message: 'Retrying provisioning needs the NocoDB AidaAdmin base',
+          message: 'Retrying provisioning needs the NocoDB PlatformConfig base',
           correlationId: req.correlationId,
         });
         return;

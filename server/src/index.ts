@@ -1,11 +1,11 @@
 import { createApp } from './app.js';
-import { ConfigError, loadConfig } from './config.js';
+import { ConfigError } from './config.js';
+import { loadPlatformConfig } from './platform-config.js';
 import { createDeps, migrate } from './deps.js';
-import { userDirectory } from './directory.js';
 import { buildDiagnostics } from './diagnostics.js';
 import { catchUpIdEvents } from './id/events.js';
-import { AIDA_BASE_NAME, IDENTITY_BASE_NAME } from './nocodb/base.js';
-import { upgradeSchema } from './nocodb/schema.js';
+import { AIDA_BASE_NAME } from './nocodb/base.js';
+import { reportDrift } from './nocodb/schema.js';
 import { createLogger } from './logger.js';
 
 const SHUTDOWN_GRACE_MS = 10_000;
@@ -13,7 +13,7 @@ const SHUTDOWN_GRACE_MS = 10_000;
 async function main(): Promise<void> {
   let config;
   try {
-    config = loadConfig();
+    config = await loadPlatformConfig();
   } catch (err) {
     if (err instanceof ConfigError) {
       // Configuration errors name variables, never values.
@@ -58,55 +58,26 @@ async function main(): Promise<void> {
       log.call(logger, { fix: finding.fix }, `login preflight: ${finding.summary}`);
     }
     if (deps.baseResolver && deps.repos) {
-      // Zero-config bootstrap: find (or create) the base by name and bring
-      // the schema up to date. The upgrade is strictly additive and a no-op
-      // once current, so it is safe on every boot. A failure here leaves the
-      // rest of the app serving; the next configuration call retries.
+      // Read-only schema validation. Operators run the explicit bootstrap CLI.
       void deps.baseResolver
         .resolve()
         .then(async (baseId) => {
           logger.info({ base: AIDA_BASE_NAME, baseId }, 'NocoDB base resolved');
-          const result = await upgradeSchema(deps.repos!.store.api);
-          if (result.createdTables.length > 0 || result.addedColumns.length > 0) {
-            logger.info(
-              { created: result.createdTables, added: result.addedColumns },
-              'NocoDB schema brought up to date',
-            );
-          }
-          for (const mismatch of result.typeMismatches) {
+          const drift = await reportDrift(deps.repos!.store.api);
+          if (!drift.inSync)
             logger.error(
-              { ...mismatch },
-              'NocoDB column type differs from the schema; nothing was retyped',
+              { missingTables: drift.missingTables, missingColumns: drift.missingColumns },
+              'PlatformConfig schema requires explicit nocodb upgrade',
             );
-          }
         })
         .catch((err) => {
           logger.error({ err }, `NocoDB base ${AIDA_BASE_NAME} is not usable yet`);
-        });
-
-      // Probe the identity base too. It is never created here — it is a view
-      // onto id's own database — so all this can do is say plainly at boot
-      // whether the user directory will be readable and editable.
-      void userDirectory(deps)
-        .search('')
-        .then((users) => {
-          logger.info(
-            { base: IDENTITY_BASE_NAME, users: users.length },
-            'platform user directory readable',
-          );
-        })
-        .catch((err) => {
-          logger.warn(
-            { err },
-            `NocoDB base ${IDENTITY_BASE_NAME} is not readable: user display names ` +
-              'cannot be listed or edited until it is connected',
-          );
         });
     }
 
     if (deps.runtimeReader) {
       void deps.runtimeReader.ping().then((ok) => {
-        if (ok) logger.info('OfficePulse runtime database (aida_officepulse) readable');
+        if (ok) logger.info('OfficePulse runtime database (aida_db) readable');
         else {
           logger.warn(
             'OfficePulse runtime database is not reachable: runtime views answer 502 until it is',

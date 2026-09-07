@@ -1,0 +1,25 @@
+# Disposable persistence validation. No published ports or persistent volumes.
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: aida_admin_db
+      MYSQL_USER: aida_admin_test
+      MYSQL_PASSWORD: isolated-test-password
+      MYSQL_ROOT_PASSWORD: isolated-root-test-password
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test:
+        ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-pisolated-root-test-password']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  test:
+    image: aida-admin:platform-validation
+    command: ['npm', 'run', 'test', '-w', 'server', '--', 'test/mysql.integration.test.ts']
+    environment:
+      AIDA_ADMIN_TEST_DATABASE_URL: mysql://aida_admin_test:isolated-test-password@mysql:3306/aida_admin_db
+    depends_on:
+      mysql:
+        condition: service_healthy

@@ -106,9 +106,10 @@ describe('ExtensionsScreen', () => {
     });
     renderExtensions();
     const user = userEvent.setup();
+    await user.click(await screen.findByText('Add Extension…'));
     await user.type(await screen.findByLabelText(/extension number/i), '100');
     await user.type(screen.getByLabelText(/display name/i), 'Front Desk');
-    await user.click(screen.getByRole('button', { name: /create and provision/i }));
+    await user.click(screen.getByRole('button', { name: /save record/i }));
 
     const dialog = await screen.findByRole('alertdialog');
     expect(dialog).toHaveTextContent('shown-once-secret');
@@ -137,9 +138,10 @@ describe('ExtensionsScreen', () => {
     });
     renderExtensions();
     const user = userEvent.setup();
+    await user.click(await screen.findByText('Add Extension…'));
     await user.type(await screen.findByLabelText(/extension number/i), '100');
     await user.type(screen.getByLabelText(/display name/i), 'Front Desk');
-    await user.click(screen.getByRole('button', { name: /create and provision/i }));
+    await user.click(screen.getByRole('button', { name: /save record/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/PBX provisioning failed/i);
   });
 });
@@ -229,9 +231,10 @@ describe('extension without a PBX', () => {
       </MemoryRouter>,
     );
     const user = userEvent.setup();
+    await user.click(await screen.findByText('Add Extension…'));
     await user.type(await screen.findByLabelText(/extension number/i), '100');
     await user.type(screen.getByLabelText(/display name/i), 'Front Desk');
-    await user.click(screen.getByRole('button', { name: /create and provision/i }));
+    await user.click(screen.getByRole('button', { name: /save record/i }));
 
     expect(await screen.findByRole('status')).toHaveTextContent(/Extension saved/i);
     // No credential panel, because no secret was issued.
@@ -250,87 +253,6 @@ function renderTenantUsers() {
   );
 }
 
-describe('TenantUsersScreen', () => {
-  it('adds a brand-new user by email, without requiring them to already exist', async () => {
-    const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
-    mockFetch((url, init) => {
-      const method = init?.method ?? 'GET';
-      if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
-        return {
-          status: 200,
-          body: { users: [], canEditDisplayName: true, directoryError: null },
-        };
-      }
-      if (url === '/admin/directory/users' && method === 'POST') {
-        calls.push({ url, method, body: JSON.parse(String(init!.body)) });
-        return {
-          status: 201,
-          body: {
-            user: { iUserId: 77, email: 'new@example.invalid', displayName: null, claimed: false },
-          },
-        };
-      }
-      if (url === '/admin/tenants/ten-1/users/77' && method === 'PUT') {
-        calls.push({ url, method, body: JSON.parse(String(init!.body)) });
-        return {
-          status: 200,
-          body: {
-            tenantUser: {
-              id: 'tu-1',
-              tenant_id: 'ten-1',
-              identity_user_id: 77,
-              role: 'USER',
-              enabled: true,
-            },
-          },
-        };
-      }
-      return null;
-    });
-    renderTenantUsers();
-    const user = userEvent.setup();
-    await user.type(await screen.findByLabelText(/^email$/i), 'new@example.invalid');
-    await user.click(screen.getByRole('button', { name: /add user/i }));
-
-    await waitFor(() => expect(calls).toHaveLength(2));
-    expect(calls[0]).toMatchObject({ url: '/admin/directory/users', method: 'POST' });
-    expect(calls[0]!.body.email).toBe('new@example.invalid');
-    expect(calls[1]).toMatchObject({ url: '/admin/tenants/ten-1/users/77', method: 'PUT' });
-    expect(calls[1]!.body).toMatchObject({ role: 'USER', enabled: true });
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      /added new@example\.invalid.*sign in.*identity/i,
-    );
-  });
-
-  it('marks a found central user who has not yet signed in', async () => {
-    mockFetch((url, init) => {
-      const method = init?.method ?? 'GET';
-      if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
-        return {
-          status: 200,
-          body: { users: [], canEditDisplayName: true, directoryError: null },
-        };
-      }
-      if (url.startsWith('/admin/directory/users?') && method === 'GET') {
-        return {
-          status: 200,
-          body: {
-            users: [
-              { iUserId: 5, email: 'pending@example.invalid', displayName: null, claimed: false },
-            ],
-          },
-        };
-      }
-      return null;
-    });
-    renderTenantUsers();
-    const user = userEvent.setup();
-    await user.type(await screen.findByLabelText(/search by email or name/i), 'pending');
-    await user.click(screen.getByRole('button', { name: /^search$/i }));
-    expect(await screen.findByText(/not yet signed in/i)).toBeInTheDocument();
-  });
-});
-
 const MEMBER = {
   id: 'tu-1',
   tenant_id: 'ten-1',
@@ -342,56 +264,84 @@ const MEMBER = {
   claimed: true,
 };
 
-describe('platform user display names', () => {
-  it('shows the person behind a mapping and saves an edited display name', async () => {
-    const puts: Array<{ url: string; body: Record<string, unknown> }> = [];
+describe('tenant user management', () => {
+  function members(superAdmin = false, claimed = true) {
+    return {
+      users: [{ ...MEMBER, claimed }],
+      canManageDirectory: true,
+      assignableRoles: superAdmin
+        ? ['SUPER_ADMIN', 'TENANT_ADMIN', 'USER']
+        : ['TENANT_ADMIN', 'USER'],
+    };
+  }
+  it('adds a user and role together through the tenant-scoped endpoint', async () => {
+    const posts: unknown[] = [];
     mockFetch((url, init) => {
-      const method = init?.method ?? 'GET';
-      if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
-        return {
-          status: 200,
-          body: { users: [MEMBER], canEditDisplayName: true, directoryError: null },
-        };
+      if (url !== '/admin/tenants/ten-1/users') return null;
+      if (init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)));
+        return { status: 201, body: {} };
       }
-      if (url === '/admin/directory/users/42' && method === 'PUT') {
-        puts.push({ url, body: JSON.parse(String(init!.body)) });
-        return { status: 200, body: { user: { iUserId: 42, displayName: 'Patricia' } } };
-      }
-      return null;
+      return { status: 200, body: members(true) };
     });
     renderTenantUsers();
     const user = userEvent.setup();
-
-    // The mapping reads as a person, not a bare id.
-    expect(await screen.findByText(/pat@example\.invalid/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /edit name/i }));
-    const input = screen.getByLabelText(/display name for user 42/i);
-    await user.clear(input);
-    await user.type(input, 'Patricia');
-    await user.click(screen.getByRole('button', { name: /save name/i }));
-
-    await waitFor(() => expect(puts).toHaveLength(1));
-    expect(puts[0]!.body).toEqual({ displayName: 'Patricia' });
+    await user.click(await screen.findByText('Add User…'));
+    await user.type(screen.getByLabelText('Email address'), 'new@example.invalid');
+    await user.selectOptions(screen.getByLabelText('Role'), 'SUPER_ADMIN');
+    await user.click(screen.getByRole('button', { name: 'Add user' }));
+    await waitFor(() =>
+      expect(posts).toEqual([
+        { email: 'new@example.invalid', displayName: null, role: 'SUPER_ADMIN', enabled: true },
+      ]),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('Added new@example.invalid');
   });
-
-  it('hides name editing and says why when the identity base is not connected', async () => {
+  it('edits the whole record once, keeps linked email read-only, and limits tenant roles', async () => {
+    const puts: unknown[] = [];
     mockFetch((url, init) => {
-      if (url === '/admin/tenants/ten-1/users' && (init?.method ?? 'GET') === 'GET') {
-        return {
-          status: 200,
-          body: {
-            users: [MEMBER],
-            canEditDisplayName: false,
-            directoryError: 'No NocoDB base named AidaIdentity exists.',
-          },
-        };
+      if (init?.method === 'PUT') {
+        expect(url).toBe('/admin/tenants/ten-1/users/42');
+        puts.push(JSON.parse(String(init.body)));
+        return { status: 200, body: {} };
       }
-      return null;
+      return { status: 200, body: members() };
     });
     renderTenantUsers();
-    expect(await screen.findByRole('alert')).toHaveTextContent(/AidaIdentity/);
-    expect(screen.queryByRole('button', { name: /edit name/i })).not.toBeInTheDocument();
+    const user = userEvent.setup();
+    expect(await screen.findByText('pat@example.invalid')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Edit Pat' }));
+    expect(screen.getByLabelText('Email address')).toHaveAttribute('readonly');
+    expect(screen.queryByRole('option', { name: 'Super Admin' })).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText('Display name'));
+    await user.type(screen.getByLabelText('Display name'), 'Patricia');
+    await user.selectOptions(screen.getByLabelText('Role'), 'TENANT_ADMIN');
+    await user.click(screen.getByRole('button', { name: 'Save user' }));
+    await waitFor(() =>
+      expect(puts).toEqual([{ displayName: 'Patricia', role: 'TENANT_ADMIN', enabled: true }]),
+    );
+  });
+  it('keeps the add form and email on a failed assignment', async () => {
+    mockFetch((_url, init) =>
+      init?.method === 'POST'
+        ? { status: 409, body: { error: 'conflict', message: 'Account conflict' } }
+        : { status: 200, body: members() },
+    );
+    renderTenantUsers();
+    const user = userEvent.setup();
+    await user.click(await screen.findByText('Add User…'));
+    await user.type(screen.getByLabelText('Email address'), 'pending@example.invalid');
+    await user.click(screen.getByRole('button', { name: 'Add user' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Account conflict');
+    expect(screen.getByLabelText('Email address')).toHaveValue('pending@example.invalid');
+  });
+  it('shows pending sign-in status and prevents tenant admins editing Super Admins', async () => {
+    const body = members(false, false);
+    body.users[0]!.role = 'SUPER_ADMIN';
+    mockFetch(() => ({ status: 200, body }));
+    renderTenantUsers();
+    expect(await screen.findByText('Awaiting first sign-in')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument();
   });
 });
 
@@ -406,7 +356,12 @@ describe('extension owner', () => {
       if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
         return {
           status: 200,
-          body: { users: [MEMBER], canEditDisplayName: true, directoryError: null },
+          body: {
+            users: [MEMBER],
+            canEditDisplayName: true,
+            canManageDirectory: true,
+            directoryError: null,
+          },
         };
       }
       if (url.endsWith('/admin/extensions') && method === 'POST') {
@@ -420,13 +375,14 @@ describe('extension owner', () => {
     });
     renderExtensions();
     const user = userEvent.setup();
+    await user.click(await screen.findByText('Add Extension…'));
     await user.type(await screen.findByLabelText(/extension number/i), '100');
     await user.selectOptions(screen.getByLabelText(/^user$/i), '42');
 
     // Picking a person fills an empty display name from them.
     expect(screen.getByLabelText(/display name/i)).toHaveValue('Pat');
 
-    await user.click(screen.getByRole('button', { name: /create and provision/i }));
+    await user.click(screen.getByRole('button', { name: /save record/i }));
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]!.identityUserId).toBe(42);
   });

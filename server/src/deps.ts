@@ -1,7 +1,8 @@
-import type pg from 'pg';
+import type { Pool } from 'mysql2/promise';
 import {
   MemoryAuthDb,
   MemorySessionRepository,
+  IdentitySessionRepository,
   type SessionRepository,
 } from './auth/session-store.js';
 import { MemoryAuthStateRepository, type AuthStateRepository } from './auth/state-store.js';
@@ -11,16 +12,17 @@ import {
   createPool,
   migrate,
   ping,
-  PostgresAuthStateRepository,
-  PostgresIdentityEventStore,
-  PostgresSessionRepository,
-} from './db/postgres.js';
+  MysqlAuthStateRepository,
+  MysqlIdentityEventStore,
+  MysqlAuditLog,
+} from './db/mysql.js';
 import { HttpIdClient, type IdClient } from './id/client.js';
+import { PlatformTenantRepository, PlatformMembershipRepository } from './id/repositories.js';
 import { MemoryIdentityEventStore, type IdentityEventStore } from './id/event-store.js';
 import { HttpNocoDbApi } from './nocodb/api.js';
-import { CachedBaseResolver, resolveBaseId, resolveIdentityBaseId } from './nocodb/base.js';
-import { NocoIdentityStore } from './nocodb/identity.js';
-import { createRepos, NocoDbTenantUserDirectory, type AidaConfigRepos } from './nocodb/repos.js';
+import { CachedBaseResolver, resolveBaseId } from './nocodb/base.js';
+import { reportDrift } from './nocodb/schema.js';
+import { createRepos, NocoStore, type AidaConfigRepos } from './nocodb/repos.js';
 import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
 import { MysqlRuntimeReader, parseMysqlUrl, type RuntimeReader } from './officepulse/runtime-db.js';
 import {
@@ -32,157 +34,88 @@ export interface AppDeps {
   idClient: IdClient | null;
   sessionStore: SessionRepository;
   stateStore: AuthStateRepository;
+  /** Test-only login seam; production uses Identity introspection. */
   tenantDirectory: TenantUserDirectory;
   eventStore: IdentityEventStore;
-  /** Non-null when the NocoDB AidaAdmin base is configured. */
   repos: AidaConfigRepos | null;
-  /** Names of the NocoDB variables that are missing when repos is null. */
   missingNocoDb: ServiceEnvVar[];
-  /** Non-null whenever repos is; resolves the base id by name on demand. */
   baseResolver: CachedBaseResolver | null;
-  /**
-   * Reads (and writes display names to) the platform user table through the
-   * NocoDB AidaIdentity base. Non-null whenever NocoDB is configured;
-   * whether that base exists is discovered on use. Pair it with idClient
-   * through `userDirectory()` rather than holding a directory here — two
-   * fields that must agree is one too many.
-   */
-  identityStore: NocoIdentityStore | null;
-  /** Non-null when the OfficePulse private API is configured. */
   officePulse: OfficePulseClient | null;
-  /**
-   * Read-only view of OfficePulse's `aida_officepulse` runtime database.
-   * Non-null when OFFICEPULSE_RUNTIME_DATABASE_URL is set.
-   */
   runtimeReader: RuntimeReader | null;
-  /** Non-null when the handset provisioning service is configured. */
   handsetDelivery: HandsetProvisioningDelivery | null;
-  /** Non-null when PostgreSQL persistence is configured. */
-  pool: pg.Pool | null;
-  /** Readiness probe for the persistence layer (always true without one). */
+  pool: Pool | null;
   dbReady: () => Promise<boolean>;
+  configReady?: () => Promise<boolean>;
 }
 
-/**
- * Only the instance and the credential are configuration. The base itself is
- * addressed by name (see nocodb/base.ts) and its id is discovered at
- * startup, so there is nothing per-deployment to look up by hand.
- */
 export const NOCODB_ENV_VARS: ServiceEnvVar[] = ['NOCODB_BASE_URL', 'NOCODB_API_TOKEN'];
-
 export function missingNocoDbConfig(config: AppConfig): ServiceEnvVar[] {
   return NOCODB_ENV_VARS.filter((name) => !config.serviceConfig[name]);
 }
 
-export interface NocoDbSetup {
+/** Only a real Identity client can wire the deployed directory repositories. */
+export function nocodbFromConfig(
+  config: AppConfig,
+  idClient: HttpIdClient | null,
+  pool: Pool | null,
+): {
   repos: AidaConfigRepos;
-  /** Resolves (and caches) the base id; safe to call repeatedly. */
   baseResolver: CachedBaseResolver;
-  /**
-   * Reads the platform user table out of the AidaIdentity base. Present
-   * whenever NocoDB is configured — whether that base actually exists is
-   * discovered on first use, not at wiring time, so a base connected later
-   * starts working without a restart.
-   */
-  identity: NocoIdentityStore;
-}
-
-export function nocodbFromConfig(config: AppConfig): NocoDbSetup | null {
+} | null {
   const { NOCODB_BASE_URL, NOCODB_API_TOKEN } = config.serviceConfig;
-  if (!NOCODB_BASE_URL || !NOCODB_API_TOKEN) return null;
-  // The client and the resolver share one API object: discovery uses the
-  // same credential and instance as every later call.
-  const api: HttpNocoDbApi = new HttpNocoDbApi(
-    NOCODB_BASE_URL,
-    NOCODB_API_TOKEN,
-    (): Promise<string> => resolver.resolve(),
+  if (!NOCODB_BASE_URL || !NOCODB_API_TOKEN || !idClient) return null;
+  const api: HttpNocoDbApi = new HttpNocoDbApi(NOCODB_BASE_URL, NOCODB_API_TOKEN, () =>
+    resolver.resolve(),
   );
-  const resolver: CachedBaseResolver = new CachedBaseResolver(() => resolveBaseId(api));
-
-  // A second client over the same instance and credential, pointed at the
-  // identity base. Its resolver caches success only, so connecting the base
-  // after boot is picked up on the next call.
-  const identityApi: HttpNocoDbApi = new HttpNocoDbApi(
-    NOCODB_BASE_URL,
-    NOCODB_API_TOKEN,
-    (): Promise<string> => identityResolver.resolve(),
-  );
-  const identityResolver: CachedBaseResolver = new CachedBaseResolver(() =>
-    resolveIdentityBaseId(identityApi),
-  );
-
+  const resolver = new CachedBaseResolver(() => resolveBaseId(api));
+  const store = new NocoStore(api);
   return {
-    repos: createRepos(api),
+    repos: createRepos(api, {
+      tenants: new PlatformTenantRepository(idClient, store),
+      tenantUsers: new PlatformMembershipRepository(idClient),
+      audit: pool ? new MysqlAuditLog(pool) : { append: async () => {} },
+    }),
     baseResolver: resolver,
-    identity: new NocoIdentityStore(identityApi),
   };
 }
 
-/**
- * Persistence selection: with AIDA_ADMIN_DATABASE_URL, sessions, login
- * states, and identity events live in AidaAdmin's own PostgreSQL database
- * and survive restarts. Without it (credential-less dev and unit tests),
- * memory-backed equivalents with the same semantics are used.
- */
 export function createDeps(config: AppConfig): AppDeps {
   const idBase = config.serviceConfig.ID_BASE_URL;
-  const idClient = idBase ? new HttpIdClient(idBase) : null;
+  const idClient = idBase ? new HttpIdClient(idBase, config.serviceConfig.ID_CLIENT_SECRET) : null;
   const databaseUrl = config.serviceConfig.AIDA_ADMIN_DATABASE_URL;
-  const nocodb = nocodbFromConfig(config);
-  const repos = nocodb?.repos ?? null;
-  // With NocoDB configured, tenant_user backs the login directory; without
-  // it there are no mappings, so non-super-admins stay denied (POC rule).
-  const tenantDirectory = repos
-    ? new NocoDbTenantUserDirectory(repos.tenantUsers)
-    : new EmptyTenantUserDirectory();
-  const baseResolver = nocodb?.baseResolver ?? null;
-  const identityStore = nocodb?.identity ?? null;
+  const pool = databaseUrl ? createPool(databaseUrl) : null;
+  const nocodb = nocodbFromConfig(config, idClient, pool);
   const officePulseBase = config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL;
-  const officePulse = officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null;
   const handsetUrl = config.serviceConfig.HANDSET_PROVISIONING_URL;
-  const handsetDelivery = handsetUrl ? new HttpHandsetProvisioningDelivery(handsetUrl) : null;
-  // A malformed URL throws here, at boot, naming the variable — not on the
-  // first runtime page view.
   const runtimeUrl = config.serviceConfig.OFFICEPULSE_RUNTIME_DATABASE_URL;
-  const runtimeReader = runtimeUrl ? new MysqlRuntimeReader(parseMysqlUrl(runtimeUrl)) : null;
-
-  if (databaseUrl) {
-    const pool = createPool(databaseUrl);
-    return {
-      idClient,
-      sessionStore: new PostgresSessionRepository(pool),
-      stateStore: new PostgresAuthStateRepository(pool),
-      tenantDirectory,
-      eventStore: new PostgresIdentityEventStore(pool),
-      repos,
-      missingNocoDb: missingNocoDbConfig(config),
-      baseResolver,
-      identityStore,
-      officePulse,
-      runtimeReader,
-      handsetDelivery,
-      pool,
-      dbReady: () => ping(pool),
-    };
-  }
-
   const memoryDb = new MemoryAuthDb();
   return {
     idClient,
-    sessionStore: new MemorySessionRepository(memoryDb),
-    stateStore: new MemoryAuthStateRepository(),
-    tenantDirectory,
-    eventStore: new MemoryIdentityEventStore(memoryDb),
-    repos,
+    // Memory sessions exist only in credential-free tests; configuring Identity
+    // always selects centralized sessions, regardless of the local SQL store.
+    sessionStore: idClient
+      ? new IdentitySessionRepository(idClient)
+      : new MemorySessionRepository(memoryDb),
+    stateStore: pool ? new MysqlAuthStateRepository(pool) : new MemoryAuthStateRepository(),
+    tenantDirectory: new EmptyTenantUserDirectory(),
+    eventStore: pool ? new MysqlIdentityEventStore(pool) : new MemoryIdentityEventStore(memoryDb),
+    repos: nocodb?.repos ?? null,
     missingNocoDb: missingNocoDbConfig(config),
-    baseResolver,
-    identityStore,
-    officePulse,
-    runtimeReader,
-    handsetDelivery,
-    pool: null,
-    dbReady: async () => true,
+    baseResolver: nocodb?.baseResolver ?? null,
+    officePulse: officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null,
+    runtimeReader: runtimeUrl ? new MysqlRuntimeReader(parseMysqlUrl(runtimeUrl)) : null,
+    handsetDelivery: handsetUrl ? new HttpHandsetProvisioningDelivery(handsetUrl) : null,
+    pool,
+    dbReady: pool ? () => ping(pool) : async () => true,
+    configReady: nocodb
+      ? async () => {
+          try {
+            return (await reportDrift(nocodb.repos.store.api)).inSync;
+          } catch {
+            return false;
+          }
+        }
+      : async () => config.nodeEnv !== 'production',
   };
 }
-
 export { migrate };

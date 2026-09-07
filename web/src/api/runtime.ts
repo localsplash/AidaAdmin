@@ -180,10 +180,16 @@ export const runtimeApi = {
       `/runtime/calls/${encodeURIComponent(callSessionId)}/events?since=${since}`,
       'GET',
     ),
-  takeover: (callSessionId: string, idempotencyKey: string, ringTimeoutSeconds?: number) =>
+  takeover: (
+    callSessionId: string,
+    idempotencyKey: string,
+    ringTimeoutSeconds?: number,
+    expectedCallVersion?: number,
+  ) =>
     call<CommandOutcome>(`/runtime/calls/${encodeURIComponent(callSessionId)}/commands`, 'POST', {
       commandType: 'TAKEOVER',
       idempotencyKey,
+      expectedCallVersion,
       ...(ringTimeoutSeconds ? { ringTimeoutSeconds } : {}),
     }),
   issues: (tenant?: string) => call<Issues>(`/runtime/issues?x=1${tenantQuery(tenant)}`, 'GET'),

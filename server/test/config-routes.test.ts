@@ -1,3 +1,4 @@
+import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
-import { createRepos } from '../src/nocodb/repos.js';
+import { createRepos } from './helpers/legacy-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import { createLogger } from '../src/logger.js';
 import { FakeOfficePulse } from './helpers/fake-officepulse.js';
@@ -35,6 +36,7 @@ beforeEach(async () => {
   });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
+  await seedLegacyDirectory(api);
   const officePulse = new FakeOfficePulse();
   const repos = createRepos(api);
   const deps: AppDeps = { ...createDeps(config), repos, officePulse };
@@ -136,7 +138,7 @@ describe('assistant profiles', () => {
     });
     // Unknown fields are simply not part of the contract and are dropped.
     expect(res.status).toBe(201);
-    const stored = ctx.api.tableByName('assistant_profile')!.records.at(-1)!;
+    const stored = ctx.api.tableByName('aida_tbl_AssistantProfile')!.records.at(-1)!;
     expect('voice' in stored).toBe(false);
     expect('model' in stored).toBe(false);
   });
@@ -196,7 +198,7 @@ describe('DID routes', () => {
     ctx.officePulse.failNext = true;
     const res = await post('/admin/did-routes', routeInput());
     expect(res.status).toBe(502);
-    expect(ctx.api.tableByName('did_route')!.records).toHaveLength(1);
+    expect(ctx.api.tableByName('aida_tbl_DidRoute')!.records).toHaveLength(1);
   });
 });
 

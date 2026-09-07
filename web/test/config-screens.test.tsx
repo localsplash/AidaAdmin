@@ -113,10 +113,11 @@ describe('DidRoutesScreen', () => {
     });
     renderAt('/tenants/t1/did-routes', '/tenants/:tenantId/did-routes', <DidRoutesScreen />);
     const user = userEvent.setup();
+    await user.click(await screen.findByText(/Add DID/));
     await user.type(await screen.findByLabelText(/did \(e\.164\)/i), '+15105550100');
     await user.selectOptions(screen.getByLabelText(/assistant profile/i), 'p1');
     await user.selectOptions(screen.getByLabelText(/^destination$/i), 'e1');
-    await user.click(screen.getByRole('button', { name: /create and provision/i }));
+    await user.click(screen.getByRole('button', { name: /save record/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/same did_e164/i);
   });
 });

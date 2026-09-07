@@ -75,6 +75,7 @@ export interface Extension {
   identity_user_id: number | null;
   caller_id_name: string | null;
   caller_id_number: string | null;
+  provisioning_profile?: string | null;
   provisioning_mac: string | null;
   device_credential_version: number;
   enabled: boolean;
@@ -86,6 +87,9 @@ export interface RingGroup {
   name: string;
   virtual_extension: string;
   ring_timeout_seconds: number;
+  music_on_hold_class?: string | null;
+  caller_id_name?: string | null;
+  caller_id_number?: string | null;
   enabled: boolean;
   revision: number;
   members: Array<{ extension_id: string }>;
@@ -141,6 +145,7 @@ export interface ExtensionInput {
   displayName: string;
   callerIdName?: string | null;
   callerIdNumber?: string | null;
+  provisioningProfile?: string | null;
   enabled: boolean;
 }
 
@@ -150,6 +155,9 @@ export interface RingGroupInput {
   virtualExtension: string;
   ringTimeoutSeconds: number;
   memberExtensionIds: string[];
+  musicOnHoldClass?: string | null;
+  callerIdName?: string | null;
+  callerIdNumber?: string | null;
   enabled: boolean;
 }
 
@@ -177,16 +185,29 @@ export interface ProfileInput {
 }
 
 export const adminApi = {
+  selectTenant: (tenantId: string) => call('/api/session/tenant', 'POST', { tenantId }),
+  addTenantUser: (
+    tenantId: string,
+    input: { email: string; displayName: string | null; role: string; enabled: boolean },
+  ) => call(`/admin/tenants/${tenantId}/users`, 'POST', input),
+  editTenantUser: (
+    tenantId: string,
+    userId: number,
+    input: { role: string; enabled: boolean; displayName?: string | null; email?: string },
+  ) => call(`/admin/tenants/${tenantId}/users/${userId}`, 'PUT', input),
   listTenants: () => call<{ tenants: Tenant[] }>('/admin/tenants', 'GET'),
   createTenant: (input: TenantInput) => call<{ tenant: Tenant }>('/admin/tenants', 'POST', input),
   updateTenant: (tenantId: string, expectedRevision: number, input: TenantInput) =>
     call<{ tenant: Tenant }>(`/admin/tenants/${tenantId}`, 'PUT', { ...input, expectedRevision }),
 
   listTenantUsers: (tenantId: string) =>
-    call<{ users: TenantUser[]; canEditDisplayName: boolean; directoryError: string | null }>(
-      `/admin/tenants/${tenantId}/users`,
-      'GET',
-    ),
+    call<{
+      users: TenantUser[];
+      canEditDisplayName: boolean;
+      canManageDirectory?: boolean;
+      assignableRoles?: string[];
+      directoryError: string | null;
+    }>(`/admin/tenants/${tenantId}/users`, 'GET'),
   searchDirectory: (query: string) =>
     call<{ users: DirectoryUser[]; canEditDisplayName: boolean; canCreate: boolean }>(
       `/admin/directory/users?query=${encodeURIComponent(query)}`,
@@ -224,11 +245,11 @@ export const adminApi = {
       tenantId,
       reprovisionDevice,
     }),
-  issueEnrollment: (extensionId: string, tenantId: string, provisioningMac: string) =>
-    call<{ deviceId: string; enrollmentToken: string; expiresAt: string }>(
+  issueEnrollment: (extensionId: string, tenantId: string) =>
+    call<{ enrollmentToken: string; expiresAt: string }>(
       `/admin/extensions/${extensionId}/handset-enrollment`,
       'POST',
-      { tenantId, provisioningMac },
+      { tenantId },
     ),
 
   listRingGroups: (tenantId: string) =>

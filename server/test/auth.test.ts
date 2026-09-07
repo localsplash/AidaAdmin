@@ -1,9 +1,10 @@
+import { IdentitySessionRepository } from '../src/auth/session-store.js';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
-import type { IdClient, IdEvent, IdRedeemResult } from '../src/id/client.js';
+import type { IdClient, IdEvent, IdRedeemResult, PlatformTenant } from '../src/id/client.js';
 import { createLogger } from '../src/logger.js';
 
 const AUTH_ENV: NodeJS.ProcessEnv = {
@@ -16,10 +17,27 @@ const AUTH_ENV: NodeJS.ProcessEnv = {
 
 class FakeIdClient implements IdClient {
   redeemCalls: Array<{ code: string; redirectUri: string }> = [];
+  revoked = false;
+  tenants: PlatformTenant[] = [];
+  async introspectSession() {
+    return this.revoked
+      ? { active: false as const }
+      : {
+          active: true as const,
+          user: this.result.user,
+          tenants: this.tenants,
+          selectedTenantId: null,
+        };
+  }
+  async revokeSession() {
+    this.revoked = true;
+  }
+  async selectTenant() {}
   result: IdRedeemResult = {
     user: { iUserId: 42, email: 'person@example.invalid', displayName: 'Pat', superAdmin: true },
     identity: { provider: 'google', subject: 'sub-1' },
     identities: [],
+    appSession: { token: 'central-session-token' },
   };
 
   async redeemCode(code: string, redirectUri: string): Promise<IdRedeemResult> {
@@ -48,7 +66,11 @@ class FakeIdClient implements IdClient {
 
 function authApp(idClient: IdClient = new FakeIdClient()) {
   const config = loadConfig(AUTH_ENV);
-  const deps: AppDeps = { ...createDeps(config), idClient };
+  const deps: AppDeps = {
+    ...createDeps(config),
+    idClient,
+    sessionStore: new IdentitySessionRepository(idClient),
+  };
   return { app: createApp(config, createLogger(config), deps), deps };
 }
 
@@ -62,6 +84,18 @@ async function startLogin(app: ReturnType<typeof authApp>['app']) {
 }
 
 describe('login redirect', () => {
+  it('uses the public Identity origin for the browser while retaining the private client origin', async () => {
+    const config = loadConfig({
+      ...AUTH_ENV,
+      ID_BASE_URL: 'http://identity-preview:3200',
+      ID_PUBLIC_BASE_URL: 'https://identity-preview.example.invalid',
+    });
+    const app = createApp(config, createLogger(config), createDeps(config));
+    const { location } = await startLogin(app);
+    expect(location.origin).toBe('https://identity-preview.example.invalid');
+    expect(config.serviceConfig.ID_BASE_URL).toBe('http://identity-preview:3200');
+  });
+
   it('redirects to id /authorize with state and the exact callback', async () => {
     const { app } = authApp();
     const { location, state } = await startLogin(app);
@@ -152,6 +186,7 @@ describe('login callback', () => {
       },
       identity: { provider: 'google', subject: 'sub-7' },
       identities: [],
+      appSession: { token: 'central-session-token' },
     };
     const { app } = authApp(idClient);
     const { state, cookies } = await startLogin(app);
@@ -165,7 +200,7 @@ describe('login callback', () => {
 });
 
 describe('logout', () => {
-  it('revokes the local session', async () => {
+  it('revokes the central application session', async () => {
     const { app } = authApp();
     const { state, cookies } = await startLogin(app);
     const cb = await request(app)
@@ -197,4 +232,32 @@ describe('credential hygiene', () => {
     expect(body).not.toContain('SECRET');
     expect(body).not.toContain('id.example.invalid');
   });
+});
+
+describe('central admin admission', () => {
+  it.each(['TENANT_ADMIN', 'USER'] as const)(
+    'admits only administrative membership: %s',
+    async (role) => {
+      const client = new FakeIdClient();
+      client.result.user.superAdmin = false;
+      client.tenants = [{ iTenantId: 1, name: 'Business', slug: 'business', bEnabled: true, role }];
+      const { app } = authApp(client);
+      const { state, cookies } = await startLogin(app);
+      const callback = await request(app)
+        .get(`/api/auth/callback?code=code&state=${encodeURIComponent(state)}`)
+        .set('Cookie', cookies);
+      expect(callback.headers.location).toBe(role === 'TENANT_ADMIN' ? '/' : '/?login=denied');
+      expect(client.revoked).toBe(role === 'USER');
+      if (role === 'TENANT_ADMIN') {
+        const sessionCookies = callback.headers['set-cookie'] as unknown as string[];
+        const session = await request(app).get('/api/session').set('Cookie', sessionCookies);
+        expect(session.status).toBe(200);
+        expect(session.body.selectedTenant.tenantId).toBe('1');
+        client.tenants[0]!.role = 'USER';
+        expect((await request(app).get('/api/session').set('Cookie', sessionCookies)).status).toBe(
+          401,
+        );
+      }
+    },
+  );
 });

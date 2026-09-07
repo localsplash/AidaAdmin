@@ -31,10 +31,7 @@ async function applyEffects(event: IdEvent, fx: IdentityEffects, logger: Logger)
   const data = event.data ?? {};
   switch (event.type) {
     case 'session.revoked': {
-      // id's /api/token response carries no session identifier, so local
-      // sessions cannot be tied to one id session. POC decision: any
-      // session.revoked (scope "one" or "all") revokes every local session
-      // for that user — strictly safer than under-revoking.
+      // Production revocation is already authoritative in Identity.
       const iUserId = asNumber(data.iUserId);
       if (iUserId !== null) {
         const revoked = await fx.revokeUserSessions(iUserId);
@@ -50,8 +47,7 @@ async function applyEffects(event: IdEvent, fx: IdentityEffects, logger: Logger)
       const to = asNumber(data.toUserId);
       if (from !== null && to !== null) {
         const moved = await fx.mergeUserSessions(from, to);
-        // Phase 3+: repoint NocoDB tenant_user mappings for `from` → `to`
-        // here as well, before the event commits as processed.
+        // No local membership or person master exists.
         logger.info({ eventId: event.id, moved }, 'id user.merged applied');
       }
       break;
@@ -134,6 +130,7 @@ export async function catchUpIdEvents(
     }
     const lastId = events[events.length - 1]?.id ?? since;
     if (lastId <= since) break;
+    await deps.eventStore.advanceReplayCursor?.(lastId);
     since = lastId;
     if (events.length < EVENT_PAGE_SIZE) break;
   }

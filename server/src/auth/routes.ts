@@ -34,7 +34,7 @@ export function authRoutes(config: AppConfig, logger: Logger, deps: AppDeps): Ro
 
   router.get('/api/auth/login', async (req, res, next) => {
     try {
-      const idBase = config.serviceConfig.ID_BASE_URL;
+      const idBase = config.serviceConfig.ID_PUBLIC_BASE_URL ?? config.serviceConfig.ID_BASE_URL;
       const redirectUri = callbackUri(config);
       if (!idBase || !redirectUri || !deps.idClient) {
         // Name what is missing so the operator does not have to guess.
@@ -96,8 +96,31 @@ export function authRoutes(config: AppConfig, logger: Logger, deps: AppDeps): Ro
       }
 
       const { user, identity } = redeemed;
+      const central = redeemed.appSession?.token;
+      // Require the consolidated contract whenever a real Identity client is wired.
+      // Unit-test memory adapters can still model the legacy handoff explicitly.
+      if (deps.idClient.introspectSession) {
+        if (!central) {
+          failLogin(res, 'error');
+          return;
+        }
+        const live = await deps.idClient.introspectSession(central);
+        if (
+          !live.active ||
+          (!live.user.superAdmin &&
+            !live.tenants.some((t) => t.bEnabled && t.role === 'TENANT_ADMIN'))
+        ) {
+          await deps.idClient.revokeSession?.(central);
+          failLogin(res, 'denied');
+          return;
+        }
+      }
       // superAdmin comes from the id response only — never recalculated here.
-      if (!user.superAdmin && !(await deps.tenantDirectory.hasEnabledMembership(user.iUserId))) {
+      if (
+        !deps.idClient.introspectSession &&
+        !user.superAdmin &&
+        !(await deps.tenantDirectory.hasEnabledMembership(user.iUserId))
+      ) {
         logger.info({ correlationId: req.correlationId }, 'login denied: no enabled tenant_user');
         failLogin(res, 'denied');
         return;
@@ -109,6 +132,7 @@ export function authRoutes(config: AppConfig, logger: Logger, deps: AppDeps): Ro
         displayName: user.displayName ?? null,
         superAdmin: user.superAdmin,
         provider: identity?.provider ?? null,
+        ...(central ? { centralToken: central } : {}),
       });
       res.cookie(SESSION_COOKIE, sid, cookieOptions(config, true));
       res.redirect('/');

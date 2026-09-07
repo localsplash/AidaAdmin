@@ -1,259 +1,233 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { adminApi, ApiError, type DirectoryUser, type TenantUser } from '../api/admin';
+import { useParams } from 'react-router-dom';
+import { adminApi, type TenantUser } from '../api/admin';
 
+const EMPTY = { email: '', displayName: '', role: 'USER', enabled: true };
+const LABELS: Record<string, string> = {
+  SUPER_ADMIN: 'Super Admin',
+  TENANT_ADMIN: 'Tenant Admin',
+  USER: 'User',
+};
 export function TenantUsersScreen() {
   const { tenantId = '' } = useParams();
   const [users, setUsers] = useState<TenantUser[] | null>(null);
-  const [results, setResults] = useState<DirectoryUser[]>([]);
-  const [query, setQuery] = useState('');
+  const [roles, setRoles] = useState<string[]>([]);
+  const [canAdd, setCanAdd] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteName, setInviteName] = useState('');
-  const [inviteRole, setInviteRole] = useState('USER');
-  const [inviting, setInviting] = useState(false);
-  const [canEditNames, setCanEditNames] = useState(false);
-  const [directoryError, setDirectoryError] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState<{ iUserId: number; value: string } | null>(null);
-
-  const load = useCallback(() => {
-    adminApi
-      .listTenantUsers(tenantId)
-      .then((res) => {
-        setUsers(res.users);
-        setCanEditNames(res.canEditDisplayName);
-        setDirectoryError(res.directoryError);
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to load'));
+  const [editing, setEditing] = useState<TenantUser | null>(null);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState(EMPTY);
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  const load = useCallback(async () => {
+    try {
+      const r = await adminApi.listTenantUsers(tenantId);
+      setUsers(r.users);
+      setRoles(r.assignableRoles ?? ['TENANT_ADMIN', 'USER']);
+      setCanAdd(r.canManageDirectory ?? false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not load users');
+    }
   }, [tenantId]);
-
   useEffect(() => {
-    load();
+    void load();
   }, [load]);
-
-  const search = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setError(null);
-    try {
-      const res = await adminApi.searchDirectory(query);
-      setResults(res.users);
-      setStatus(`${res.users.length} matching platform user(s)`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Directory search failed');
-    }
+  const cancel = () => {
+    setEditing(null);
+    setForm(EMPTY);
+    setOpen(false);
   };
-
-  const assign = async (identityUserId: number, role: string, enabled = true) => {
+  const edit = (user: TenantUser) => {
+    setEditing(user);
+    setForm({
+      email: user.email ?? '',
+      displayName: user.display_name ?? '',
+      role: user.role,
+      enabled: user.enabled,
+    });
+    setOpen(true);
     setError(null);
-    try {
-      await adminApi.saveTenantUser(tenantId, identityUserId, role, enabled);
-      setStatus(`Saved user ${identityUserId}: ${role}${enabled ? '' : ' (disabled)'}`);
-      load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Assignment failed');
-    }
+    setStatus(null);
   };
-
-  const invite = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setInviting(true);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
     setError(null);
+    setStatus(null);
     try {
-      const { user } = await adminApi.ensureDirectoryUser(
-        inviteEmail.trim(),
-        inviteName.trim() || null,
-      );
-      await assign(user.iUserId, inviteRole);
+      const fields = {
+        ...form,
+        email: form.email.trim(),
+        displayName: form.displayName.trim() || null,
+      };
+      if (editing)
+        await adminApi.editTenantUser(tenantId, editing.identity_user_id, {
+          ...fields,
+          ...(editing.claimed ? { email: undefined } : {}),
+        });
+      else await adminApi.addTenantUser(tenantId, fields);
       setStatus(
-        `Added ${inviteEmail.trim()} as ${inviteRole}. They gain access once they sign in ` +
-          'with this address through identity.',
+        editing
+          ? 'User updated.'
+          : `Added ${form.email.trim()}. They can sign in with their linked account.`,
       );
-      setInviteEmail('');
-      setInviteName('');
-      setInviteRole('USER');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not add that user');
+      cancel();
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not save the user');
     } finally {
-      setInviting(false);
+      setBusy(false);
     }
   };
-
-  const saveDisplayName = async () => {
-    if (!editingName) return;
-    setError(null);
-    try {
-      await adminApi.updateDirectoryUser(editingName.iUserId, editingName.value.trim() || null);
-      setStatus(`Saved the display name for user ${editingName.iUserId}`);
-      setEditingName(null);
-      load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save the display name');
-    }
-  };
-
+  const visible = (users ?? []).filter((u) =>
+    [u.email, u.display_name, LABELS[u.role]].some((v) =>
+      v?.toLowerCase().includes(query.toLowerCase()),
+    ),
+  );
   return (
     <section aria-labelledby="tenant-users-heading">
+      <h1 id="tenant-users-heading">Users</h1>
       <p>
-        <Link to="/tenants">← All tenants</Link>
+        Manage the people and permissions for this tenant. Super Admins have access to all tenants.
       </p>
-      <h1 id="tenant-users-heading">Tenant users</h1>
       {error ? <p role="alert">{error}</p> : null}
       {status ? <p role="status">{status}</p> : null}
-      {directoryError ? (
-        <p role="alert">
-          Names and emails are unavailable: {directoryError} Roles can still be changed.
-        </p>
-      ) : null}
-
+      <label className="list-filter">
+        Find users
+        <input
+          type="search"
+          placeholder="Name or email"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </label>
       {users === null ? (
-        <p role="status">Loading…</p>
-      ) : users.length === 0 ? (
-        <p>No users are mapped to this tenant yet.</p>
+        <p role="status">Loading users…</p>
       ) : (
-        <table>
-          <caption className="visually-hidden">Users mapped to this tenant</caption>
-          <thead>
-            <tr>
-              <th scope="col">Person</th>
-              <th scope="col">Email</th>
-              <th scope="col">Role</th>
-              <th scope="col">Enabled</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((user) => (
-              <tr key={user.id}>
-                <td>
-                  {editingName?.iUserId === user.identity_user_id ? (
-                    <>
-                      <label>
-                        <span className="visually-hidden">
-                          Display name for user {user.identity_user_id}
-                        </span>
-                        <input
-                          value={editingName.value}
-                          onChange={(e) =>
-                            setEditingName({ ...editingName, value: e.target.value })
-                          }
-                        />
-                      </label>{' '}
-                      <button type="button" onClick={() => void saveDisplayName()}>
-                        Save name
-                      </button>{' '}
-                      <button type="button" onClick={() => setEditingName(null)}>
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {user.display_name ?? <em>no name</em>} (#{user.identity_user_id})
-                      {user.claimed === false ? ' — not yet signed in' : ''}{' '}
-                      {canEditNames ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setEditingName({
-                              iUserId: user.identity_user_id,
-                              value: user.display_name ?? '',
-                            })
-                          }
-                        >
-                          Edit name
-                        </button>
-                      ) : null}
-                    </>
-                  )}
-                </td>
-                <td>{user.email ?? '—'}</td>
-                <td>
-                  <label>
-                    <span className="visually-hidden">Role for user {user.identity_user_id}</span>
-                    <select
-                      value={user.role}
-                      onChange={(e) =>
-                        void assign(user.identity_user_id, e.target.value, user.enabled)
-                      }
-                    >
-                      <option value="TENANT_ADMIN">TENANT_ADMIN</option>
-                      <option value="USER">USER</option>
-                    </select>
-                  </label>
-                </td>
-                <td>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={user.enabled}
-                      onChange={(e) =>
-                        void assign(user.identity_user_id, user.role, e.target.checked)
-                      }
-                    />
-                    <span className="visually-hidden">
-                      Enabled for user {user.identity_user_id}
-                    </span>
-                  </label>
-                </td>
+        <div className="table-scroll">
+          <table>
+            <caption className="visually-hidden">Users in this tenant</caption>
+            <thead>
+              <tr>
+                <th scope="col">Name</th>
+                <th scope="col">Email address</th>
+                <th scope="col">Role</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {visible.map((user) => (
+                <tr key={user.id}>
+                  <td>{user.display_name || 'Not provided'}</td>
+                  <td>{user.email || 'Not provided'}</td>
+                  <td>{LABELS[user.role] ?? user.role}</td>
+                  <td>
+                    {!user.enabled
+                      ? 'Disabled'
+                      : user.claimed === false
+                        ? 'Awaiting first sign-in'
+                        : 'Active'}
+                  </td>
+                  <td>
+                    {roles.includes(user.role) ? (
+                      <button
+                        type="button"
+                        aria-label={`Edit ${user.display_name || user.email || 'user'}`}
+                        onClick={() => edit(user)}
+                      >
+                        Edit
+                      </button>
+                    ) : (
+                      <span>Managed by Super Admin</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!visible.length ? (
+            <p>
+              {users.length ? 'No matching users.' : 'No users yet. Add your first user below.'}
+            </p>
+          ) : null}
+        </div>
       )}
-
-      <h2 id="add-user-heading">Add a user by email</h2>
-      <p>
-        Any email address can be added — it does not need to already exist. The person gains access
-        the first time they sign in with that address through identity.
-      </p>
-      <form aria-labelledby="add-user-heading" onSubmit={(e) => void invite(e)}>
-        <label>
-          Email
-          <input
-            required
-            type="email"
-            value={inviteEmail}
-            onChange={(e) => setInviteEmail(e.target.value)}
-          />
-        </label>
-        <label>
-          Display name (optional)
-          <input value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
-        </label>
-        <label>
-          Role
-          <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
-            <option value="TENANT_ADMIN">TENANT_ADMIN</option>
-            <option value="USER">USER</option>
-          </select>
-        </label>
-        <button type="submit" disabled={inviting}>
-          {inviting ? 'Adding…' : 'Add user'}
-        </button>
-      </form>
-
-      <h2 id="find-user-heading">Find an existing platform user</h2>
-      <form aria-labelledby="find-user-heading" onSubmit={(e) => void search(e)}>
-        <label>
-          Search by email or name
-          <input value={query} onChange={(e) => setQuery(e.target.value)} />
-        </label>
-        <button type="submit">Search</button>
-      </form>
-      {results.length > 0 ? (
-        <ul>
-          {results.map((user) => (
-            <li key={user.iUserId}>
-              #{user.iUserId} {user.displayName ?? user.email ?? '(no name)'}
-              {user.claimed ? '' : ' (not yet signed in)'}{' '}
-              <button type="button" onClick={() => void assign(user.iUserId, 'TENANT_ADMIN')}>
-                Make tenant admin
-              </button>{' '}
-              <button type="button" onClick={() => void assign(user.iUserId, 'USER')}>
-                Make user
+      {canAdd || editing ? (
+        <details
+          className="record-editor"
+          open={open}
+          onToggle={(e) => setOpen(e.currentTarget.open)}
+        >
+          <summary>
+            {editing ? `Edit ${editing.display_name || editing.email}` : 'Add User…'}
+          </summary>
+          <form aria-label={editing ? 'Edit user' : 'Add user'} onSubmit={(e) => void save(e)}>
+            <label>
+              Display name
+              <input
+                value={form.displayName}
+                onChange={(e) => setForm({ ...form, displayName: e.target.value })}
+              />
+            </label>
+            <label>
+              Email address
+              <input
+                required={!editing?.claimed}
+                type="email"
+                aria-label="Email address"
+                readOnly={Boolean(editing?.claimed)}
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+              />
+              {editing?.claimed ? (
+                <small>This email belongs to a linked sign-in account.</small>
+              ) : null}
+            </label>
+            <label>
+              Role
+              <select
+                value={form.role}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    role: e.target.value,
+                    enabled: e.target.value === 'SUPER_ADMIN' ? true : form.enabled,
+                  })
+                }
+              >
+                {roles.map((role) => (
+                  <option key={role} value={role}>
+                    {LABELS[role]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {form.role === 'SUPER_ADMIN' ? (
+              <p className="form-notice">
+                Super Admin grants platform-wide access to every tenant.
+              </p>
+            ) : null}
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                disabled={form.role === 'SUPER_ADMIN'}
+                checked={form.enabled}
+                onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+              />
+              Enabled in this tenant
+            </label>
+            <div className="form-actions">
+              <button type="submit" disabled={busy}>
+                {busy ? 'Saving…' : editing ? 'Save user' : 'Add user'}
               </button>
-            </li>
-          ))}
-        </ul>
+              <button type="button" disabled={busy} onClick={cancel}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        </details>
       ) : null}
     </section>
   );

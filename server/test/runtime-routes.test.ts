@@ -1,9 +1,10 @@
+import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig, SERVICE_ENV_VARS } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
-import { createRepos } from '../src/nocodb/repos.js';
+import { createRepos } from './helpers/legacy-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import { createLogger } from '../src/logger.js';
 import { presentCaller } from '../src/runtime/routes.js';
@@ -61,7 +62,7 @@ async function actor(
         .set('x-csrf-token', csrf)
         .send(body as object),
   };
-  if (selectTenant) {
+  if (selectTenant && superAdmin) {
     const selected = await me.post('/api/session/tenant', { tenantId: selectTenant });
     expect(selected.status).toBe(200);
   }
@@ -72,6 +73,7 @@ beforeEach(async () => {
   const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
+  await seedLegacyDirectory(api);
   const repos = createRepos(api);
   const runtime = new FakeRuntimeReader();
   const officePulse = new FakeOfficePulse();
@@ -279,12 +281,12 @@ describe('caller presentation', () => {
     expect(presentCaller(null, 'USER')).toBeNull();
   });
 
-  it('applies the mask on the wire', async () => {
+  it('denies staff the admin runtime and shows caller details to tenant administrators', async () => {
     const staff = await actor(21, false, ctx.acme.id);
     const list = await staff.get('/runtime/calls?state=active');
-    expect(list.body.calls[0].callerNumber).toBe('•••1234');
+    expect(list.status).toBe(403);
     const detail = await staff.get('/runtime/calls/acme-live');
-    expect(detail.body.call.callerNumber).toBe('•••1234');
+    expect(detail.status).toBe(403);
     const admin = await actor(20, false, ctx.acme.id);
     expect((await admin.get('/runtime/calls/acme-live')).body.call.callerNumber).toBe(
       '+15105551234',
@@ -316,7 +318,7 @@ describe('call detail', () => {
 
 describe('takeover', () => {
   it('sends exactly the allowlisted command to OfficePulse and audits it', async () => {
-    const staff = await actor(21, false, ctx.acme.id);
+    const staff = await actor(20, false, ctx.acme.id);
     const res = await staff.post('/runtime/calls/acme-live/commands', {
       commandType: 'TAKEOVER',
       idempotencyKey: 'k-12345678',
@@ -337,7 +339,7 @@ describe('takeover', () => {
     const audit = ctx.api.tableByName('audit_log')!.records;
     expect(audit.map((r) => r.action)).toEqual(['runtime.command']);
     expect(audit[0]!.tenant_id).toBe(ctx.acme.id);
-    expect(audit[0]!.actor_identity_user_id).toBe(21);
+    expect(audit[0]!.actor_identity_user_id).toBe(20);
   });
 
   it('refuses a command on another tenant call before anything is sent', async () => {

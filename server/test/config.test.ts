@@ -20,7 +20,12 @@ describe('loadConfig', () => {
     const config = loadConfig({ NODE_ENV: 'test' });
     expect(config.port).toBe(3001);
     expect(config.nodeEnv).toBe('test');
-    expect(config.missingServiceConfig).toEqual([...SERVICE_ENV_VARS]);
+    expect(config.missingServiceConfig).toEqual(
+      SERVICE_ENV_VARS.filter(
+        (name) =>
+          !['ID_CLIENT_SECRET', 'ID_PUBLIC_BASE_URL', 'HANDSET_PROVISIONING_URL'].includes(name),
+      ),
+    );
   });
 
   it('accepts a fully configured production environment', () => {
