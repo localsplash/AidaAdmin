@@ -11,7 +11,7 @@ Identity owns every person, business, membership and staff application session.
 | `platform_db`           | Identity              | Authenticated Identity API only                                       |
 | NocoDB `PlatformConfig` | Platform applications | `aida_tbl_*` voice configuration; scoped settings                     |
 | `aida_admin_db` (MySQL) | AidaAdmin             | OAuth state, Identity event receipts/replay cursor, append-only audit |
-| `aida_db` (MySQL)       | OfficePulse           | Read-only runtime views; commands through the private HTTP API        |
+| `aidacalls_db` (MySQL)  | OfficePulse           | Read-only runtime views; commands through the private HTTP API        |
 | Asterisk tables         | PBX project           | OfficePulse adapter only; no AidaAdmin DDL or direct writes           |
 
 There is no AidaAdmin PostgreSQL dependency, local user/membership directory,
@@ -110,3 +110,11 @@ NocoDB integration requires separate `NOCODB_TEST_BASE_URL` and
 `NOCODB_TEST_API_TOKEN` values for a disposable PlatformConfig instance.
 CI uses MySQL 8.4 and Node 22. A passing build does not validate the external
 PBX, real Identity login, a carrier number or a physical Android handset.
+
+## Shared numbers and Echo access
+
+Manage each tenant’s **Numbers** in AidaAdmin. Identity owns the unique E.164 number-to-tenant assignment in `platform_db.identity_tbl_PhoneNumber`; every number supports both voice and messaging and explicitly grants access to all enabled tenant members. Enabled USER members can sign in to Echo even though they cannot use AidaAdmin. No separate Echo user or business provisioning grants access. Members without numbers see a contact-admin warning in Echo.
+
+DID routes choose from this same registry. The immutable E.164 value is their reference; routing details remain in NocoDB. Number assignment does not provision carrier service. Disable an existing DID route separately when stopping PBX routing; disabling the shared number removes Echo access and prevents saving it as an active route. Tenant/number reassignment is deliberately unsupported to protect historical messages and media.
+
+Deploy Identity migration `0005_shared_phone_numbers` and import reviewed existing assignments before this Admin version. Runtime call history now uses `aidacalls_db`; `aida_admin_db` still stores this application’s local state. See the infrastructure repository’s shared-number rollout guide for a data-preserving existing-database migration.

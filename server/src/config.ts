@@ -35,7 +35,7 @@ const envSchema = z.object({
  * Values are never logged — only names.
  *
  * There is no AidaControl: for the POC OfficePulseAidaIntegration is the
- * call orchestrator (its issue #9). AidaAdmin reads its `aida_db`
+ * call orchestrator (its issue #9). AidaAdmin reads its `aidacalls_db`
  * runtime database through a read-only account and sends commands to the
  * same private HTTP API that handles provisioning.
  */

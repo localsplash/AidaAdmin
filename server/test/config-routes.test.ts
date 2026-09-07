@@ -1,3 +1,4 @@
+import { HttpIdClient } from '../src/id/client.js';
 import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -39,7 +40,23 @@ beforeEach(async () => {
   await seedLegacyDirectory(api);
   const officePulse = new FakeOfficePulse();
   const repos = createRepos(api);
-  const deps: AppDeps = { ...createDeps(config), repos, officePulse };
+  const idClient = new HttpIdClient('https://id.test');
+  idClient.listTenantNumbers = async (tenantId) => ({
+    numbers: [
+      {
+        iPhoneNumberId: 1,
+        iTenantId: Number(tenantId),
+        phoneNumber: '+15105550100',
+        label: '',
+        bEnabled: true,
+        bVoice: true,
+        bMessaging: true,
+        accessPolicy: 'TENANT_MEMBERS',
+        iVersion: 1,
+      },
+    ],
+  });
+  const deps: AppDeps = { ...createDeps(config), repos, officePulse, idClient };
   const app = createApp(config, logger, deps);
   const sid = await deps.sessionStore.create({
     iUserId: 1,
@@ -145,6 +162,11 @@ describe('assistant profiles', () => {
 });
 
 describe('DID routes', () => {
+  it('refuses numbers absent from the central tenant assignment before provisioning', async () => {
+    const response = await post('/admin/did-routes', routeInput({ didE164: '+15105550999' }));
+    expect(response.status).toBe(400);
+    expect(ctx.officePulse.dids).toHaveLength(0);
+  });
   it('creates a route, provisions the DID, and previews the fallback destination', async () => {
     const res = await post('/admin/did-routes', routeInput({ didE164: '+1 (510) 555-0100' }));
     expect(res.status).toBe(201);

@@ -11,7 +11,7 @@ import { RuntimeDbError, type RuntimeCallSession } from '../officepulse/runtime-
 /**
  * Runtime visibility and actions (issue #29). There is no AidaControl:
  * OfficePulseAidaIntegration orchestrates calls and owns the
- * `aida_db` runtime database. AidaAdmin READS that database
+ * `aidacalls_db` runtime database. AidaAdmin READS that database
  * through a read-only account and sends the few allowed ACTIONS to
  * OfficePulse's private HTTP API — never a proxy, never a table write.
  *
@@ -125,7 +125,7 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
         error: 'runtime_db_not_configured',
         message:
           'The OfficePulse runtime database is not configured: set OFFICEPULSE_RUNTIME_DATABASE_URL ' +
-          'to the read-only aidaadmin_ro account on aida_db',
+          'to the read-only aidaadmin_ro account on aidacalls_db',
         missingConfiguration: ['OFFICEPULSE_RUNTIME_DATABASE_URL'],
         correlationId: req.correlationId,
       });

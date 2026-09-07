@@ -20,14 +20,14 @@ function statements(): Array<{ sql: string; params: unknown[] }> {
 
 describe('parseMysqlUrl', () => {
   it('reads every connection field from one URL', () => {
-    expect(parseMysqlUrl('mysql://aidaadmin_ro:p%40ss@db.internal:3307/aida_officepulse')).toEqual({
+    expect(parseMysqlUrl('mysql://aidaadmin_ro:p%40ss@db.internal:3307/aidacalls_db')).toEqual({
       host: 'db.internal',
       port: 3307,
       user: 'aidaadmin_ro',
       password: 'p@ss',
-      database: 'aida_officepulse',
+      database: 'aidacalls_db',
     });
-    expect(parseMysqlUrl('mysql://u:p@h/aida_officepulse').port).toBe(3306);
+    expect(parseMysqlUrl('mysql://u:p@h/aidacalls_db').port).toBe(3306);
   });
 
   it('names the variable when the URL is unusable, never the value', () => {
@@ -44,7 +44,7 @@ describe('MysqlRuntimeReader', () => {
     port: 3306,
     user: 'aidaadmin_ro',
     password: 'p',
-    database: 'aida_officepulse',
+    database: 'aidacalls_db',
   });
 
   it('puts every pooled connection in READ ONLY mode', () => {

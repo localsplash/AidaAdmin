@@ -16,7 +16,7 @@ const target = process.env.E2E_RUNTIME_URL;
 
 test.skip(!target, 'set E2E_RUNTIME_URL to a deployed non-production AidaAdmin');
 
-test('reads dependency status from the real aida_officepulse database', async ({ page }) => {
+test('reads dependency status from the real aidacalls_db database', async ({ page }) => {
   await page.goto(`${target}/runtime`);
   await expect(page.getByRole('heading', { name: /^runtime$/i })).toBeVisible();
   await page.getByRole('tab', { name: /dependencies/i }).click();

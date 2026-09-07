@@ -11,7 +11,7 @@ const fullProductionEnv = (): NodeJS.ProcessEnv => {
     env[name] = '10.0.0.0/8, 192.0.2.10/32';
   }
   env.OFFICEPULSE_RUNTIME_DATABASE_URL =
-    'mysql://aidaadmin_ro:pw@db.example.invalid:3306/aida_officepulse';
+    'mysql://aidaadmin_ro:pw@db.example.invalid:3306/aidacalls_db';
   return env;
 };
 

@@ -89,6 +89,10 @@ export function TenantUsersScreen() {
     <section aria-labelledby="tenant-users-heading">
       <h1 id="tenant-users-heading">Users</h1>
       <p>
+        Enabled tenant members can sign in to Echo and access all enabled numbers assigned to this
+        tenant. Only Tenant Admins and Super Admins can use AidaAdmin.
+      </p>
+      <p>
         Manage the people and permissions for this tenant. Super Admins have access to all tenants.
       </p>
       {error ? <p role="alert">{error}</p> : null}

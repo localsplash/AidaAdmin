@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import express, { type Express } from 'express';
 import { pinoHttp } from 'pino-http';
 import { adminRoutes } from './admin/routes.js';
+import { numberRoutes } from './admin/number-routes.js';
 import { configRoutes } from './admin/config-routes.js';
 import { sessionMiddleware } from './auth/middleware.js';
 import { authRoutes } from './auth/routes.js';
@@ -71,6 +72,7 @@ export function createApp(
   app.use(tenantSelectionRoutes(logger, deps));
   app.use(runtimeRoutes(logger, deps));
   app.use(adminRoutes(logger, deps));
+  app.use(numberRoutes(deps));
   app.use(configRoutes(config, logger, deps));
 
   // Validated appearance assets (uploaded logos).

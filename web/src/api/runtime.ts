@@ -1,6 +1,6 @@
 /**
  * Same-origin client for the runtime views (issue #29). The server reads
- * OfficePulse's `aida_officepulse` database through a read-only account and
+ * OfficePulse's `aidacalls_db` database through a read-only account and
  * sends the few allowed actions to OfficePulse's private API; the browser
  * never sees either.
  */
