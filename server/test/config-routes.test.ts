@@ -32,6 +32,7 @@ let ctx: Ctx;
 beforeEach(async () => {
   const config = loadConfig({
     NODE_ENV: 'test',
+    LEGACY_PBX_WRITES_ENABLED: 'true',
     LOG_LEVEL: 'fatal',
     ASSET_STORAGE_DIR: mkdtempSync(path.join(tmpdir(), 'aida-assets-')),
   });

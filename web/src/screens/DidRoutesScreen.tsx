@@ -19,7 +19,7 @@ const EMPTY = {
   enabled: true,
 };
 
-export function DidRoutesScreen() {
+export function DidRoutesScreen({ readOnly = true }: { readOnly?: boolean } = {}) {
   const { tenantId = '' } = useParams();
   const [routes, setRoutes] = useState<DidRoute[] | null>(null);
   const [numbers, setNumbers] = useState<TenantNumber[]>([]);
@@ -34,6 +34,16 @@ export function DidRoutesScreen() {
   const [formOpen, setFormOpen] = useState(false);
 
   const load = useCallback(() => {
+    if (readOnly) {
+      void adminApi
+        .listDidRoutes(tenantId)
+        .then((result) => setRoutes(result.didRoutes))
+        .catch((err) => {
+          setRoutes([]);
+          setError(err instanceof Error ? err.message : 'Failed to read saved routing metadata');
+        });
+      return;
+    }
     // Settled, not all: one failing list must not blank the destination
     // choices and leave the form unusable for an unrelated reason.
     void Promise.allSettled([
@@ -54,7 +64,7 @@ export function DidRoutesScreen() {
       if (n.status === 'fulfilled') setNumbers(n.value.numbers);
       else setError('Unable to load shared numbers. Refresh before saving a route.');
     });
-  }, [tenantId]);
+  }, [tenantId, readOnly]);
 
   useEffect(() => {
     load();
@@ -116,10 +126,18 @@ export function DidRoutesScreen() {
         <Link to="/">← Dashboard</Link>
       </p>
       <h1 id="did-routes-heading">DID routes</h1>
-      <p>
-        Inbound order is always: DID → recording disclosure → Aida screening → destination on
-        takeover or failure.
-      </p>
+      {readOnly ? (
+        <p>
+          Saved business routing metadata. PBX routing is managed in OfficePulse; editing is paused
+          until destinations reference Asterisk extensions and queues.
+        </p>
+      ) : null}
+      {!readOnly ? (
+        <p>
+          Inbound order is always: DID → recording disclosure → Aida screening → destination on
+          takeover or failure.
+        </p>
+      ) : null}
       {error ? <p role="alert">{error}</p> : null}
       {status ? <p role="status">{status}</p> : null}
 
@@ -136,7 +154,7 @@ export function DidRoutesScreen() {
               <th scope="col">Screening</th>
               <th scope="col">Fallback destination</th>
               <th scope="col">Enabled</th>
-              <th scope="col">Actions</th>
+              {!readOnly ? <th scope="col">Actions</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -146,149 +164,153 @@ export function DidRoutesScreen() {
                 <td>{route.screening_enabled ? 'Aida screens' : 'Direct'}</td>
                 <td>{route.fallbackPreview}</td>
                 <td>{route.enabled ? 'Yes' : 'No'}</td>
-                <td>
-                  <button type="button" onClick={() => startEdit(route)}>
-                    Edit
-                  </button>
-                </td>
+                {!readOnly ? (
+                  <td>
+                    <button type="button" onClick={() => startEdit(route)}>
+                      Edit
+                    </button>
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>
         </table>
       )}
 
-      <details
-        className="record-editor"
-        open={formOpen}
-        onToggle={(e) => setFormOpen(e.currentTarget.open)}
-      >
-        <summary>{editing ? 'Edit record' : 'Add DID Route…'}</summary>
-        <h2 id="route-form-heading">{editing ? `Edit ${editing.did_e164}` : 'New DID route'}</h2>
-        <form aria-labelledby="route-form-heading" onSubmit={(e) => void submit(e)}>
-          <label>
-            DID (E.164)
-            <select
-              required
-              value={form.didE164}
-              onChange={(e) => setForm({ ...form, didE164: e.target.value })}
-            >
-              <option value="">Choose a tenant number…</option>
-              {numbers.map((n) => (
-                <option
-                  key={n.iPhoneNumberId}
-                  value={n.phoneNumber}
-                  disabled={!n.bEnabled && form.enabled}
-                >
-                  {n.phoneNumber}
-                  {n.label ? ` — ${n.label}` : ''}
-                </option>
-              ))}
-            </select>
-            <Link to={`/tenants/${tenantId}/numbers`}>Manage shared numbers</Link>
-          </label>
-          <label>
-            Assistant profile
-            <select
-              required
-              value={form.assistantProfileId}
-              onChange={(e) => setForm({ ...form, assistantProfileId: e.target.value })}
-            >
-              <option value="">Choose a profile…</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id} disabled={!profile.enabled}>
-                  {profile.name}
-                  {profile.enabled ? '' : ' (disabled)'}
-                </option>
-              ))}
-            </select>
-          </label>
-          {profiles.length === 0 ? (
-            <p>
-              No assistant profiles for this tenant yet —{' '}
-              <Link to={`/tenants/${tenantId}/profiles`}>create one</Link> first.
-            </p>
-          ) : null}
-          <fieldset>
-            <legend>Destination on takeover or failure</legend>
+      {!readOnly ? (
+        <details
+          className="record-editor"
+          open={formOpen}
+          onToggle={(e) => setFormOpen(e.currentTarget.open)}
+        >
+          <summary>{editing ? 'Edit record' : 'Add DID Route…'}</summary>
+          <h2 id="route-form-heading">{editing ? `Edit ${editing.did_e164}` : 'New DID route'}</h2>
+          <form aria-labelledby="route-form-heading" onSubmit={(e) => void submit(e)}>
             <label>
-              <input
-                type="radio"
-                name="destinationType"
-                checked={form.destinationType === 'EXTENSION'}
-                onChange={() =>
-                  setForm({ ...form, destinationType: 'EXTENSION', destinationId: '' })
-                }
-              />
-              Extension
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="destinationType"
-                checked={form.destinationType === 'RING_GROUP'}
-                onChange={() =>
-                  setForm({ ...form, destinationType: 'RING_GROUP', destinationId: '' })
-                }
-              />
-              Ring group
-            </label>
-            <label>
-              Destination
+              DID (E.164)
               <select
                 required
-                value={form.destinationId}
-                onChange={(e) => setForm({ ...form, destinationId: e.target.value })}
+                value={form.didE164}
+                onChange={(e) => setForm({ ...form, didE164: e.target.value })}
               >
-                <option value="">Choose…</option>
-                {destinations.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {'extension_number' in d
-                      ? `${d.extension_number} — ${d.display_name}`
-                      : `${d.virtual_extension} — ${d.name}`}
+                <option value="">Choose a tenant number…</option>
+                {numbers.map((n) => (
+                  <option
+                    key={n.iPhoneNumberId}
+                    value={n.phoneNumber}
+                    disabled={!n.bEnabled && form.enabled}
+                  >
+                    {n.phoneNumber}
+                    {n.label ? ` — ${n.label}` : ''}
+                  </option>
+                ))}
+              </select>
+              <Link to={`/tenants/${tenantId}/numbers`}>Manage shared numbers</Link>
+            </label>
+            <label>
+              Assistant profile
+              <select
+                required
+                value={form.assistantProfileId}
+                onChange={(e) => setForm({ ...form, assistantProfileId: e.target.value })}
+              >
+                <option value="">Choose a profile…</option>
+                {profiles.map((profile) => (
+                  <option key={profile.id} value={profile.id} disabled={!profile.enabled}>
+                    {profile.name}
+                    {profile.enabled ? '' : ' (disabled)'}
                   </option>
                 ))}
               </select>
             </label>
-            {destinations.length === 0 ? (
+            {profiles.length === 0 ? (
               <p>
-                No {destinationNoun} for this tenant yet — create one on the{' '}
-                <Link
-                  to={`/tenants/${tenantId}/${
-                    form.destinationType === 'EXTENSION' ? 'extensions' : 'ring-groups'
-                  }`}
-                >
-                  {destinationNoun}
-                </Link>{' '}
-                page first.
+                No assistant profiles for this tenant yet —{' '}
+                <Link to={`/tenants/${tenantId}/profiles`}>create one</Link> first.
               </p>
             ) : null}
-          </fieldset>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.screeningEnabled}
-              onChange={(e) => setForm({ ...form, screeningEnabled: e.target.checked })}
-            />
-            Aida screening enabled
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-            />
-            Enabled
-          </label>
-          <button type="submit" disabled={busy}>
-            {busy ? 'Saving…' : editing ? 'Save DID route' : 'Save record'}
-          </button>
-          {editing ? (
-            <button type="button" onClick={cancelEdit}>
-              Cancel edit
+            <fieldset>
+              <legend>Destination on takeover or failure</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="destinationType"
+                  checked={form.destinationType === 'EXTENSION'}
+                  onChange={() =>
+                    setForm({ ...form, destinationType: 'EXTENSION', destinationId: '' })
+                  }
+                />
+                Extension
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="destinationType"
+                  checked={form.destinationType === 'RING_GROUP'}
+                  onChange={() =>
+                    setForm({ ...form, destinationType: 'RING_GROUP', destinationId: '' })
+                  }
+                />
+                Ring group
+              </label>
+              <label>
+                Destination
+                <select
+                  required
+                  value={form.destinationId}
+                  onChange={(e) => setForm({ ...form, destinationId: e.target.value })}
+                >
+                  <option value="">Choose…</option>
+                  {destinations.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {'extension_number' in d
+                        ? `${d.extension_number} — ${d.display_name}`
+                        : `${d.virtual_extension} — ${d.name}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {destinations.length === 0 ? (
+                <p>
+                  No {destinationNoun} for this tenant yet — create one on the{' '}
+                  <Link
+                    to={`/tenants/${tenantId}/${
+                      form.destinationType === 'EXTENSION' ? 'extensions' : 'ring-groups'
+                    }`}
+                  >
+                    {destinationNoun}
+                  </Link>{' '}
+                  page first.
+                </p>
+              ) : null}
+            </fieldset>
+            <label>
+              <input
+                type="checkbox"
+                checked={form.screeningEnabled}
+                onChange={(e) => setForm({ ...form, screeningEnabled: e.target.checked })}
+              />
+              Aida screening enabled
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={form.enabled}
+                onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+              />
+              Enabled
+            </label>
+            <button type="submit" disabled={busy}>
+              {busy ? 'Saving…' : editing ? 'Save DID route' : 'Save record'}
             </button>
-          ) : null}
-        </form>
-      </details>
+            {editing ? (
+              <button type="button" onClick={cancelEdit}>
+                Cancel edit
+              </button>
+            ) : null}
+          </form>
+        </details>
+      ) : null}
     </section>
   );
 }

@@ -59,7 +59,11 @@ describe('central authorization with PlatformConfig voice profiles', () => {
         throw new Error(`Unexpected Identity path: ${path}`);
       }),
     );
-    const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      LEGACY_PBX_WRITES_ENABLED: 'true',
+      LOG_LEVEL: 'fatal',
+    });
     const deps = createDeps(config);
     const id = new HttpIdClient('https://identity.example.invalid');
     const noco = new FakeNocoDbApi();
@@ -104,6 +108,7 @@ describe('central authorization with PlatformConfig voice profiles', () => {
   it('fails closed on Identity outage while liveness remains available', async () => {
     const config = loadConfig({
       NODE_ENV: 'test',
+      LEGACY_PBX_WRITES_ENABLED: 'true',
       LOG_LEVEL: 'fatal',
       ID_BASE_URL: 'https://identity.example.invalid',
     });

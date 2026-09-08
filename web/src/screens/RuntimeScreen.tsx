@@ -295,9 +295,8 @@ function FallbacksSection() {
   return (
     <>
       <p>
-        Where each DID's caller goes when NocoDB or LiveKit is unavailable — projected by
-        OfficePulse when the DID route was provisioned. A DID missing here has no local fail-safe:
-        save its route again to project one.
+        Historical DID fail-safe snapshots recorded by OfficePulse. Verify current routing and
+        fallback behavior in PBX operations before relying on these records.
       </p>
       {fallbacks.error ? <RuntimeErrorNotice error={fallbacks.error} /> : null}
       {fallbacks.data ? (
@@ -432,11 +431,20 @@ function OrphansSection() {
  * the few actions that go to its API. Tenant administrators get the
  * tenant-scoped sections; Super Admins get all of them.
  */
-export function RuntimeScreen({ session }: { session: SessionView }) {
+export function RuntimeScreen({
+  session,
+  legacyProvisioning = false,
+}: {
+  session: SessionView;
+  legacyProvisioning?: boolean;
+}) {
   const superAdmin = session.user.superAdmin;
   const sections: Section[] = superAdmin
     ? ['calls', 'dependencies', 'provisioning', 'fallbacks', 'webhooks', 'orphans']
     : TENANT_SECTIONS;
+  const visibleSections = sections.filter(
+    (value) => legacyProvisioning || value !== 'provisioning',
+  );
   const [section, setSection] = useState<Section>('calls');
 
   return (
@@ -447,7 +455,7 @@ export function RuntimeScreen({ session }: { session: SessionView }) {
         API and are audited.
       </p>
       <div role="tablist" aria-label="Runtime sections" className="call-tabs">
-        {sections.map((s) => (
+        {visibleSections.map((s) => (
           <button
             key={s}
             role="tab"
