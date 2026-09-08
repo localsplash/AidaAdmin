@@ -18,10 +18,12 @@ import { RingGroupsScreen } from './screens/RingGroupsScreen';
 import { RuntimeScreen } from './screens/RuntimeScreen';
 import { CallDetailScreen } from './screens/CallDetailScreen';
 import { TenantsScreen } from './screens/TenantsScreen';
+import { TenantNumbersScreen } from './screens/TenantNumbersScreen';
 import { TenantUsersScreen } from './screens/TenantUsersScreen';
 
 const TENANT_SCREENS = [
   { path: 'users', label: 'Users' },
+  { path: 'numbers', label: 'Numbers' },
   { path: 'extensions', label: 'Extensions' },
   { path: 'ring-groups', label: 'Ring groups' },
   { path: 'profiles', label: 'Profiles' },
@@ -161,6 +163,14 @@ function AuthenticatedShell({
             element={
               <TenantPage session={session} onChanged={onSessionChanged}>
                 <ProfilesScreen />
+              </TenantPage>
+            }
+          />
+          <Route
+            path="/tenants/:tenantId/numbers"
+            element={
+              <TenantPage session={session} onChanged={onSessionChanged}>
+                <TenantNumbersScreen />
               </TenantPage>
             }
           />

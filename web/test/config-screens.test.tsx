@@ -13,7 +13,23 @@ function mockFetch(handler: FetchHandler) {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      const result = handler(url, init) ?? { status: 404, body: {} };
+      const result = handler(url, init) ??
+        (url.endsWith('/numbers')
+          ? {
+              status: 200,
+              body: {
+                numbers: [
+                  {
+                    iPhoneNumberId: 1,
+                    iTenantId: 1,
+                    phoneNumber: '+15105550100',
+                    label: '',
+                    bEnabled: true,
+                  },
+                ],
+              },
+            }
+          : null) ?? { status: 404, body: {} };
       return new Response(JSON.stringify(result.body), { status: result.status });
     }),
   );
@@ -114,7 +130,7 @@ describe('DidRoutesScreen', () => {
     renderAt('/tenants/t1/did-routes', '/tenants/:tenantId/did-routes', <DidRoutesScreen />);
     const user = userEvent.setup();
     await user.click(await screen.findByText(/Add DID/));
-    await user.type(await screen.findByLabelText(/did \(e\.164\)/i), '+15105550100');
+    await user.selectOptions(await screen.findByLabelText(/did \(e\.164\)/i), '+15105550100');
     await user.selectOptions(screen.getByLabelText(/assistant profile/i), 'p1');
     await user.selectOptions(screen.getByLabelText(/^destination$/i), 'e1');
     await user.click(screen.getByRole('button', { name: /save record/i }));

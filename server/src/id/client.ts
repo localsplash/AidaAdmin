@@ -56,7 +56,25 @@ export type SessionIntrospection =
       selectedTenantId?: number | null;
     };
 
+export interface PlatformNumber {
+  iPhoneNumberId: number;
+  iTenantId: number;
+  phoneNumber: string;
+  label: string;
+  bVoice: true;
+  bMessaging: true;
+  bEnabled: boolean;
+  accessPolicy: 'TENANT_MEMBERS';
+  iVersion: number;
+}
+export type NumberInput = Omit<PlatformNumber, 'iPhoneNumberId' | 'iTenantId' | 'iVersion'>;
 export interface IdClient {
+  listTenantNumbers?(tenantId: string): Promise<{ numbers: PlatformNumber[] }>;
+  saveTenantNumber?(
+    tenantId: string,
+    numberId: string | null,
+    input: NumberInput & { expectedVersion?: number | undefined },
+  ): Promise<PlatformNumber>;
   manageTenantMember?(
     tenantId: string,
     userId: number,
@@ -135,6 +153,9 @@ export class HttpIdClient implements IdClient {
       // Do not include the response body: it is not ours to log.
       const body = (await res.json().catch(() => ({}))) as { error?: unknown };
       const safeMessages = new Set([
+        'Phone number is already assigned to a tenant',
+        'Phone numbers cannot be reassigned; add a new number instead',
+        'Phone number changed; reload before saving',
         'Only a Super Admin can change Super Admin access',
         'Choose a tenant role before disabling tenant membership',
         'Assign another Super Admin before removing the last Super Admin',
@@ -150,6 +171,20 @@ export class HttpIdClient implements IdClient {
     return res.status === 204 ? null : res.json();
   }
 
+  async listTenantNumbers(tenantId: string): Promise<{ numbers: PlatformNumber[] }> {
+    return this.directoryRequest(`tenants/${encodeURIComponent(tenantId)}/numbers`);
+  }
+  async saveTenantNumber(
+    tenantId: string,
+    numberId: string | null,
+    input: NumberInput & { expectedVersion?: number | undefined },
+  ): Promise<PlatformNumber> {
+    return this.directoryRequest(
+      `tenants/${encodeURIComponent(tenantId)}/numbers${numberId === null ? '' : '/' + encodeURIComponent(numberId)}`,
+      numberId === null ? 'POST' : 'PUT',
+      input,
+    );
+  }
   async introspectSession(token: string): Promise<SessionIntrospection> {
     return (await this.request('/api/sessions/introspect', {
       method: 'POST',

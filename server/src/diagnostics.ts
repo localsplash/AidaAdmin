@@ -212,7 +212,7 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
       level: 'warning',
       summary:
         'OFFICEPULSE_RUNTIME_DATABASE_URL is not set, so the runtime views (calls, dependencies, provisioning history) answer 503',
-      fix: "Point OFFICEPULSE_RUNTIME_DATABASE_URL at aida_db as the read-only aidaadmin_ro account from OfficePulse's deploy/sql/grants.sql",
+      fix: "Point OFFICEPULSE_RUNTIME_DATABASE_URL at aidacalls_db as the read-only aidaadmin_ro account from OfficePulse's deploy/sql/grants.sql",
     });
   }
   if (!config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL) {

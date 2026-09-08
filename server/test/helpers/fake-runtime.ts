@@ -15,7 +15,7 @@ import { ORPHAN_HORIZON_HOURS, RuntimeDbError } from '../../src/officepulse/runt
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
- * In-memory stand-in for the read-only `aida_officepulse` view. Tests seed
+ * In-memory stand-in for the read-only `aidacalls_db` view. Tests seed
  * the public arrays directly; the query semantics (active/recent/orphaned,
  * tenant scoping) mirror the SQL in MysqlRuntimeReader.
  */
@@ -33,7 +33,7 @@ export class FakeRuntimeReader implements RuntimeReader {
   now = () => Date.now();
 
   private guard(): void {
-    if (this.down) throw new RuntimeDbError('aida_officepulse read failed (ECONNREFUSED)');
+    if (this.down) throw new RuntimeDbError('aidacalls_db read failed (ECONNREFUSED)');
   }
 
   async listCallSessions(filter: CallListFilter): Promise<RuntimeCallSession[]> {

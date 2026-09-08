@@ -184,7 +184,34 @@ export interface ProfileInput {
   enabled: boolean;
 }
 
+export interface TenantNumber {
+  iPhoneNumberId: number;
+  iTenantId: number;
+  phoneNumber: string;
+  label: string;
+  bVoice: true;
+  bMessaging: true;
+  bEnabled: boolean;
+  accessPolicy: 'TENANT_MEMBERS';
+  iVersion: number;
+}
+export type NumberInput = Omit<TenantNumber, 'iPhoneNumberId' | 'iTenantId' | 'iVersion'>;
 export const adminApi = {
+  listNumbers: (tenantId: string) =>
+    call<{ numbers: TenantNumber[] }>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/numbers`,
+      'GET',
+    ),
+  saveNumber: (
+    tenantId: string,
+    numberId: number | null,
+    input: NumberInput & { expectedVersion?: number },
+  ) =>
+    call<{ number: TenantNumber }>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/numbers${numberId === null ? '' : '/' + numberId}`,
+      numberId === null ? 'POST' : 'PUT',
+      input,
+    ),
   selectTenant: (tenantId: string) => call('/api/session/tenant', 'POST', { tenantId }),
   addTenantUser: (
     tenantId: string,

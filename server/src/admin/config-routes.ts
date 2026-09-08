@@ -13,7 +13,7 @@ import {
   UniqueViolationError,
   type AidaConfigRepos,
 } from '../nocodb/repos.js';
-import { ValidationError } from '../nocodb/validation.js';
+import { ValidationError, normalizeE164 } from '../nocodb/validation.js';
 import { OfficePulseError } from '../officepulse/client.js';
 import { didPayload } from '../officepulse/payloads.js';
 import { HandsetDeliveryError } from '../provisioning/handset-delivery.js';
@@ -277,6 +277,24 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
   async function saveDidRoute(req: Request, res: Response, routeId: string | null): Promise<void> {
     const input = parse(didRouteBody, req.body, res, req);
     if (!input) return;
+    input.didE164 = normalizeE164('didE164', input.didE164);
+    if (!deps.idClient?.listTenantNumbers)
+      throw new IdClientError('Shared number directory is unavailable');
+    const { numbers } = await deps.idClient.listTenantNumbers(input.tenantId);
+    if (
+      !numbers.some(
+        (n) =>
+          n.iTenantId === Number(input.tenantId) &&
+          n.phoneNumber === input.didE164 &&
+          (!input.enabled || n.bEnabled) &&
+          n.bVoice,
+      )
+    ) {
+      throw new ValidationError(
+        'didE164',
+        'Choose an enabled number from this tenant’s Numbers page',
+      );
+    }
     const tenant = await repos().tenants.get(input.tenantId);
     // Screening dispatches this profile; a disabled one must be enabled (or
     // the route pointed elsewhere) before the route can be saved as enabled.

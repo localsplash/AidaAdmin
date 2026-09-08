@@ -7,6 +7,7 @@ import {
   type DidRoute,
   type Extension,
   type RingGroup,
+  type TenantNumber,
 } from '../api/admin';
 
 const EMPTY = {
@@ -21,6 +22,7 @@ const EMPTY = {
 export function DidRoutesScreen() {
   const { tenantId = '' } = useParams();
   const [routes, setRoutes] = useState<DidRoute[] | null>(null);
+  const [numbers, setNumbers] = useState<TenantNumber[]>([]);
   const [profiles, setProfiles] = useState<AssistantProfile[]>([]);
   const [extensions, setExtensions] = useState<Extension[]>([]);
   const [ringGroups, setRingGroups] = useState<RingGroup[]>([]);
@@ -39,7 +41,8 @@ export function DidRoutesScreen() {
       adminApi.listProfiles(tenantId),
       adminApi.listExtensions(tenantId),
       adminApi.listRingGroups(tenantId),
-    ]).then(([r, p, e, g]) => {
+      adminApi.listNumbers(tenantId),
+    ]).then(([r, p, e, g, n]) => {
       if (r.status === 'fulfilled') setRoutes(r.value.didRoutes);
       else {
         setRoutes([]);
@@ -48,6 +51,8 @@ export function DidRoutesScreen() {
       if (p.status === 'fulfilled') setProfiles(p.value.profiles);
       if (e.status === 'fulfilled') setExtensions(e.value.extensions);
       if (g.status === 'fulfilled') setRingGroups(g.value.ringGroups);
+      if (n.status === 'fulfilled') setNumbers(n.value.numbers);
+      else setError('Unable to load shared numbers. Refresh before saving a route.');
     });
   }, [tenantId]);
 
@@ -162,12 +167,24 @@ export function DidRoutesScreen() {
         <form aria-labelledby="route-form-heading" onSubmit={(e) => void submit(e)}>
           <label>
             DID (E.164)
-            <input
+            <select
               required
-              placeholder="+15105550100"
               value={form.didE164}
               onChange={(e) => setForm({ ...form, didE164: e.target.value })}
-            />
+            >
+              <option value="">Choose a tenant number…</option>
+              {numbers.map((n) => (
+                <option
+                  key={n.iPhoneNumberId}
+                  value={n.phoneNumber}
+                  disabled={!n.bEnabled && form.enabled}
+                >
+                  {n.phoneNumber}
+                  {n.label ? ` — ${n.label}` : ''}
+                </option>
+              ))}
+            </select>
+            <Link to={`/tenants/${tenantId}/numbers`}>Manage shared numbers</Link>
           </label>
           <label>
             Assistant profile
