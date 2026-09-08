@@ -1,82 +1,7 @@
 import { z } from 'zod';
 
-/**
- * OfficePulseAidaIntegration's private-LAN HTTP API (its issue #9): the
- * provisioning routes AidaAdmin has always used, plus the call-control and
- * readiness routes that AidaControl used to front. Only AidaAdmin's server
- * calls it, from an address inside OfficePulse's TRUSTED_SERVER_CIDRS.
- *
- * OfficePulse generates SIP secrets, stores them solely in Asterisk's
- * ps_auths, and returns a new secret exactly once — AidaAdmin never persists
- * it, and a replayed create or rotation is answered "already applied", never
- * with the existing secret.
- */
-
+/** Private OfficePulse inventory, readiness and audited call-command API. */
 const UPSTREAM_TIMEOUT_MS = 10_000;
-
-export interface ProvisionExtensionRequest {
-  requestId: string;
-  tenantId: string;
-  extensionId: string;
-  extensionNumber: string;
-  context: string;
-  displayName: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  provisioningProfile?: string | null;
-}
-
-export interface ProvisionExtensionResult {
-  status?: 'created' | 'already-applied';
-  sipUsername: string;
-  /** Returned once; displayed once; never stored. Absent on a replay. */
-  sipSecret?: string;
-  provisioningResult?: unknown;
-}
-
-export interface UpdateExtensionRequest {
-  extensionNumber: string;
-  context: string;
-  displayName: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  provisioningProfile?: string | null;
-  enabled: boolean;
-}
-
-export interface RotateSecretResult {
-  status?: 'rotated' | 'already-applied';
-  /** Absent on a replay: recovering a lost response needs a new rotation. */
-  sipSecret?: string;
-  provisioningResult?: unknown;
-}
-
-export interface ProvisionRingGroupRequest {
-  tenantId: string;
-  virtualExtension: string;
-  context: string;
-  memberExtensions: string[];
-  ringTimeoutSeconds: number;
-  musicOnHoldClass?: string | null;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  enabled: boolean;
-}
-
-/**
- * The fail-safe fields (tenantId, destinationType, destinationId) are what
- * OfficePulse projects into `did_fallback`: without them a DID has no
- * destination of its own when NocoDB or LiveKit is unavailable.
- */
-export interface ProvisionDidRequest {
-  didE164: string;
-  context: string;
-  fastAgiPath: '/bootstrap';
-  enabled: boolean;
-  tenantId: string;
-  destinationType: 'EXTENSION' | 'RING_GROUP';
-  destinationId: string;
-}
 
 /** The one staff command OfficePulse acts on; DRAIN_ACK is the agent's. */
 export interface CallCommandRequest {
@@ -140,19 +65,6 @@ export interface OfficePulseClient {
   listPbxQueues?(
     iTenantId: number,
   ): Promise<{ source: 'asterisk'; iTenantId: number; queues: PbxQueue[] }>;
-  issueDeviceEnrollment?(
-    iTenantId: number,
-    extensionId: string,
-  ): Promise<{ enrollmentToken: string; expiresIn: number }>;
-  provisionExtension(req: ProvisionExtensionRequest): Promise<ProvisionExtensionResult>;
-  updateProvisionedExtension(extensionId: string, req: UpdateExtensionRequest): Promise<void>;
-  rotateProvisionedExtensionSecret(
-    extensionId: string,
-    requestId: string,
-    reprovisionDevice: boolean,
-  ): Promise<RotateSecretResult>;
-  provisionRingGroup(ringGroupId: string, req: ProvisionRingGroupRequest): Promise<void>;
-  provisionDid(didRouteId: string, req: ProvisionDidRequest): Promise<void>;
   submitCallCommand(callSessionId: string, req: CallCommandRequest): Promise<UpstreamOutcome>;
   /** OfficePulse's own /readyz: never throws — an unreachable service is a result. */
   readiness(): Promise<OfficePulseReadiness>;
@@ -181,7 +93,7 @@ export class HttpOfficePulseClient implements OfficePulseClient {
 
   private async fetchJson(
     path: string,
-    method: string,
+    method: 'GET' | 'POST' = 'GET',
     body?: unknown,
   ): Promise<{ status: number; body: Record<string, unknown> }> {
     const res = await fetch(new URL(path, this.baseUrl), {
@@ -197,8 +109,8 @@ export class HttpOfficePulseClient implements OfficePulseClient {
     return { status: res.status, body: parsed };
   }
 
-  private async request(path: string, method: string, body: unknown): Promise<unknown> {
-    const { status, body: parsed } = await this.fetchJson(path, method, body);
+  private async request(path: string): Promise<unknown> {
+    const { status, body: parsed } = await this.fetchJson(path);
     if (status < 200 || status >= 300) {
       throw new OfficePulseError(
         `OfficePulse ${path.split('?')[0]} failed`,
@@ -210,11 +122,7 @@ export class HttpOfficePulseClient implements OfficePulseClient {
   }
 
   async listPbxExtensions(iTenantId: number) {
-    const body = await this.request(
-      `/v1/admin/pbx/extensions?iTenantId=${iTenantId}`,
-      'GET',
-      undefined,
-    );
+    const body = await this.request(`/v1/admin/pbx/extensions?iTenantId=${iTenantId}`);
     return z
       .object({
         source: z.literal('asterisk'),
@@ -225,11 +133,7 @@ export class HttpOfficePulseClient implements OfficePulseClient {
   }
 
   async listPbxQueues(iTenantId: number) {
-    const body = await this.request(
-      `/v1/admin/pbx/queues?iTenantId=${iTenantId}`,
-      'GET',
-      undefined,
-    );
+    const body = await this.request(`/v1/admin/pbx/queues?iTenantId=${iTenantId}`);
     return z
       .object({
         source: z.literal('asterisk'),
@@ -237,50 +141,6 @@ export class HttpOfficePulseClient implements OfficePulseClient {
         queues: z.array(pbxQueueSchema),
       })
       .parse(body);
-  }
-
-  async issueDeviceEnrollment(
-    iTenantId: number,
-    extensionId: string,
-  ): Promise<{ enrollmentToken: string; expiresIn: number }> {
-    return (await this.request('/v1/provisioning/device-enrollments', 'POST', {
-      iTenantId,
-      extensionId,
-    })) as { enrollmentToken: string; expiresIn: number };
-  }
-
-  async provisionExtension(req: ProvisionExtensionRequest): Promise<ProvisionExtensionResult> {
-    return (await this.request(
-      '/v1/provisioning/extensions',
-      'POST',
-      req,
-    )) as ProvisionExtensionResult;
-  }
-
-  async updateProvisionedExtension(
-    extensionId: string,
-    req: UpdateExtensionRequest,
-  ): Promise<void> {
-    await this.request(`/v1/provisioning/extensions/${extensionId}`, 'PUT', req);
-  }
-
-  async rotateProvisionedExtensionSecret(
-    extensionId: string,
-    requestId: string,
-    reprovisionDevice: boolean,
-  ): Promise<RotateSecretResult> {
-    return (await this.request(`/v1/provisioning/extensions/${extensionId}/rotate-secret`, 'POST', {
-      requestId,
-      reprovisionDevice,
-    })) as RotateSecretResult;
-  }
-
-  async provisionRingGroup(ringGroupId: string, req: ProvisionRingGroupRequest): Promise<void> {
-    await this.request(`/v1/provisioning/ring-groups/${ringGroupId}`, 'PUT', req);
-  }
-
-  async provisionDid(didRouteId: string, req: ProvisionDidRequest): Promise<void> {
-    await this.request(`/v1/provisioning/dids/${didRouteId}`, 'PUT', req);
   }
 
   async submitCallCommand(
@@ -292,7 +152,10 @@ export class HttpOfficePulseClient implements OfficePulseClient {
       'POST',
       req,
     );
-    if (outcome.status >= 500) {
+    const unavailable =
+      outcome.status === 503 &&
+      ['native_destination_unavailable', 'voice_unavailable'].includes(String(outcome.body.error));
+    if (outcome.status >= 500 && !unavailable) {
       throw new OfficePulseError(
         'OfficePulse could not run the command',
         outcome.status,
@@ -306,7 +169,7 @@ export class HttpOfficePulseClient implements OfficePulseClient {
     try {
       // /readyz answers 200 when ready and 503 when a critical component is
       // down; both carry the same snapshot, so both are data here.
-      const { body } = await this.fetchJson('/readyz', 'GET');
+      const { body } = await this.fetchJson('/readyz');
       const components = (body.components ?? {}) as Record<string, OfficePulseComponent>;
       return {
         reachable: true,

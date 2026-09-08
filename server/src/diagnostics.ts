@@ -211,16 +211,16 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
     findings.push({
       level: 'warning',
       summary:
-        'OFFICEPULSE_RUNTIME_DATABASE_URL is not set, so the runtime views (calls, dependencies, provisioning history) answer 503',
+        'OFFICEPULSE_RUNTIME_DATABASE_URL is not set, so the runtime views (calls and dependencies) answer 503',
       fix: "Point OFFICEPULSE_RUNTIME_DATABASE_URL at aidacalls_db as the read-only aidaadmin_ro account from OfficePulse's deploy/sql/grants.sql",
     });
   }
-  if (!config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL) {
+  if (!config.serviceConfig.OFFICEPULSE_API_BASE_URL) {
     findings.push({
       level: 'warning',
       summary:
-        'OFFICEPULSE_PROVISIONING_BASE_URL is not set, so nothing is provisioned to the PBX and takeover/retry/dependency-test actions answer 503',
-      fix: 'Set OFFICEPULSE_PROVISIONING_BASE_URL to the private OfficePulseAidaIntegration API (port 8085)',
+        'OFFICEPULSE_API_BASE_URL is not set, so PBX inventory and the OfficePulse readiness probe answer 503',
+      fix: 'Set OFFICEPULSE_API_BASE_URL to the private OfficePulseAidaIntegration API (port 8085)',
     });
   }
   if (parseCidrList(config.serviceConfig.ID_EVENT_SOURCE_CIDRS).length === 0) {

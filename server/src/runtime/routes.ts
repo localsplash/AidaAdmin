@@ -5,7 +5,6 @@ import type { AppDeps } from '../deps.js';
 import type { Logger } from '../logger.js';
 import { NotFoundError } from '../nocodb/repos.js';
 import { OfficePulseError } from '../officepulse/client.js';
-import { reprovision, type ProvisionableKind } from '../officepulse/reprovision.js';
 import { RuntimeDbError, type RuntimeCallSession } from '../officepulse/runtime-db.js';
 
 /**
@@ -18,7 +17,7 @@ import { RuntimeDbError, type RuntimeCallSession } from '../officepulse/runtime-
  * Every route re-resolves the session, tenant, and role before touching
  * anything, so a revoked membership fails now, not at the next login.
  * Call views are scoped to the selected tenant for everyone; the
- * platform-wide views (dependencies, provisioning history, webhook
+ * platform-wide views (dependencies, webhook
  * deliveries, orphans) are Super Admin.
  */
 
@@ -28,11 +27,6 @@ const commandBody = z.object({
   idempotencyKey: z.string().min(8).max(120),
   ringTimeoutSeconds: z.number().int().min(5).max(300).optional(),
   musicOnHoldClass: z.string().max(80).optional(),
-});
-
-const retryBody = z.object({
-  kind: z.enum(['EXTENSION', 'RING_GROUP', 'DID']),
-  externalId: z.string().min(1).max(60),
 });
 
 /** Event types that mean a call did not go the way it was configured to. */
@@ -138,8 +132,8 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
     if (!deps.officePulse) {
       res.status(503).json({
         error: 'officepulse_not_configured',
-        message: 'OfficePulse is not configured: set OFFICEPULSE_PROVISIONING_BASE_URL',
-        missingConfiguration: ['OFFICEPULSE_PROVISIONING_BASE_URL'],
+        message: 'OfficePulse is not configured: set OFFICEPULSE_API_BASE_URL',
+        missingConfiguration: ['OFFICEPULSE_API_BASE_URL'],
         correlationId: req.correlationId,
       });
       return null;
@@ -413,104 +407,7 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  // ── Provisioning history and retry ─────────────────────────────────────────
-
-  /** The ids of every provisionable record in a tenant, for scoping. */
-  async function tenantEntityIds(tenantId: string): Promise<Set<string>> {
-    const repos = deps.repos;
-    if (!repos) return new Set();
-    const [extensions, groups, routes] = await Promise.all([
-      repos.extensions.listForTenant(tenantId),
-      repos.ringGroups.listForTenant(tenantId),
-      repos.didRoutes.listForTenant(tenantId),
-    ]);
-    return new Set([...extensions, ...groups, ...routes].map((r) => r.id as string));
-  }
-
-  router.get('/runtime/provisioning', async (req, res, next) => {
-    try {
-      const ctx = await resolveContext(req, res);
-      if (!ctx) return;
-      if (ctx.role === 'USER') {
-        res.status(403).json({ error: 'forbidden', correlationId: req.correlationId });
-        return;
-      }
-      const db = reader(req, res);
-      if (!db) return;
-      const limit = Number(req.query.limit);
-      let operations = await db.listProvisioningOperations(
-        Number.isFinite(limit) ? limit : undefined,
-      );
-      const scope = scopeFor(ctx, req);
-      if (scope !== undefined) {
-        // provisioning_operation carries no tenant: scope by the tenant's
-        // own record ids. Handsets are keyed by device id and stay
-        // Super-Admin-only.
-        const ids = await tenantEntityIds(scope);
-        operations = operations.filter((op) => ids.has(op.externalId));
-      }
-      res.json({ operations });
-    } catch (err) {
-      try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
-      }
-    }
-  });
-
-  router.post('/runtime/provisioning/retry', async (req, res, next) => {
-    try {
-      const ctx = await resolveContext(req, res);
-      if (!ctx) return;
-      if (ctx.role === 'USER') {
-        res.status(403).json({ error: 'forbidden', correlationId: req.correlationId });
-        return;
-      }
-      const parsed = retryBody.safeParse(req.body);
-      if (!parsed.success) {
-        res.status(400).json({
-          error: 'validation',
-          message: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
-          correlationId: req.correlationId,
-        });
-        return;
-      }
-      const api = officePulse(req, res);
-      if (!api) return;
-      if (!deps.repos) {
-        res.status(503).json({
-          error: 'nocodb_not_configured',
-          message: 'Retrying provisioning needs the NocoDB PlatformConfig base',
-          correlationId: req.correlationId,
-        });
-        return;
-      }
-      const result = await reprovision(
-        { ...deps, repos: deps.repos, officePulse: api },
-        parsed.data.kind as ProvisionableKind,
-        parsed.data.externalId,
-        ctx.superAdmin ? null : ctx.tenantId,
-      );
-      await audit(
-        req,
-        ctx,
-        'runtime.reprovision',
-        parsed.data.kind.toLowerCase(),
-        parsed.data.externalId,
-        result.tenantId,
-      );
-      res.json({ retried: result });
-    } catch (err) {
-      try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
-      }
-    }
-  });
-
-  // ── Webhooks, fallbacks, orphans ──────────────────────────────────────────
+  // ── Webhooks and orphans ──────────────────────────────────────────
 
   router.get('/runtime/webhooks', async (req, res, next) => {
     try {
@@ -522,27 +419,6 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
       res.json({
         deliveries: await db.listWebhookDeliveries(Number.isFinite(limit) ? limit : undefined),
       });
-    } catch (err) {
-      try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
-      }
-    }
-  });
-
-  /** Which DIDs have a local fail-safe destination projected at OfficePulse. */
-  router.get('/runtime/fallbacks', async (req, res, next) => {
-    try {
-      const ctx = await resolveContext(req, res);
-      if (!ctx) return;
-      if (ctx.role === 'USER') {
-        res.status(403).json({ error: 'forbidden', correlationId: req.correlationId });
-        return;
-      }
-      const db = reader(req, res);
-      if (!db) return;
-      res.json({ fallbacks: await db.listDidFallbacks(scopeFor(ctx, req)) });
     } catch (err) {
       try {
         fail(res, req, err);

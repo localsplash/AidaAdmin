@@ -1,10 +1,9 @@
-import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig, SERVICE_ENV_VARS } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
-import { createRepos } from './helpers/legacy-repos.js';
+import { createRepos, directoryState } from './helpers/fake-config-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import { createLogger } from '../src/logger.js';
 import { presentCaller } from '../src/runtime/routes.js';
@@ -28,7 +27,7 @@ interface Ctx {
   api: FakeNocoDbApi;
   runtime: FakeRuntimeReader;
   officePulse: FakeOfficePulse;
-  acme: { id: string; extensionId: string };
+  acme: { id: string };
   other: { id: string };
 }
 
@@ -72,12 +71,10 @@ async function actor(
 beforeEach(async () => {
   const config = loadConfig({
     NODE_ENV: 'test',
-    LEGACY_PBX_WRITES_ENABLED: 'true',
     LOG_LEVEL: 'fatal',
   });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
-  await seedLegacyDirectory(api);
   const repos = createRepos(api);
   const runtime = new FakeRuntimeReader();
   const officePulse = new FakeOfficePulse();
@@ -101,13 +98,6 @@ beforeEach(async () => {
     asteriskContext: 'other',
     enabled: true,
   });
-  const extension = await repos.extensions.create(acme.id as string, {
-    extensionNumber: '100',
-    displayName: 'Front Desk',
-    asteriskContext: 'acme',
-    enabled: true,
-  });
-
   // Members: 20 administers Acme, 21 is Acme staff, 30 administers Other.
   await repos.tenantUsers.save(acme.id as string, 20, 'TENANT_ADMIN', true);
   await repos.tenantUsers.save(acme.id as string, 21, 'USER', true);
@@ -117,7 +107,7 @@ beforeEach(async () => {
     fakeSession({
       id: 'acme-live',
       tenantId: acme.id as string,
-      destinationId: extension.id as string,
+      destinationId: 'native-endpoint',
     }),
     fakeSession({
       id: 'acme-done',
@@ -162,52 +152,13 @@ beforeEach(async () => {
     { name: 'ari', ready: true, detail: null, changedAt: 'x' },
     { name: 'livekit', ready: false, detail: 'timeout', changedAt: 'x' },
   ];
-  runtime.provisioning = [
-    {
-      requestId: 'r1',
-      kind: 'EXTENSION',
-      externalId: extension.id as string,
-      action: 'create',
-      status: 'created',
-      createdAt: 'x',
-    },
-    {
-      requestId: 'r2',
-      kind: 'HANDSET',
-      externalId: 'device-9',
-      action: 'provision',
-      status: 'provisioned',
-      createdAt: 'x',
-    },
-  ];
-  runtime.fallbacks = [
-    {
-      didRouteId: 'route-a',
-      tenantId: acme.id as string,
-      didE164: '+15105550100',
-      destinationType: 'EXTENSION',
-      destinationId: extension.id as string,
-      enabled: true,
-      updatedAt: 'x',
-    },
-    {
-      didRouteId: 'route-o',
-      tenantId: other.id as string,
-      didE164: '+15105550200',
-      destinationType: 'RING_GROUP',
-      destinationId: 'rg-1',
-      enabled: true,
-      updatedAt: 'x',
-    },
-  ];
-
   ctx = {
     app,
     deps,
     api,
     runtime,
     officePulse,
-    acme: { id: acme.id as string, extensionId: extension.id as string },
+    acme: { id: acme.id as string },
     other: { id: other.id as string },
   };
 });
@@ -340,10 +291,10 @@ describe('takeover', () => {
         body: { commandType: 'TAKEOVER', idempotencyKey: 'k-12345678', ringTimeoutSeconds: 30 },
       },
     ]);
-    const audit = ctx.api.tableByName('audit_log')!.records;
+    const audit = directoryState(ctx.api).audit;
     expect(audit.map((r) => r.action)).toEqual(['runtime.command']);
-    expect(audit[0]!.tenant_id).toBe(ctx.acme.id);
-    expect(audit[0]!.actor_identity_user_id).toBe(20);
+    expect(audit[0]!.tenantId).toBe(ctx.acme.id);
+    expect(audit[0]!.actorIdentityUserId).toBe(20);
   });
 
   it('refuses a command on another tenant call before anything is sent', async () => {
@@ -436,7 +387,7 @@ describe('degraded states', () => {
       idempotencyKey: 'k-12345678',
     });
     expect(unconfigured.status).toBe(503);
-    expect(unconfigured.body.missingConfiguration).toEqual(['OFFICEPULSE_PROVISIONING_BASE_URL']);
+    expect(unconfigured.body.missingConfiguration).toEqual(['OFFICEPULSE_API_BASE_URL']);
   });
 });
 
@@ -471,72 +422,11 @@ describe('dependencies', () => {
     const probe = await root.post('/runtime/dependencies/test', {});
     expect(probe.status).toBe(200);
     expect(ctx.officePulse.readinessProbes).toBe(2);
-    expect(ctx.api.tableByName('audit_log')!.records.map((r) => r.action)).toEqual([
-      'runtime.dependency_test',
-    ]);
+    expect(directoryState(ctx.api).audit.map((r) => r.action)).toEqual(['runtime.dependency_test']);
   });
 });
 
-describe('provisioning history and retry', () => {
-  it('shows a tenant administrator only operations on their own records', async () => {
-    const admin = await actor(20, false, ctx.acme.id);
-    const res = await admin.get('/runtime/provisioning');
-    expect(res.body.operations.map((o: { requestId: string }) => o.requestId)).toEqual(['r1']);
-    const root = await actor(1, true, null);
-    expect((await root.get('/runtime/provisioning')).body.operations).toHaveLength(2);
-    const staff = await actor(21, false, ctx.acme.id);
-    expect((await staff.get('/runtime/provisioning')).status).toBe(403);
-  });
-
-  it('retries with the idempotent update, never a create that would mint a secret', async () => {
-    const admin = await actor(20, false, ctx.acme.id);
-    const res = await admin.post('/runtime/provisioning/retry', {
-      kind: 'EXTENSION',
-      externalId: ctx.acme.extensionId,
-    });
-    expect(res.status).toBe(200);
-    expect(ctx.officePulse.updated).toEqual([
-      {
-        extensionId: ctx.acme.extensionId,
-        body: {
-          extensionNumber: '100',
-          context: 'acme',
-          displayName: 'Front Desk',
-          callerIdName: null,
-          callerIdNumber: null,
-          provisioningProfile: null,
-          enabled: true,
-        },
-      },
-    ]);
-    expect(ctx.officePulse.provisioned).toHaveLength(0);
-    expect(ctx.api.tableByName('audit_log')!.records.map((r) => r.action)).toEqual([
-      'runtime.reprovision',
-    ]);
-  });
-
-  it('will not retry another tenant record', async () => {
-    const otherAdmin = await actor(30, false, ctx.other.id);
-    const res = await otherAdmin.post('/runtime/provisioning/retry', {
-      kind: 'EXTENSION',
-      externalId: ctx.acme.extensionId,
-    });
-    expect(res.status).toBe(404);
-    expect(ctx.officePulse.updated).toHaveLength(0);
-  });
-});
-
-describe('fallbacks and orphans', () => {
-  it('scopes DID fail-safes to the tenant', async () => {
-    const admin = await actor(20, false, ctx.acme.id);
-    const res = await admin.get('/runtime/fallbacks');
-    expect(res.body.fallbacks.map((f: { didRouteId: string }) => f.didRouteId)).toEqual([
-      'route-a',
-    ]);
-    const root = await actor(1, true, null);
-    expect((await root.get('/runtime/fallbacks?tenant=all')).body.fallbacks).toHaveLength(2);
-  });
-
+describe('orphans', () => {
   it('lists lost calls with whoever is still marked present, and offers no cleanup', async () => {
     const root = await actor(1, true, null);
     const res = await root.get('/runtime/orphans');

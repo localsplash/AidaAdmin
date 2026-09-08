@@ -2,7 +2,6 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ExtensionsScreen } from '../src/screens/ExtensionsScreen';
 import { TenantsScreen } from '../src/screens/TenantsScreen';
 import { TenantUsersScreen } from '../src/screens/TenantUsersScreen';
 
@@ -76,76 +75,6 @@ describe('TenantsScreen', () => {
   });
 });
 
-function renderExtensions() {
-  return render(
-    <MemoryRouter initialEntries={['/tenants/ten-1/extensions']}>
-      <Routes>
-        <Route path="/tenants/:tenantId/extensions" element={<ExtensionsScreen />} />
-      </Routes>
-    </MemoryRouter>,
-  );
-}
-
-describe('ExtensionsScreen', () => {
-  it('shows the one-time SIP credentials exactly once after creation', async () => {
-    mockFetch((url, init) => {
-      if (url.endsWith('/admin/extensions') && init?.method === 'POST') {
-        return {
-          status: 201,
-          body: {
-            extension: { id: 'ext-1' },
-            sipUsername: 'sip-100',
-            sipSecret: 'shown-once-secret',
-          },
-        };
-      }
-      if (url.includes('/admin/tenants/ten-1/extensions')) {
-        return { status: 200, body: { extensions: [] } };
-      }
-      return null;
-    });
-    renderExtensions();
-    const user = userEvent.setup();
-    await user.click(await screen.findByText('Add Extension…'));
-    await user.type(await screen.findByLabelText(/extension number/i), '100');
-    await user.type(screen.getByLabelText(/display name/i), 'Front Desk');
-    await user.click(screen.getByRole('button', { name: /save record/i }));
-
-    const dialog = await screen.findByRole('alertdialog');
-    expect(dialog).toHaveTextContent('shown-once-secret');
-    expect(dialog).toHaveTextContent(/shown once/i);
-
-    await user.click(screen.getByRole('button', { name: /i have copied/i }));
-    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
-    expect(screen.queryByText('shown-once-secret')).not.toBeInTheDocument();
-  });
-
-  it('reports a provisioning failure clearly', async () => {
-    mockFetch((url, init) => {
-      if (url.endsWith('/admin/extensions') && init?.method === 'POST') {
-        return {
-          status: 502,
-          body: {
-            error: 'provisioning_failed',
-            message: 'The record was saved, but PBX provisioning failed.',
-          },
-        };
-      }
-      if (url.includes('/admin/tenants/ten-1/extensions')) {
-        return { status: 200, body: { extensions: [] } };
-      }
-      return null;
-    });
-    renderExtensions();
-    const user = userEvent.setup();
-    await user.click(await screen.findByText('Add Extension…'));
-    await user.type(await screen.findByLabelText(/extension number/i), '100');
-    await user.type(screen.getByLabelText(/display name/i), 'Front Desk');
-    await user.click(screen.getByRole('button', { name: /save record/i }));
-    expect(await screen.findByRole('alert')).toHaveTextContent(/PBX provisioning failed/i);
-  });
-});
-
 describe('editing existing records', () => {
   it('prefills the tenant form and saves with the record revision', async () => {
     const puts: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -202,44 +131,6 @@ describe('editing existing records', () => {
     await user.click(await screen.findByRole('button', { name: /edit/i }));
     await user.click(screen.getByRole('button', { name: /save tenant/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/modified by someone else/i);
-  });
-});
-
-describe('extension without a PBX', () => {
-  it('reports the record as saved rather than failing', async () => {
-    mockFetch((url, init) => {
-      if (url.endsWith('/admin/extensions') && init?.method === 'POST') {
-        return {
-          status: 201,
-          body: {
-            extension: { id: 'ext-1' },
-            provisioning: 'not_configured',
-            message: 'Extension saved. OFFICEPULSE_PROVISIONING_BASE_URL is not set…',
-          },
-        };
-      }
-      if (url.includes('/admin/tenants/ten-1/extensions')) {
-        return { status: 200, body: { extensions: [] } };
-      }
-      return null;
-    });
-    render(
-      <MemoryRouter initialEntries={['/tenants/ten-1/extensions']}>
-        <Routes>
-          <Route path="/tenants/:tenantId/extensions" element={<ExtensionsScreen />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    const user = userEvent.setup();
-    await user.click(await screen.findByText('Add Extension…'));
-    await user.type(await screen.findByLabelText(/extension number/i), '100');
-    await user.type(screen.getByLabelText(/display name/i), 'Front Desk');
-    await user.click(screen.getByRole('button', { name: /save record/i }));
-
-    expect(await screen.findByRole('status')).toHaveTextContent(/Extension saved/i);
-    // No credential panel, because no secret was issued.
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
 
@@ -342,48 +233,5 @@ describe('tenant user management', () => {
     renderTenantUsers();
     expect(await screen.findByText('Awaiting first sign-in')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument();
-  });
-});
-
-describe('extension owner', () => {
-  it('offers the tenant members and sends the chosen user', async () => {
-    const posts: Array<Record<string, unknown>> = [];
-    mockFetch((url, init) => {
-      const method = init?.method ?? 'GET';
-      if (url.includes('/admin/tenants/ten-1/extensions')) {
-        return { status: 200, body: { extensions: [] } };
-      }
-      if (url === '/admin/tenants/ten-1/users' && method === 'GET') {
-        return {
-          status: 200,
-          body: {
-            users: [MEMBER],
-            canEditDisplayName: true,
-            canManageDirectory: true,
-            directoryError: null,
-          },
-        };
-      }
-      if (url.endsWith('/admin/extensions') && method === 'POST') {
-        posts.push(JSON.parse(String(init!.body)));
-        return {
-          status: 201,
-          body: { extension: { id: 'ext-1' }, provisioning: 'not_configured' },
-        };
-      }
-      return null;
-    });
-    renderExtensions();
-    const user = userEvent.setup();
-    await user.click(await screen.findByText('Add Extension…'));
-    await user.type(await screen.findByLabelText(/extension number/i), '100');
-    await user.selectOptions(screen.getByLabelText(/^user$/i), '42');
-
-    // Picking a person fills an empty display name from them.
-    expect(screen.getByLabelText(/display name/i)).toHaveValue('Pat');
-
-    await user.click(screen.getByRole('button', { name: /save record/i }));
-    await waitFor(() => expect(posts).toHaveLength(1));
-    expect(posts[0]!.identityUserId).toBe(42);
   });
 });

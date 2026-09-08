@@ -1,9 +1,8 @@
 import type { NocoColumnDef, NocoDbApi, NocoTableDef } from './api.js';
 import { tableByCanonicalName } from './api.js';
 
-/** Aida-owned voice configuration in shared PlatformConfig. Enrollment hash
- * columns are retained for explicit legacy inspection; new grants live in
- * OfficePulse. Tenant identity, membership and audit are not stored here.
+/** Active Aida business configuration in PlatformConfig. PBX configuration
+ * is owned by Asterisk; Identity owns tenants and memberships.
  */
 
 const text = (name: string): NocoColumnDef => ({
@@ -33,61 +32,9 @@ export const LOGICAL_SCHEMA: NocoTableDef[] = [
     columns: [
       ...common,
       num('tenant_id'),
-      text('legacy_tenant_id'),
       text('asterisk_context'),
       text('caller_id_name'),
       text('caller_id_number'),
-    ],
-  },
-  {
-    table_name: 'extension',
-    title: 'extension',
-    columns: [
-      ...common,
-      text('tenant_id'),
-      num('identity_user_id'),
-      text('extension_number'),
-      text('display_name'),
-      text('caller_id_name'),
-      text('caller_id_number'),
-      text('asterisk_context'),
-      text('provisioning_profile'),
-      text('device_id'),
-      text('provisioning_mac'),
-      text('enrollment_token_hash'),
-      dt('enrollment_expires_at'),
-      dt('enrollment_consumed_at'),
-      num('device_credential_version'),
-      bool('enabled'),
-    ],
-  },
-  {
-    table_name: 'ring_group',
-    title: 'ring_group',
-    columns: [
-      ...common,
-      text('tenant_id'),
-      text('name'),
-      text('virtual_extension'),
-      text('asterisk_context'),
-      text('ring_strategy'),
-      num('ring_timeout_seconds'),
-      text('music_on_hold_class'),
-      text('caller_id_name'),
-      text('caller_id_number'),
-      bool('enabled'),
-    ],
-  },
-  {
-    table_name: 'ring_group_member',
-    title: 'ring_group_member',
-    columns: [
-      ...common,
-      text('tenant_id'),
-      text('ring_group_id'),
-      text('extension_id'),
-      num('sort_order'),
-      bool('enabled'),
     ],
   },
   {
@@ -108,26 +55,6 @@ export const LOGICAL_SCHEMA: NocoTableDef[] = [
     ],
   },
   {
-    table_name: 'did_route',
-    title: 'did_route',
-    columns: [
-      ...common,
-      text('tenant_id'),
-      text('did_e164'),
-      text('assistant_profile_id'),
-      text('destination_type'),
-      text('destination_extension_id'),
-      text('destination_ring_group_id'),
-      bool('screening_enabled'),
-      bool('enabled'),
-    ],
-  },
-  {
-    table_name: 'configuration_source',
-    title: 'configuration_source',
-    columns: [...common, text('tenant_id'), text('kind'), text('description')],
-  },
-  {
     table_name: 'appearance',
     title: 'appearance',
     columns: [
@@ -140,15 +67,10 @@ export const LOGICAL_SCHEMA: NocoTableDef[] = [
   },
 ];
 
-/** Physical PlatformConfig names; browser and OfficePulse wire fields remain stable. */
+/** Physical names of the active Aida business tables in PlatformConfig. */
 export const TABLE_NAMES: Record<string, string> = {
   tenant_profile: 'aida_tbl_TenantProfile',
-  extension: 'aida_tbl_Extension',
-  ring_group: 'aida_tbl_RingGroup',
-  ring_group_member: 'aida_tbl_RingGroupMember',
   assistant_profile: 'aida_tbl_AssistantProfile',
-  did_route: 'aida_tbl_DidRoute',
-  configuration_source: 'aida_tbl_ConfigurationSource',
   appearance: 'aida_tbl_Appearance',
 };
 export const FIELD_NAMES: Record<string, string> = {
@@ -174,10 +96,6 @@ export const AIDA_SCHEMA: NocoTableDef[] = LOGICAL_SCHEMA.map((table) => ({
  */
 export const UNIQUE_RULES: Record<string, string[][]> = {
   tenant_profile: [['tenant_id'], ['asterisk_context']],
-  extension: [['tenant_id', 'extension_number'], ['device_id'], ['provisioning_mac']],
-  ring_group: [['tenant_id', 'virtual_extension']],
-  ring_group_member: [['ring_group_id', 'extension_id']],
-  did_route: [['did_e164']],
 };
 
 export interface DriftReport {

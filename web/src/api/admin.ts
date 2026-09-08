@@ -87,33 +87,6 @@ export interface PbxQueue {
   }>;
 }
 
-export interface Extension {
-  id: string;
-  extension_number: string;
-  display_name: string;
-  identity_user_id: number | null;
-  caller_id_name: string | null;
-  caller_id_number: string | null;
-  provisioning_profile?: string | null;
-  provisioning_mac: string | null;
-  device_credential_version: number;
-  enabled: boolean;
-  revision: number;
-}
-
-export interface RingGroup {
-  id: string;
-  name: string;
-  virtual_extension: string;
-  ring_timeout_seconds: number;
-  music_on_hold_class?: string | null;
-  caller_id_name?: string | null;
-  caller_id_number?: string | null;
-  enabled: boolean;
-  revision: number;
-  members: Array<{ extension_id: string }>;
-}
-
 export interface TenantInput {
   name: string;
   slug: string;
@@ -135,59 +108,12 @@ export interface AssistantProfile {
   revision: number;
 }
 
-export interface DidRoute {
-  id: string;
-  did_e164: string;
-  assistant_profile_id: string;
-  destination_type: 'EXTENSION' | 'RING_GROUP';
-  destination_extension_id: string | null;
-  destination_ring_group_id: string | null;
-  screening_enabled: boolean;
-  enabled: boolean;
-  revision: number;
-  fallbackPreview: string;
-}
-
 export interface Appearance {
   id: string;
   brand_name: string;
   primary_color: string | null;
   logo_asset_path: string | null;
   revision: number;
-}
-
-export interface ExtensionInput {
-  tenantId: string;
-  /** The one platform user who answers this extension, if any. */
-  identityUserId?: number | null;
-  extensionNumber: string;
-  displayName: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  provisioningProfile?: string | null;
-  enabled: boolean;
-}
-
-export interface RingGroupInput {
-  tenantId: string;
-  name: string;
-  virtualExtension: string;
-  ringTimeoutSeconds: number;
-  memberExtensionIds: string[];
-  musicOnHoldClass?: string | null;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  enabled: boolean;
-}
-
-export interface DidRouteInput {
-  tenantId: string;
-  didE164: string;
-  assistantProfileId: string;
-  destinationType: 'EXTENSION' | 'RING_GROUP';
-  destinationId: string;
-  screeningEnabled: boolean;
-  enabled: boolean;
 }
 
 export interface ProfileInput {
@@ -281,59 +207,12 @@ export const adminApi = {
       enabled,
     }),
 
-  listExtensions: (tenantId: string) =>
-    call<{ extensions: Extension[] }>(`/admin/tenants/${tenantId}/extensions`, 'GET'),
-  createExtension: (input: ExtensionInput) =>
-    call<{
-      extension: Extension;
-      sipUsername?: string;
-      sipSecret?: string;
-      provisioning?: string;
-      message?: string;
-    }>('/admin/extensions', 'POST', input),
-  updateExtension: (extensionId: string, expectedRevision: number, input: ExtensionInput) =>
-    call<{ extension: Extension }>(`/admin/extensions/${extensionId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
-  rotateSecret: (extensionId: string, tenantId: string, reprovisionDevice: boolean) =>
-    call<{ sipSecret: string }>(`/admin/extensions/${extensionId}/rotate-secret`, 'POST', {
-      tenantId,
-      reprovisionDevice,
-    }),
-  issueEnrollment: (extensionId: string, tenantId: string) =>
-    call<{ enrollmentToken: string; expiresAt: string }>(
-      `/admin/extensions/${extensionId}/handset-enrollment`,
-      'POST',
-      { tenantId },
-    ),
-
-  listRingGroups: (tenantId: string) =>
-    call<{ ringGroups: RingGroup[] }>(`/admin/tenants/${tenantId}/ring-groups`, 'GET'),
-  createRingGroup: (input: RingGroupInput) =>
-    call<{ ringGroup: RingGroup }>('/admin/ring-groups', 'POST', input),
-  updateRingGroup: (ringGroupId: string, expectedRevision: number, input: RingGroupInput) =>
-    call<{ ringGroup: RingGroup }>(`/admin/ring-groups/${ringGroupId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
-
   listProfiles: (tenantId: string) =>
     call<{ profiles: AssistantProfile[] }>(`/admin/tenants/${tenantId}/profiles`, 'GET'),
   createProfile: (input: ProfileInput) =>
     call<{ profile: AssistantProfile }>('/admin/profiles', 'POST', input),
   updateProfile: (profileId: string, expectedRevision: number, input: ProfileInput) =>
     call<{ profile: AssistantProfile }>(`/admin/profiles/${profileId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
-
-  listDidRoutes: (tenantId: string) =>
-    call<{ didRoutes: DidRoute[] }>(`/admin/tenants/${tenantId}/did-routes`, 'GET'),
-  createDidRoute: (input: DidRouteInput) =>
-    call<{ didRoute: DidRoute }>('/admin/did-routes', 'POST', input),
-  updateDidRoute: (didRouteId: string, expectedRevision: number, input: DidRouteInput) =>
-    call<{ didRoute: DidRoute }>(`/admin/did-routes/${didRouteId}`, 'PUT', {
       ...input,
       expectedRevision,
     }),

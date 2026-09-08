@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
  * Deployed smoke test against a REAL OfficePulse runtime database and API
  * (issue #29's last definition-of-done item). It drives an already-running,
  * non-production AidaAdmin that has E2E_FAKE_SESSION=true and both
- * OFFICEPULSE_RUNTIME_DATABASE_URL and OFFICEPULSE_PROVISIONING_BASE_URL
+ * OFFICEPULSE_RUNTIME_DATABASE_URL and OFFICEPULSE_API_BASE_URL
  * pointed at the live services:
  *
  *   E2E_RUNTIME_URL=https://aida-admin.staging.example npm run test:e2e -- runtime

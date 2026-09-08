@@ -1,103 +1,61 @@
-# Asterisk ownership and the POC boundary
+# Asterisk source of truth
 
-Asterisk is the source of truth for PBX extensions, queues, queue membership,
-trunks and effective PBX routing. OfficePulseAidaIntegration owns its PBX adapter
-and the operations interface. AidaAdmin owns business and tenant administration:
-Identity users, memberships, roles and number assignments, plus Aida business
-profiles. There is no separate AidaOfficePbxAdmin application. AidaHandset and
-AidaAgent work is deferred. See the [cross-project decision](https://github.com/localsplash/identity/blob/dev/docs/PBX_OWNERSHIP.md).
+Asterisk owns extensions, queues, queue membership, trunks and effective routing.
+OfficePulseAidaIntegration owns the PBX integration API and its operations UI.
+AidaAdmin owns business administration through Identity, business profiles and
+appearance. There is no separate AidaOfficePbxAdmin application. AidaHandset and
+AidaAgent work remains deferred. See the [cross-project decision](https://github.com/localsplash/identity/blob/dev/docs/PBX_OWNERSHIP.md).
 
-Queues are Asterisk queues. Existing `RING_GROUP` objects and `RING_ALL` behavior
-are historical configuration, not queue definitions and not a safe automatic
-conversion target. In particular, PJSIP endpoint IDs may differ from dialable
-extension numbers and must not be used as dialplan destinations without review.
+## POC API boundary
 
-## Host runbook reconciliation
+Browser reads `/admin/tenants/:tenantId/pbx/extensions` and `.../queues`. AidaAdmin
+checks authenticated tenant-administrator membership before calling OfficePulse
+`GET /v1/admin/pbx/extensions?iTenantId=N` or `.../queues`. Super Admin can view
+other tenants. The client verifies the returned tenant and source and strips
+unapproved fields. SIP secrets are never part of inventory.
 
-The supplied OfficePulse host runbook describes PJSIP Realtime endpoints in
-MariaDB and genuine `queues` / `queue_members` tables. It also places effective
-DID routing in `/etc/asterisk/extensions.conf` and some trunks in
-`/etc/asterisk/pjsip_wizard.conf`. A database inventory cannot describe the whole
-PBX. Do not overwrite file-owned routing or equate queue `ringall` strategy with
-a legacy ring-group object.
+OfficePulse uses a dedicated SELECT-only PBX account and explicit
+`PBX_INVENTORY_TENANTS_JSON` tenant-to-context/queue mappings. Enable
+`PBX_INVENTORY_ENABLED` and configure those reviewed mappings before rollout.
+Missing mappings, query failures and incompatible schema produce errors.
+Inventory describes persisted PBX configuration, not live registrations.
 
-Native call history is `asterisk.cdr`, recorded in UTC; `userfield` contains the
-recording basename. `aidacalls_db` is a separate integration call-orchestration
-store in this codebase, not the native CDR database and not proven deployed by
-that runbook. Tenant-scoped native CDR and recording access still needs an
-OfficePulse API contract, reviewed tenant mapping and file-access controls.
-Do not infer tenant ownership from a browser-supplied recording name.
+No Admin PBX save, projection, retry, enrollment or secret-rotation API remains.
+There is no compatibility toggle. No duplicate PBX state or sync status is
+required. The existing live operations view and audited call-command modules
+are retained. Takeover controls are unavailable until native queue routing exists;
+OfficePulse returns `native_destination_unavailable` or `voice_unavailable` with
+503 before it creates a command record. These are runtime call operations, not
+a local PBX configuration. The obsolete local extension/ring-group/DID graph is removed
+from code and must be deleted from this disposable DEV base.
 
-The host's TLS port 80 serves phone provisioning, while port 443 serves SIP TLS.
-Deploy the private OfficePulse integration API behind its own reviewed ingress;
-`OFFICEPULSE_PROVISIONING_BASE_URL` must point at that API, not at either existing
-phone-facing listener. The runbook's customer/device inventory is not copied here.
+## Host runbook evidence
 
-## Implemented boundary
+The supplied runbook identifies PJSIP Realtime `ps_endpoints`, native `queues`
+and `queue_members`. Queue `ringall` is a strategy, not a ring-group object.
+Endpoint IDs are not automatically dialable extension numbers. Effective DID
+routing also lives in `/etc/asterisk/extensions.conf`, while some trunks use
+`pjsip_wizard.conf`; inventory SQL cannot describe or replace those files.
 
-- Browser reads `/admin/tenants/:tenantId/pbx/extensions` and `.../queues`.
-  Authentication and enabled tenant-administrator membership are checked before
-  the API call. Only Super Admin can view other tenants.
-- AidaAdmin calls fixed, private OfficePulse endpoints
-  `/v1/admin/pbx/extensions?iTenantId=N` and `/v1/admin/pbx/queues?iTenantId=N`.
-  It has no direct Asterisk MySQL access. The client validates the source and
-  tenant ID and allowlists response fields, so SIP authentication data cannot
-  pass through the inventory response.
-- OfficePulse reads the vendor database with explicit operator-owned
-  `PBX_INVENTORY_TENANTS_JSON` mappings of Identity tenant IDs to PBX contexts
-  and queue names. Configure and validate those mappings before Admin rollout.
-  Enable `PBX_INVENTORY_ENABLED` with dedicated SELECT-only
-  `PBX_INVENTORY_MYSQL_USER` / `PBX_INVENTORY_MYSQL_PASSWORD` credentials.
-  Missing mappings, vendor schema incompatibility and PBX outages are errors;
-  the UI does not replace them with successful empty inventories.
-- Inventory is current persisted PBX configuration, without an Admin copy or
-  reconciliation ledger. Registrations and live queue membership require
-  operational runtime evidence; this SQL view does not promise either.
-- Extension, ring-group, DID, SIP-secret, enrollment and provisioning-retry
-  writes return `409 pbx_owned_by_asterisk` before any local save by default.
-  Extension and queue pages have read-only inventory. The default runtime UI
-  has no provisioning-status or retry tab. Call diagnostics and idempotent
-  call commands remain available.
-- The shared Identity Numbers page remains editable. Historical DID routing
-  metadata is read-only until its destination contract refers to verified native
-  PBX identifiers. Current PBX routing must be checked in OfficePulse operations.
+Native call history is UTC `asterisk.cdr`; `userfield` contains the recording
+basename. `aidacalls_db` is separate integration diagnostics. Native CDR pagination,
+verified tenant attribution and authorized recording access remain unfinished.
+A filename supplied by a browser must not grant recording access.
 
-## Preserved compatibility and unfinished cutover
+TLS port 80 serves phone provisioning; TCP 443 serves SIP TLS. The integration
+API needs separate private ingress. `OFFICEPULSE_API_BASE_URL` refers to that API,
+not a phone-facing listener. The private service API's CIDR admission is not
+human authorization for a browser operations UI.
 
-No PBX/NocoDB records, tables or grants are deleted. Existing local extension,
-ring-group, DID, provisioning and enrollment code is retained for review and
-rollback. `LEGACY_PBX_WRITES_ENABLED=true` explicitly re-enables old server
-mutation routes; it is false by default and does not restore the retired browser
-editors. Keep it false in this POC. Historical provisioning records may still be
-read through the existing diagnostics API; they are not a new reconciliation
-requirement. OfficePulse also needs its matching default write gate deployed.
+## Remaining work
 
-Before business DID editing resumes, define a native extension/queue reference
-contract, verify tenant isolation and effective queue fallback behavior, and
-review existing references individually. Do not rename a ring-group UUID into
-a queue name. The small OfficePulse operations UI and its human authentication
-remain separate work; a CIDR-trusted service API is not sufficient browser
-authorization. Do not expose that private API directly to browsers.
+Define a native extension/queue/DID and AI-profile contract before reintroducing
+business routing controls. OfficePulse owns how call handling resolves native
+PBX destinations without the obsolete configuration graph. Keep actual PBX file routing intact; do not
+reconstruct it from deleted UUID projections. Live-call, native history/recording
+and authenticated operations-UI work remain in [#29](https://github.com/localsplash/AidaAdmin/issues/29).
+Identity tenant merge semantics remain in [#31](https://github.com/localsplash/AidaAdmin/issues/31).
 
-## Issue evidence and acceptance
-
-[#31](https://github.com/localsplash/AidaAdmin/issues/31) already has Identity
-directory proxies, numeric platform tenant IDs, tenant voice profiles, central
-session introspection, scoped PlatformConfig loading and durable Identity event
-receipts. The original extra membership lookup is superseded by fresh session
-introspection on every request. Tenant disable removes access there. There is
-no implemented tenant merge/remapping workflow: that remains open with
-[identity #16](https://github.com/localsplash/identity/issues/16). A reviewed
-legacy tenant/config mapping importer and actual migration evidence remain
-open if source records exist; no source deletion is authorized by this cutover.
-Old AidaControl device-MAC/session requirements are superseded and handset work
-is deferred.
-
-[#29](https://github.com/localsplash/AidaAdmin/issues/29) uses `aidacalls_db`,
-not the historical `aida_officepulse` name. The read-only runtime repository,
-call/event/dependency views and explicit OfficePulse call API are implemented.
-Live-call acceptance is still required: one real DID arrival through screening,
-queue takeover/fallback and hangup, two-tenant isolation, verified SELECT-only
-SQL grants, and a deployed browser smoke test using the real OfficePulse API.
-Unit/component tests prove the application boundary; they do not prove live
-calls, vendor SQL compatibility, registrations or deployed credentials.
+This DEV has no data-preservation or rollback-window requirement. Follow
+[DEV_RESET.md](DEV_RESET.md) for exact obsolete object removal after the matching
+application cleanup is deployed.
