@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import express, { type Express } from 'express';
 import { pinoHttp } from 'pino-http';
 import { adminRoutes } from './admin/routes.js';
+import { pbxRoutes } from './admin/pbx-routes.js';
 import { numberRoutes } from './admin/number-routes.js';
 import { configRoutes } from './admin/config-routes.js';
 import { sessionMiddleware } from './auth/middleware.js';
@@ -70,6 +71,7 @@ export function createApp(
   app.use(authRoutes(config, logger, deps));
   app.use(sessionRoutes(config, deps));
   app.use(tenantSelectionRoutes(logger, deps));
+  app.use(pbxRoutes(config, deps));
   app.use(runtimeRoutes(logger, deps));
   app.use(adminRoutes(logger, deps));
   app.use(numberRoutes(deps));

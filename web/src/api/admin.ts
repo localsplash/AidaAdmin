@@ -68,6 +68,25 @@ export interface DirectoryUser {
   lastLoginAt?: string | null;
 }
 
+export interface PbxExtension {
+  id: string;
+  context: string;
+  callerId: string | null;
+  transport: string | null;
+  aors: string | null;
+}
+export interface PbxQueue {
+  id: string;
+  name: string;
+  strategy: string | null;
+  members: Array<{
+    interface: string;
+    memberName: string | null;
+    penalty: number;
+    paused: boolean;
+  }>;
+}
+
 export interface Extension {
   id: string;
   extension_number: string;
@@ -197,6 +216,16 @@ export interface TenantNumber {
 }
 export type NumberInput = Omit<TenantNumber, 'iPhoneNumberId' | 'iTenantId' | 'iVersion'>;
 export const adminApi = {
+  listPbxExtensions: (tenantId: string) =>
+    call<{ source: 'asterisk'; iTenantId: number; extensions: PbxExtension[] }>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/pbx/extensions`,
+      'GET',
+    ),
+  listPbxQueues: (tenantId: string) =>
+    call<{ source: 'asterisk'; iTenantId: number; queues: PbxQueue[] }>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/pbx/queues`,
+      'GET',
+    ),
   listNumbers: (tenantId: string) =>
     call<{ numbers: TenantNumber[] }>(
       `/admin/tenants/${encodeURIComponent(tenantId)}/numbers`,

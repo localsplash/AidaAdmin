@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 /**
  * OfficePulseAidaIntegration's private-LAN HTTP API (its issue #9): the
  * provisioning routes AidaAdmin has always used, plus the call-control and
@@ -108,7 +110,36 @@ export interface OfficePulseReadiness {
   components: Record<string, OfficePulseComponent>;
 }
 
+const pbxExtensionSchema = z.object({
+  id: z.string(),
+  context: z.string(),
+  callerId: z.string().nullable(),
+  transport: z.string().nullable(),
+  aors: z.string().nullable(),
+});
+const pbxQueueSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  strategy: z.string().nullable(),
+  members: z.array(
+    z.object({
+      interface: z.string(),
+      memberName: z.string().nullable(),
+      penalty: z.number(),
+      paused: z.boolean(),
+    }),
+  ),
+});
+export type PbxExtension = z.infer<typeof pbxExtensionSchema>;
+export type PbxQueue = z.infer<typeof pbxQueueSchema>;
+
 export interface OfficePulseClient {
+  listPbxExtensions?(
+    iTenantId: number,
+  ): Promise<{ source: 'asterisk'; iTenantId: number; extensions: PbxExtension[] }>;
+  listPbxQueues?(
+    iTenantId: number,
+  ): Promise<{ source: 'asterisk'; iTenantId: number; queues: PbxQueue[] }>;
   issueDeviceEnrollment?(
     iTenantId: number,
     extensionId: string,
@@ -176,6 +207,36 @@ export class HttpOfficePulseClient implements OfficePulseClient {
       );
     }
     return parsed;
+  }
+
+  async listPbxExtensions(iTenantId: number) {
+    const body = await this.request(
+      `/v1/admin/pbx/extensions?iTenantId=${iTenantId}`,
+      'GET',
+      undefined,
+    );
+    return z
+      .object({
+        source: z.literal('asterisk'),
+        iTenantId: z.literal(iTenantId),
+        extensions: z.array(pbxExtensionSchema),
+      })
+      .parse(body);
+  }
+
+  async listPbxQueues(iTenantId: number) {
+    const body = await this.request(
+      `/v1/admin/pbx/queues?iTenantId=${iTenantId}`,
+      'GET',
+      undefined,
+    );
+    return z
+      .object({
+        source: z.literal('asterisk'),
+        iTenantId: z.literal(iTenantId),
+        queues: z.array(pbxQueueSchema),
+      })
+      .parse(body);
   }
 
   async issueDeviceEnrollment(

@@ -97,7 +97,11 @@ describe('DidRoutesScreen', () => {
       if (url.includes('/ring-groups')) return { status: 200, body: { ringGroups: [] } };
       return null;
     });
-    renderAt('/tenants/t1/did-routes', '/tenants/:tenantId/did-routes', <DidRoutesScreen />);
+    renderAt(
+      '/tenants/t1/did-routes',
+      '/tenants/:tenantId/did-routes',
+      <DidRoutesScreen readOnly={false} />,
+    );
     expect(await screen.findByText('Extension 100 — Front Desk')).toBeInTheDocument();
     const disabledOption = screen.getByRole('option', { name: /old profile \(disabled\)/i });
     expect(disabledOption).toBeDisabled();
@@ -127,7 +131,11 @@ describe('DidRoutesScreen', () => {
       if (url.includes('/ring-groups')) return { status: 200, body: { ringGroups: [] } };
       return null;
     });
-    renderAt('/tenants/t1/did-routes', '/tenants/:tenantId/did-routes', <DidRoutesScreen />);
+    renderAt(
+      '/tenants/t1/did-routes',
+      '/tenants/:tenantId/did-routes',
+      <DidRoutesScreen readOnly={false} />,
+    );
     const user = userEvent.setup();
     await user.click(await screen.findByText(/Add DID/));
     await user.selectOptions(await screen.findByLabelText(/did \(e\.164\)/i), '+15105550100');

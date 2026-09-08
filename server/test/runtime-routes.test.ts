@@ -70,7 +70,11 @@ async function actor(
 }
 
 beforeEach(async () => {
-  const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
+  const config = loadConfig({
+    NODE_ENV: 'test',
+    LEGACY_PBX_WRITES_ENABLED: 'true',
+    LOG_LEVEL: 'fatal',
+  });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
   await seedLegacyDirectory(api);

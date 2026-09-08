@@ -41,7 +41,7 @@ describe('RuntimeScreen', () => {
     mockFetch((url) => (url.startsWith('/runtime/calls?') ? emptyCalls : null));
     render(
       <MemoryRouter>
-        <RuntimeScreen session={tenantAdmin} />
+        <RuntimeScreen legacyProvisioning session={tenantAdmin} />
       </MemoryRouter>,
     );
     const tabs = within(await screen.findByRole('tablist', { name: /runtime sections/i }))
@@ -86,7 +86,7 @@ describe('RuntimeScreen', () => {
     });
     render(
       <MemoryRouter>
-        <RuntimeScreen session={superAdmin} />
+        <RuntimeScreen legacyProvisioning session={superAdmin} />
       </MemoryRouter>,
     );
     const user = userEvent.setup();
@@ -142,7 +142,7 @@ describe('RuntimeScreen', () => {
     });
     render(
       <MemoryRouter>
-        <RuntimeScreen session={superAdmin} />
+        <RuntimeScreen legacyProvisioning session={superAdmin} />
       </MemoryRouter>,
     );
     const user = userEvent.setup();
@@ -165,7 +165,7 @@ describe('RuntimeScreen', () => {
     }));
     render(
       <MemoryRouter>
-        <RuntimeScreen session={superAdmin} />
+        <RuntimeScreen legacyProvisioning session={superAdmin} />
       </MemoryRouter>,
     );
     expect(await screen.findByRole('alert')).toHaveTextContent(/OFFICEPULSE_RUNTIME_DATABASE_URL/);
@@ -199,7 +199,7 @@ describe('RuntimeScreen', () => {
     });
     render(
       <MemoryRouter>
-        <RuntimeScreen session={superAdmin} />
+        <RuntimeScreen legacyProvisioning session={superAdmin} />
       </MemoryRouter>,
     );
     const user = userEvent.setup();

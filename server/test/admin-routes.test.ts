@@ -69,7 +69,11 @@ interface Ctx {
 let ctx: Ctx;
 
 beforeEach(async () => {
-  const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
+  const config = loadConfig({
+    NODE_ENV: 'test',
+    LEGACY_PBX_WRITES_ENABLED: 'true',
+    LOG_LEVEL: 'fatal',
+  });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
   await seedLegacyDirectory(api);
@@ -460,6 +464,7 @@ describe('unconfigured NocoDB', () => {
   it('names the missing variables instead of a bare not-configured message', async () => {
     const config = loadConfig({
       NODE_ENV: 'test',
+      LEGACY_PBX_WRITES_ENABLED: 'true',
       LOG_LEVEL: 'fatal',
       NOCODB_BASE_URL: 'https://nocodb.example.invalid',
       // NOCODB_API_TOKEN deliberately absent.

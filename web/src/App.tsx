@@ -12,9 +12,8 @@ import { TenantContextBanner } from './components/TenantContextBanner';
 import { AppearanceScreen } from './screens/AppearanceScreen';
 import { OperationsScreen } from './screens/OperationsScreen';
 import { DidRoutesScreen } from './screens/DidRoutesScreen';
-import { ExtensionsScreen } from './screens/ExtensionsScreen';
+import { PbxInventoryScreen } from './screens/PbxInventoryScreen';
 import { ProfilesScreen } from './screens/ProfilesScreen';
-import { RingGroupsScreen } from './screens/RingGroupsScreen';
 import { RuntimeScreen } from './screens/RuntimeScreen';
 import { CallDetailScreen } from './screens/CallDetailScreen';
 import { TenantsScreen } from './screens/TenantsScreen';
@@ -25,7 +24,7 @@ const TENANT_SCREENS = [
   { path: 'users', label: 'Users' },
   { path: 'numbers', label: 'Numbers' },
   { path: 'extensions', label: 'Extensions' },
-  { path: 'ring-groups', label: 'Ring groups' },
+  { path: 'queues', label: 'Queues' },
   { path: 'profiles', label: 'Profiles' },
   { path: 'did-routes', label: 'DID routes' },
   { path: 'appearance', label: 'Appearance' },
@@ -146,15 +145,15 @@ function AuthenticatedShell({
             path="/tenants/:tenantId/extensions"
             element={
               <TenantPage session={session} onChanged={onSessionChanged}>
-                <ExtensionsScreen />
+                <PbxInventoryScreen kind="extensions" />
               </TenantPage>
             }
           />
           <Route
-            path="/tenants/:tenantId/ring-groups"
+            path="/tenants/:tenantId/queues"
             element={
               <TenantPage session={session} onChanged={onSessionChanged}>
-                <RingGroupsScreen />
+                <PbxInventoryScreen kind="queues" />
               </TenantPage>
             }
           />

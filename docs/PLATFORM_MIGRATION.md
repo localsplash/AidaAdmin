@@ -1,5 +1,10 @@
 # Platform consolidation cutover
 
+The Identity consolidation below is implemented. The PBX authority decision in
+[PBX_OWNERSHIP.md](PBX_OWNERSHIP.md) supersedes the historical extension/group
+projection and handset acceptance requirements. Asterisk owns extensions and
+queues; preserve legacy data without adding another synchronization workflow.
+
 This change requires the companion Identity platform-session/directory API and
 OfficePulse platform tenant/config/device API changes. Deploy those before
 switching AidaAdmin. It does not alter an existing Echo service or database.
@@ -84,8 +89,9 @@ blindly fed into old local tenant tables.
 Verify one SUPER_ADMIN and two distinct business memberships, immediate access
 removal after disable/revoke, tenant selection after Admin restart, and denial
 of cross-business extension/call operations. Configure existing and new tenants,
-then exercise actual OfficePulse provisioning, handset grant redemption, live
-transcription and takeover. Inspect upstream failure/retry states separately
-from the saved configuration. Confirm Echo sign-in and messaging with the
+then verify tenant-scoped OfficePulse PBX inventory, real calls and takeover.
+Handset enrollment and AidaAgent acceptance are deferred. Historical PBX
+configuration must be reviewed before converting any native destination references;
+legacy provisioning is disabled by default. Confirm Echo sign-in and messaging with the
 companion Identity change. Back up and restore platform, configuration and
 runtime stores before retiring legacy copies.

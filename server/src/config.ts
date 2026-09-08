@@ -24,6 +24,8 @@ const envSchema = z.object({
   E2E_FAKE_SESSION: envBool,
   /** Register the /id/events webhook with id at startup. */
   ID_REGISTER_WEBHOOK: envBool,
+  /** Temporary rollback switch; PBX configuration is authoritative in Asterisk. */
+  LEGACY_PBX_WRITES_ENABLED: envBool,
   /** Where validated appearance assets (logos) are stored and served from. */
   ASSET_STORAGE_DIR: z.string().default('data/assets'),
 });
@@ -82,6 +84,7 @@ export interface AppConfig {
   logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   e2eFakeSession: boolean;
   idRegisterWebhook: boolean;
+  legacyPbxWritesEnabled: boolean;
   assetStorageDir: string;
   /** Service variables present in the environment; values stay out of this object except where a later phase needs them. */
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
@@ -148,6 +151,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     logLevel: LOG_LEVEL,
     e2eFakeSession: E2E_FAKE_SESSION,
     idRegisterWebhook: ID_REGISTER_WEBHOOK,
+    legacyPbxWritesEnabled: parsed.data.LEGACY_PBX_WRITES_ENABLED,
     assetStorageDir: ASSET_STORAGE_DIR,
     serviceConfig,
     missingServiceConfig,
