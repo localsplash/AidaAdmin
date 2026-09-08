@@ -1,28 +1,16 @@
-import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
 import type { DirectoryUser, IdClient, IdEvent, IdRedeemResult } from '../src/id/client.js';
-import { createRepos } from './helpers/legacy-repos.js';
+import { createRepos, directoryState } from './helpers/fake-config-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
-import type {
-  HandsetEnrollmentDelivery,
-  HandsetProvisioningDelivery,
-} from '../src/provisioning/handset-delivery.js';
 import { createLogger } from '../src/logger.js';
 import { FakeOfficePulse } from './helpers/fake-officepulse.js';
 import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
 
 const logger = createLogger({ logLevel: 'fatal' });
-
-class FakeHandsetDelivery implements HandsetProvisioningDelivery {
-  deliveries: HandsetEnrollmentDelivery[] = [];
-  async deliver(payload: HandsetEnrollmentDelivery) {
-    this.deliveries.push(payload);
-  }
-}
 
 class FakeDirectoryIdClient implements IdClient {
   users: DirectoryUser[] = [
@@ -61,7 +49,6 @@ interface Ctx {
   deps: AppDeps;
   api: FakeNocoDbApi;
   officePulse: FakeOfficePulse;
-  handset: FakeHandsetDelivery;
   cookies: string[];
   csrf: string;
 }
@@ -71,19 +58,15 @@ let ctx: Ctx;
 beforeEach(async () => {
   const config = loadConfig({
     NODE_ENV: 'test',
-    LEGACY_PBX_WRITES_ENABLED: 'true',
     LOG_LEVEL: 'fatal',
   });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
-  await seedLegacyDirectory(api);
   const officePulse = new FakeOfficePulse();
-  const handset = new FakeHandsetDelivery();
   const deps: AppDeps = {
     ...createDeps(config),
     repos: createRepos(api),
     officePulse,
-    handsetDelivery: handset,
     idClient: new FakeDirectoryIdClient(),
   };
   const app = createApp(config, logger, deps);
@@ -103,7 +86,6 @@ beforeEach(async () => {
     deps,
     api,
     officePulse,
-    handset,
     cookies: [`aida.sid=${sid}`, `aida.csrf=${csrf}`],
     csrf,
   };
@@ -189,7 +171,7 @@ describe('authorization', () => {
     expect(list.status).toBe(403);
 
     // A USER membership is not an administrative role in their own tenant.
-    expect((await member.get(`/admin/tenants/${tenant.id}/extensions`)).status).toBe(403);
+    expect((await member.get(`/admin/tenants/${tenant.id}/profiles`)).status).toBe(403);
     expect(
       (
         await member.post('/admin/tenants', {
@@ -210,21 +192,21 @@ describe('authorization', () => {
     const list = await admin.get('/admin/tenants');
     expect(list.status).toBe(403);
 
-    expect((await admin.get(`/admin/tenants/${mine.id}/extensions`)).status).toBe(200);
     expect((await admin.get(`/admin/tenants/${mine.id}/profiles`)).status).toBe(200);
-    expect((await admin.get(`/admin/tenants/${mine.id}/did-routes`)).status).toBe(200);
+    expect((await admin.get(`/admin/tenants/${mine.id}/profiles`)).status).toBe(200);
+    expect((await admin.get(`/admin/tenants/${mine.id}/profiles`)).status).toBe(200);
     expect((await admin.get(`/admin/tenants/${mine.id}/appearance`)).status).toBe(200);
 
     // Another tenant is refused whether it is named in the path or the body.
-    expect((await admin.get(`/admin/tenants/${theirs.id}/extensions`)).status).toBe(403);
-    const crossTenant = await admin.post('/admin/extensions', {
+    expect((await admin.get(`/admin/tenants/${theirs.id}/profiles`)).status).toBe(403);
+    const crossTenant = await admin.post('/admin/profiles', {
       tenantId: theirs.id,
       extensionNumber: '100',
       displayName: 'Nope',
       enabled: true,
     });
     expect(crossTenant.status).toBe(403);
-    expect(ctx.api.tableByName('aida_tbl_Extension')!.records).toHaveLength(0);
+    expect(ctx.api.tableByName('aida_tbl_AssistantProfile')!.records).toHaveLength(0);
   });
 
   it('keeps platform-wide actions to Super Admin', async () => {
@@ -277,7 +259,7 @@ describe('tenants', () => {
     expect(updated.status).toBe(200);
     expect(updated.body.tenant.revision).toBe(2);
 
-    const auditRows = ctx.api.tableByName('audit_log')!.records;
+    const auditRows = directoryState(ctx.api).audit;
     expect(auditRows.map((r) => r.action)).toEqual(['tenant.create', 'tenant.update']);
   });
 
@@ -310,7 +292,7 @@ describe('tenant users and directory', () => {
       enabled: true,
     });
     expect(res.status).toBe(200);
-    const stored = ctx.api.tableByName('tenant_user')!.records[0]!;
+    const stored = directoryState(ctx.api).memberships[0]!;
     expect(stored.identity_user_id).toBe(42);
     expect(JSON.stringify(stored)).not.toContain('pat@example.invalid');
   });
@@ -341,130 +323,10 @@ describe('tenant users and directory', () => {
   });
 });
 
-describe('extensions and provisioning', () => {
-  it('creates an extension and relays the one-time SIP secret without persisting it', async () => {
-    const tenant = await createTenant();
-    const res = await post('/admin/extensions', {
-      tenantId: tenant.id,
-      extensionNumber: '100',
-      displayName: 'Front Desk',
-      enabled: true,
-    });
-    expect(res.status).toBe(201);
-    expect(res.body.sipUsername).toBe('sip-100');
-    expect(res.body.sipSecret).toBe('one-time-sip-secret');
-    expect(res.body.secretShownOnce).toBe(true);
-    // The secret exists nowhere in NocoDB — not in any table's records.
-    for (const table of ['aida_tbl_Extension', 'audit_log']) {
-      expect(JSON.stringify(ctx.api.tableByName(table)!.records)).not.toContain(
-        'one-time-sip-secret',
-      );
-    }
-    expect(ctx.officePulse.provisioned[0]?.context).toBe('acme');
-  });
-
-  it('reports a PBX provisioning failure clearly with the record saved', async () => {
-    const tenant = await createTenant();
-    ctx.officePulse.failNext = true;
-    const res = await post('/admin/extensions', {
-      tenantId: tenant.id,
-      extensionNumber: '100',
-      displayName: 'Front Desk',
-      enabled: true,
-    });
-    expect(res.status).toBe(502);
-    expect(res.body.error).toBe('provisioning_failed');
-    // The intended record was saved; no background reconciliation exists.
-    expect(ctx.api.tableByName('aida_tbl_Extension')!.records).toHaveLength(1);
-  });
-
-  it('rotates the SIP secret and bumps the device credential version on reprovision', async () => {
-    const tenant = await createTenant();
-    const created = await post('/admin/extensions', {
-      tenantId: tenant.id,
-      extensionNumber: '100',
-      displayName: 'Front Desk',
-      enabled: true,
-    });
-    const extensionId = created.body.extension.id as string;
-    const res = await post(`/admin/extensions/${extensionId}/rotate-secret`, {
-      tenantId: tenant.id,
-      reprovisionDevice: true,
-    });
-    expect(res.status).toBe(200);
-    expect(res.body.sipSecret).toBe('rotated-sip-secret');
-    const stored = ctx.api.tableByName('aida_tbl_Extension')!.records[0]!;
-    expect(stored.device_credential_version).toBe(2);
-    expect(JSON.stringify(ctx.api.tableByName('aida_tbl_Extension')!.records)).not.toContain(
-      'rotated-sip-secret',
-    );
-  });
-
-  it('delegates handset grants to the runtime without storing token state in config', async () => {
-    const tenant = await createTenant();
-    const created = await post('/admin/extensions', {
-      tenantId: tenant.id,
-      extensionNumber: '100',
-      displayName: 'Front Desk',
-      enabled: true,
-    });
-    const extensionId = created.body.extension.id as string;
-    const res = await post(`/admin/extensions/${extensionId}/handset-enrollment`, {
-      tenantId: tenant.id,
-      provisioningMac: 'aa:bb:cc:dd:ee:01',
-    });
-    expect(res.status).toBe(201);
-    const token = res.body.enrollmentToken as string;
-    expect(token.length).toBeGreaterThan(20);
-    expect(res.body.tokenShownOnce).toBe(true);
-
-    const stored = ctx.api.tableByName('aida_tbl_Extension')!.records[0]!;
-    expect(stored.enrollment_token_hash).not.toBe(token);
-    expect(JSON.stringify(ctx.api.tableByName('aida_tbl_Extension')!.records)).not.toContain(token);
-
-    expect(ctx.officePulse.enrollments).toEqual([{ iTenantId: Number(tenant.id), extensionId }]);
-    expect(ctx.handset.deliveries).toHaveLength(0);
-  });
-});
-
-describe('ring groups', () => {
-  it('creates a ring group with members and provisions the member extension numbers', async () => {
-    const tenant = await createTenant();
-    const e1 = await post('/admin/extensions', {
-      tenantId: tenant.id,
-      extensionNumber: '100',
-      displayName: 'A',
-      enabled: true,
-    });
-    const e2 = await post('/admin/extensions', {
-      tenantId: tenant.id,
-      extensionNumber: '101',
-      displayName: 'B',
-      enabled: true,
-    });
-    const res = await post('/admin/ring-groups', {
-      tenantId: tenant.id,
-      name: 'Sales',
-      virtualExtension: '600',
-      memberExtensionIds: [e1.body.extension.id, e2.body.extension.id],
-      enabled: true,
-    });
-    expect(res.status).toBe(201);
-    expect(ctx.officePulse.ringGroups[0]!.body.memberExtensions).toEqual(['100', '101']);
-    expect(ctx.officePulse.ringGroups[0]!.body.ringTimeoutSeconds).toBe(20);
-
-    const list = await request(ctx.app)
-      .get(`/admin/tenants/${tenant.id}/ring-groups`)
-      .set('Cookie', ctx.cookies);
-    expect(list.body.ringGroups[0].members).toHaveLength(2);
-  });
-});
-
 describe('unconfigured NocoDB', () => {
   it('names the missing variables instead of a bare not-configured message', async () => {
     const config = loadConfig({
       NODE_ENV: 'test',
-      LEGACY_PBX_WRITES_ENABLED: 'true',
       LOG_LEVEL: 'fatal',
       NOCODB_BASE_URL: 'https://nocodb.example.invalid',
       // NOCODB_API_TOKEN deliberately absent.

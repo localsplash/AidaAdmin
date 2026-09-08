@@ -17,12 +17,7 @@ export function resolveSettings(env: NodeJS.ProcessEnv, rows: NocoRecord[]): Nod
     indexed.set(index, String(row.settingValue ?? ''));
   }
   const resolved: NodeJS.ProcessEnv = { ...env };
-  const keys = [
-    ...SERVICE_ENV_VARS,
-    'ID_REGISTER_WEBHOOK',
-    'ASSET_STORAGE_DIR',
-    'LEGACY_PBX_WRITES_ENABLED',
-  ];
+  const keys = [...SERVICE_ENV_VARS, 'ID_REGISTER_WEBHOOK', 'ASSET_STORAGE_DIR'];
   for (const key of keys) {
     if (env[key]?.trim()) continue;
     for (const scope of SCOPES) {

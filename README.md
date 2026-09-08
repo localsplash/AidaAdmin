@@ -1,62 +1,63 @@
 # AidaAdmin
 
-AidaAdmin is the administration UI and backend for the shared Echo/Aida office
-platform. Asterisk owns PBX extensions, queues and their membership.
-OfficePulseAidaIntegration owns PBX access and voice orchestration.
-Identity owns every person, business, membership and staff application session.
+AidaAdmin handles business and tenant administration for Echo/Aida. Identity
+owns users, tenants, roles, memberships, sessions and shared number assignments.
+Asterisk owns PBX extensions, queues, queue membership and effective routing.
+OfficePulseAidaIntegration supplies the private PBX inventory API.
 
-## Storage and ownership
+## Active administration
 
-| Store                   | Owner                 | AidaAdmin access                                                      |
-| ----------------------- | --------------------- | --------------------------------------------------------------------- |
-| `platform_db`           | Identity              | Authenticated Identity API only                                       |
-| NocoDB `PlatformConfig` | Platform applications | `aida_tbl_*` voice configuration; scoped settings                     |
-| `aida_admin_db` (MySQL) | AidaAdmin             | OAuth state, Identity event receipts/replay cursor, append-only audit |
-| `aidacalls_db` (MySQL)  | OfficePulse           | Read-only runtime views; commands through the private HTTP API        |
-| Asterisk tables         | PBX project           | OfficePulse adapter only; no AidaAdmin DDL or direct writes           |
+Super Admins manage tenants and users; Tenant Admins manage their enabled tenant.
+Identity introspection checks each authenticated request so disabled memberships,
+revoked sessions and privilege changes take effect immediately. USER members can
+use Echo but cannot sign in to AidaAdmin.
 
-There is no AidaAdmin PostgreSQL dependency, local user/membership directory,
-local authoritative session table, or NocoDB `AidaIdentity` access. The cookie
-contains Identity's opaque application-session token. Every authenticated
-request introspects that token, so membership removal and session/privilege
-revocation take effect on the next request. Tenant selection is stored in the
-central application session. An Identity outage denies authenticated work.
+Numbers are the shared Identity E.164 registry. Assignment grants voice/messaging
+access to enabled tenant members; it does not configure carrier service or PBX
+routing. Assistant profiles and tenant appearance remain business configuration.
 
-SUPER_ADMIN can see every business and assign Super Admin, Tenant Admin or User.
-TENANT_ADMIN can add users by email and assign Tenant Admin or User in its own
-enabled tenant. USER cannot sign in to AidaAdmin. Only Super Admins see the
-Tenants menu and tenant selector; selecting a tenant updates both the central
-session and the current tenant page. Tenant Admins enter their tenant automatically.
+Extensions and queues are read-only OfficePulse API views of saved Asterisk
+configuration. Endpoint IDs can differ from dialable extension numbers. Actual
+registrations, queue execution and file-owned routing require PBX operations
+verification. The existing live operations view and audited call-command modules
+remain; takeover controls are unavailable until OfficePulse implements native
+queue routing. Native DID editing, device
+enrollment and handset administration are outside this release; the native
+queue/AI contract and authenticated OfficePulse operations UI remain future work.
 
-Users are listed with names, email addresses, roles and status. Add User is
-expandable; Edit saves the profile and role together through Identity. Linked
-sign-in emails are read-only; pending-user email addresses can be corrected.
-Extensions and queues are read-only views of Asterisk through the OfficePulse API.
-DID routing metadata is currently read-only pending native PBX destination references;
-the Numbers page continues to manage the shared Identity number registry.
-Identity enforces the role hierarchy on the server, including live demotion and
-last-administrator protection. Global directory search remains Super Admin-only.
+## Storage
+
+| Store                   | Owner                 | AidaAdmin use                                                           |
+| ----------------------- | --------------------- | ----------------------------------------------------------------------- |
+| `platform_db`           | Identity              | Authenticated API only; no local directory/session copies               |
+| NocoDB `PlatformConfig` | Platform applications | `cfg_tbl_Setting` plus three Aida business tables                       |
+| `aida_admin_db`         | AidaAdmin             | OAuth state, Identity event receipts/cursor, audit and migration ledger |
+| `aidacalls_db`          | OfficePulse           | Read-only integration call/event/dependency diagnostics                 |
+| Asterisk MariaDB        | Asterisk              | Read-only inventory through OfficePulse; no direct Admin connection     |
+
+The only Aida configuration tables are `aida_tbl_TenantProfile`,
+`aida_tbl_AssistantProfile` and `aida_tbl_Appearance`. No extension, ring-group,
+DID projection, provisioning/sync ledger or device enrollment schema is created.
+The supplied host runbook identifies `asterisk.cdr` as native call history;
+`aidacalls_db` is separate integration diagnostics. Native CDR/recording API access
+and live-call validation remain open in [#29](https://github.com/localsplash/AidaAdmin/issues/29).
 
 ## Setup
 
-Use Node 22 or the supplied Dockerfile. Set `NOCODB_BASE_URL` and
-`NOCODB_API_TOKEN` as server-only bootstrap inputs. Settings are read from
-`cfg_tbl_Setting` in `PlatformConfig`, with precedence:
+Use Node 22 or the supplied Dockerfile. `NOCODB_BASE_URL` and `NOCODB_API_TOKEN`
+are server-only bootstrap values. Settings load from PlatformConfig
+`cfg_tbl_Setting` with precedence: nonblank environment, `app=aida-admin`,
+`app=aida`, then `app=*`. Applicable duplicate keys are errors. Connection changes
+require restart. Runtime never creates a missing base or schema.
 
-1. Nonblank environment override.
-2. `app=aida-admin`.
-3. `app=aida`.
-4. `app=*`.
-
-Fields are `app`, `settingKey`, `settingValue`, `description`, `bSecret`,
-`dtCreated`, `dtUpdated`. Blank rows are unset and duplicate applicable keys are
-errors. `PARENT_DOMAIN` supplies `ID_PARENT_DOMAIN` when that key is absent.
-Connection/settings changes require a process restart in this first release.
-Runtime reads do not create a missing base or schema.
+`OFFICEPULSE_API_BASE_URL` is the canonical private API setting. It must point to
+the integration API's own ingress, not the host's phone-provisioning TLS port 80
+or SIP TLS port 443. There is no old provisioning-URL alias or legacy write flag.
+See [.env.example](.env.example).
 
 ```sh
 npm ci
-npm run nocodb -w server -- create  # explicit first bootstrap
+npm run nocodb -w server -- create
 npm run nocodb -w server -- upgrade
 npm run nocodb -w server -- validate
 npm run typecheck
@@ -65,70 +66,25 @@ npm run build
 npm start
 ```
 
-The CLI only creates/upgrades Aida-owned tables; the platform bootstrap owns
-`cfg_tbl_Setting`. Create businesses and memberships through Identity/AidaAdmin,
-then configure each business's voice profile. Existing organizations without a
-voice profile appear with revision 0 and can be configured using the normal
-edit form. See [.env.example](.env.example) and the
-[cutover guide](docs/PLATFORM_MIGRATION.md) before attaching existing data.
+`create` is an explicit bootstrap command; the platform bootstrap owns
+`cfg_tbl_Setting`. Numeric `iTenantId` values come from Identity. Tenant profile
+revisions use read/compare/write and require a single administrative writer.
 
-## PBX ownership and runtime
+## DEV reset and validation
 
-AidaAdmin reads tenant-scoped inventory through OfficePulse's private
-`GET /v1/admin/pbx/extensions?iTenantId=N` and
-`GET /v1/admin/pbx/queues?iTenantId=N` APIs. OfficePulse uses explicit,
-operator-reviewed tenant/context and queue mappings; an unavailable or unmapped
-PBX is an error. Endpoint IDs are not assumed to be dialable extension numbers.
-This view reports saved configuration, not live registrations or queue state.
+This deployment is disposable DEV. Remove obsolete objects and data using
+[DEV_RESET.md](docs/DEV_RESET.md); historical backup/import/rollback-window
+requirements are not prerequisites for this DEV cleanup. Deploy the matching
+OfficePulse service with its obsolete configuration graph/provisioning readers removed
+before deleting the shared NocoDB PBX graph. AidaHandset and AidaAgent are deferred.
 
-Legacy extension, ring-group, DID, SIP-secret, enrollment, and retry writes are
-disabled before saving any local configuration. The application has no PBX
-creation or synchronization status workflow in its default UI. Existing records
-and compatibility code remain for reviewed rollback; `LEGACY_PBX_WRITES_ENABLED`
-is false by default and must remain false for the Asterisk-owned POC.
-The flag does not restore retired browser editors. See
-[the ownership and cutover decision](docs/PBX_OWNERSHIP.md).
+The container listens on 3001. `/healthz` is liveness; `/readyz` reports persistence,
+configuration and integration-runtime readiness. Browser mutations use CSRF
+protection, browser `X-Aida-*` headers are stripped, and Identity webhook admission
+uses configured source/proxy CIDRs. No arbitrary upstream proxy is exposed.
 
-Staff takeover goes to
-`/v1/admin/calls/:id/commands`, with the viewed call version and an idempotency
-key. Call and event views use the read-only runtime SQL account.
-The supplied host runbook identifies `asterisk.cdr` as native call history;
-`aidacalls_db` is separate integration diagnostics and is not a replacement for
-that history. Native CDR/recording API access and deployed validation remain open.
-No AidaControl service is required.
-
-AidaHandset and AidaAgent work is deferred. Existing enrollment and secret
-rotation compatibility code is gated with the other legacy PBX writes.
-Call commands remain explicit, auditable OfficePulse API operations.
-NocoDB revision checks are read/compare/write, so this POC
-requires one administrative writer; they do not promise SQL compare-and-swap.
-
-## Health, deployment and validation
-
-The container listens on port 3001. Map the chosen public origin, for example
-`https://aida-admin.localsplash.dev`, to that port through Nginx Proxy Manager.
-Identity's parent domain must allow the callback
-`https://aida-admin.localsplash.dev/api/auth/callback`. Public branding and host
-names remain deployment settings; use `X.TLD` for another operator.
-
-`/healthz` is independent of authentication and dependencies. `/readyz` reports
-Admin persistence and runtime database status. `/id/events` accepts only the
-configured Identity source CIDRs. Webhooks durably record receipts but do not
-advance the ordered replay cursor; missed lower event IDs remain replayable.
-Browser mutations require the CSRF token, and browser-supplied `X-Aida-*`
-headers are stripped.
-
-Unit/component tests require no credentials. MySQL integration runs only with
-`AIDA_ADMIN_TEST_DATABASE_URL` pointing at a **disposable** `aida_admin_db`.
-NocoDB integration requires separate `NOCODB_TEST_BASE_URL` and
-`NOCODB_TEST_API_TOKEN` values for a disposable PlatformConfig instance.
-CI uses MySQL 8.4 and Node 22. A passing build does not validate the external
-PBX, real Identity login, a carrier number or a physical Android handset.
-
-## Shared numbers and Echo access
-
-Manage each tenant’s **Numbers** in AidaAdmin. Identity owns the unique E.164 number-to-tenant assignment in `platform_db.identity_tbl_PhoneNumber`; every number supports both voice and messaging and explicitly grants access to all enabled tenant members. Enabled USER members can sign in to Echo even though they cannot use AidaAdmin. No separate Echo user or business provisioning grants access. Members without numbers see a contact-admin warning in Echo.
-
-DID routes choose from this same registry. The immutable E.164 value is their reference; routing details remain in NocoDB. Number assignment does not provision carrier service. Use OfficePulse PBX operations to stop PBX routing; disabling the shared number removes Echo access and prevents saving it as an active route. Tenant/number reassignment is deliberately unsupported to protect historical messages and media.
-
-Deploy Identity migration `0005_shared_phone_numbers` and import reviewed existing assignments before this Admin version. Runtime call history now uses `aidacalls_db`; `aida_admin_db` still stores this application’s local state. See the infrastructure repository’s shared-number rollout guide for a data-preserving existing-database migration.
+Unit/component tests use no credentials. MySQL integration requires a disposable
+`AIDA_ADMIN_TEST_DATABASE_URL`; NocoDB integration requires dedicated test bootstrap
+credentials. CI runs Node 22, MySQL integration, browser smoke and container smoke.
+These checks do not prove real Identity login, PBX SQL compatibility, native call
+history, recording authorization or live queue/call behavior.

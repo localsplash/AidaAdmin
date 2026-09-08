@@ -24,8 +24,6 @@ const envSchema = z.object({
   E2E_FAKE_SESSION: envBool,
   /** Register the /id/events webhook with id at startup. */
   ID_REGISTER_WEBHOOK: envBool,
-  /** Temporary rollback switch; PBX configuration is authoritative in Asterisk. */
-  LEGACY_PBX_WRITES_ENABLED: envBool,
   /** Where validated appearance assets (logos) are stored and served from. */
   ASSET_STORAGE_DIR: z.string().default('data/assets'),
 });
@@ -36,10 +34,9 @@ const envSchema = z.object({
  * tests, but production startup requires every variable to be present.
  * Values are never logged — only names.
  *
- * There is no AidaControl: for the POC OfficePulseAidaIntegration is the
- * call orchestrator (its issue #9). AidaAdmin reads its `aidacalls_db`
- * runtime database through a read-only account and sends commands to the
- * same private HTTP API that handles provisioning.
+ * OfficePulse owns the PBX integration API. AidaAdmin reads its `aidacalls_db`
+ * runtime database through a read-only account and sends allowlisted call
+ * commands to the private OfficePulse HTTP API.
  */
 export const SERVICE_ENV_VARS = [
   'PUBLIC_BASE_URL',
@@ -54,9 +51,8 @@ export const SERVICE_ENV_VARS = [
   'ID_PARENT_DOMAIN',
   'NOCODB_BASE_URL',
   'NOCODB_API_TOKEN',
-  'OFFICEPULSE_PROVISIONING_BASE_URL',
+  'OFFICEPULSE_API_BASE_URL',
   'OFFICEPULSE_RUNTIME_DATABASE_URL',
-  'HANDSET_PROVISIONING_URL',
 ] as const;
 
 export type ServiceEnvVar = (typeof SERVICE_ENV_VARS)[number];
@@ -84,7 +80,6 @@ export interface AppConfig {
   logLevel: 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   e2eFakeSession: boolean;
   idRegisterWebhook: boolean;
-  legacyPbxWritesEnabled: boolean;
   assetStorageDir: string;
   /** Service variables present in the environment; values stay out of this object except where a later phase needs them. */
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
@@ -106,11 +101,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   for (const name of SERVICE_ENV_VARS) {
     const value = env[name];
     if (value === undefined || value.trim() === '') {
-      if (
-        name !== 'ID_CLIENT_SECRET' &&
-        name !== 'ID_PUBLIC_BASE_URL' &&
-        name !== 'HANDSET_PROVISIONING_URL'
-      )
+      if (name !== 'ID_CLIENT_SECRET' && name !== 'ID_PUBLIC_BASE_URL')
         missingServiceConfig.push(name);
     } else {
       serviceConfig[name] = value;
@@ -151,7 +142,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     logLevel: LOG_LEVEL,
     e2eFakeSession: E2E_FAKE_SESSION,
     idRegisterWebhook: ID_REGISTER_WEBHOOK,
-    legacyPbxWritesEnabled: parsed.data.LEGACY_PBX_WRITES_ENABLED,
     assetStorageDir: ASSET_STORAGE_DIR,
     serviceConfig,
     missingServiceConfig,

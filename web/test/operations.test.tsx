@@ -167,6 +167,24 @@ describe('OperationsScreen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/OFFICEPULSE_RUNTIME_DATABASE_URL/);
   });
 
+  it('keeps the canonical POC diagnostic-only while native queue routing is unavailable', async () => {
+    const upstream: Upstream = {
+      active: [detail(call('call-a', '+15105550001'), [ev(1, 'bootstrapped')])],
+      commands: [],
+    };
+    mockRuntime(upstream);
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByText(/native PBX queue routing is not configured/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /take over this call/i })).not.toBeInTheDocument();
+    expect(upstream.commands).toHaveLength(0);
+  });
+
   it('submits a takeover once, with an idempotency key and no destination', async () => {
     const upstream: Upstream = {
       active: [detail(call('call-a', '+15105550001'), [ev(1, 'bootstrapped')])],
@@ -176,7 +194,7 @@ describe('OperationsScreen', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(
       <MemoryRouter>
-        <OperationsScreen />
+        <OperationsScreen takeoverUnavailableReason={null} />
       </MemoryRouter>,
     );
     const user = userEvent.setup();
@@ -205,7 +223,7 @@ describe('OperationsScreen', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(
       <MemoryRouter>
-        <OperationsScreen />
+        <OperationsScreen takeoverUnavailableReason={null} />
       </MemoryRouter>,
     );
     const user = userEvent.setup();

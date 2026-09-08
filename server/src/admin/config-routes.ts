@@ -13,10 +13,7 @@ import {
   UniqueViolationError,
   type AidaConfigRepos,
 } from '../nocodb/repos.js';
-import { ValidationError, normalizeE164 } from '../nocodb/validation.js';
-import { OfficePulseError } from '../officepulse/client.js';
-import { didPayload } from '../officepulse/payloads.js';
-import { HandsetDeliveryError } from '../provisioning/handset-delivery.js';
+import { ValidationError } from '../nocodb/validation.js';
 import { requireSession, requireTenantAdmin } from './authz.js';
 
 const profileBody = z.object({
@@ -32,16 +29,6 @@ const profileBody = z.object({
   enabled: z.boolean().default(true),
   // LiveKit model/STT/TTS/voice are deliberately absent: aida-prime
   // supplies the defaults and the POC neither stores nor sends them.
-});
-
-const didRouteBody = z.object({
-  tenantId: z.string(),
-  didE164: z.string(),
-  assistantProfileId: z.string(),
-  destinationType: z.enum(['EXTENSION', 'RING_GROUP']),
-  destinationId: z.string(),
-  screeningEnabled: z.boolean().default(true),
-  enabled: z.boolean().default(true),
 });
 
 const appearanceBody = z.object({
@@ -63,14 +50,7 @@ function fail(res: Response, req: Request, err: unknown): void {
     res.status(409).json({ error: 'revision_conflict', message: err.message, correlationId });
   } else if (err instanceof NotFoundError) {
     res.status(404).json({ error: 'not_found', message: err.message, correlationId });
-  } else if (err instanceof OfficePulseError) {
-    res.status(502).json({
-      error: 'provisioning_failed',
-      message:
-        'The route was saved, but DID provisioning failed. Fix the PBX issue and retry; nothing reconciles in the background.',
-      correlationId,
-    });
-  } else if (err instanceof HandsetDeliveryError || err instanceof IdClientError) {
+  } else if (err instanceof IdClientError) {
     res.status(502).json({ error: 'upstream_failed', correlationId });
   } else {
     throw err;
@@ -224,125 +204,6 @@ export function configRoutes(config: AppConfig, logger: Logger, deps: AppDeps): 
         input.tenantId,
       );
       res.json({ profile });
-    } catch (err) {
-      try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
-      }
-    }
-  });
-
-  // ── DID routes ────────────────────────────────────────────────────────────
-
-  /** Fallback preview: where the call lands on takeover or screening failure. */
-  async function destinationPreview(tenantId: string, route: Record<string, unknown>) {
-    try {
-      if (route.destination_type === 'EXTENSION' && route.destination_extension_id) {
-        const ext = await repos().extensions.get(
-          tenantId,
-          route.destination_extension_id as string,
-        );
-        return `Extension ${ext.extension_number} — ${ext.display_name}`;
-      }
-      if (route.destination_type === 'RING_GROUP' && route.destination_ring_group_id) {
-        const group = await repos().ringGroups.get(
-          tenantId,
-          route.destination_ring_group_id as string,
-        );
-        return `Ring group ${group.virtual_extension} — ${group.name}`;
-      }
-    } catch {
-      // Destination missing: surface that instead of failing the listing.
-    }
-    return 'Destination unavailable';
-  }
-
-  router.get('/admin/tenants/:tenantId/did-routes', tenantAdmin, async (req, res, next) => {
-    try {
-      const tenantId = req.params.tenantId as string;
-      const routes = await repos().didRoutes.listForTenant(tenantId);
-      const withPreview = await Promise.all(
-        routes.map(async (route) => ({
-          ...route,
-          fallbackPreview: await destinationPreview(tenantId, route),
-        })),
-      );
-      res.json({ didRoutes: withPreview });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  async function saveDidRoute(req: Request, res: Response, routeId: string | null): Promise<void> {
-    const input = parse(didRouteBody, req.body, res, req);
-    if (!input) return;
-    input.didE164 = normalizeE164('didE164', input.didE164);
-    if (!deps.idClient?.listTenantNumbers)
-      throw new IdClientError('Shared number directory is unavailable');
-    const { numbers } = await deps.idClient.listTenantNumbers(input.tenantId);
-    if (
-      !numbers.some(
-        (n) =>
-          n.iTenantId === Number(input.tenantId) &&
-          n.phoneNumber === input.didE164 &&
-          (!input.enabled || n.bEnabled) &&
-          n.bVoice,
-      )
-    ) {
-      throw new ValidationError(
-        'didE164',
-        'Choose an enabled number from this tenant’s Numbers page',
-      );
-    }
-    const tenant = await repos().tenants.get(input.tenantId);
-    // Screening dispatches this profile; a disabled one must be enabled (or
-    // the route pointed elsewhere) before the route can be saved as enabled.
-    const profile = await repos().assistantProfiles.get(input.tenantId, input.assistantProfileId);
-    if (input.enabled && !profile.enabled) {
-      throw new ValidationError(
-        'assistantProfileId',
-        'The assistant profile is disabled; enable it or choose another profile',
-      );
-    }
-    let route;
-    if (routeId === null) {
-      route = await repos().didRoutes.create(input.tenantId, input);
-      await audit(req, 'did_route.create', 'did_route', route.id as string, input.tenantId);
-    } else {
-      const revision = expectedRevision(req, res);
-      if (revision === null) return;
-      route = await repos().didRoutes.update(input.tenantId, routeId, revision, input);
-      await audit(req, 'did_route.update', 'did_route', route.id as string, input.tenantId);
-    }
-    if (deps.officePulse) {
-      // The destination travels with the DID so OfficePulse can project a
-      // local fail-safe for it (see officepulse/payloads.ts).
-      await deps.officePulse.provisionDid(
-        route.id as string,
-        didPayload(input.tenantId, route, tenant.asterisk_context as string),
-      );
-    }
-    res.status(routeId === null ? 201 : 200).json({
-      didRoute: { ...route, fallbackPreview: await destinationPreview(input.tenantId, route) },
-    });
-  }
-
-  router.post('/admin/did-routes', tenantAdmin, async (req, res, next) => {
-    try {
-      await saveDidRoute(req, res, null);
-    } catch (err) {
-      try {
-        fail(res, req, err);
-      } catch (unhandled) {
-        next(unhandled);
-      }
-    }
-  });
-
-  router.put('/admin/did-routes/:didRouteId', tenantAdmin, async (req, res, next) => {
-    try {
-      await saveDidRoute(req, res, req.params.didRouteId as string);
     } catch (err) {
       try {
         fail(res, req, err);

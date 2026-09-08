@@ -1,10 +1,9 @@
 import { Router } from 'express';
-import type { AppConfig } from '../config.js';
 import type { AppDeps } from '../deps.js';
 import { requireSession, requireTenantAdmin } from './authz.js';
 
 /** PBX configuration is read from Asterisk through OfficePulse, never copied locally. */
-export function pbxRoutes(config: AppConfig, deps: AppDeps): Router {
+export function pbxRoutes(deps: AppDeps): Router {
   const router = Router();
   const tenantAdmin = requireTenantAdmin(deps);
 
@@ -47,23 +46,5 @@ export function pbxRoutes(config: AppConfig, deps: AppDeps): Router {
     );
   }
 
-  // Applied before legacy routers: even stale clients cannot save local desired
-  // state, rotate credentials, enroll handsets, or replay provisioning by default.
-  router.use(
-    ['/admin/extensions', '/admin/ring-groups', '/admin/did-routes', '/runtime/provisioning/retry'],
-    requireSession,
-    (req, res, next) => {
-      if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || config.legacyPbxWritesEnabled) {
-        next();
-        return;
-      }
-      res.status(409).json({
-        error: 'pbx_owned_by_asterisk',
-        message:
-          'PBX configuration is managed in OfficePulse. AidaAdmin reads extensions and queues from Asterisk.',
-        correlationId: req.correlationId,
-      });
-    },
-  );
   return router;
 }

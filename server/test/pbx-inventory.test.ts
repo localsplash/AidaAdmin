@@ -87,8 +87,8 @@ describe('Asterisk inventory boundary', () => {
     expect(officePulse.listPbxQueues).not.toHaveBeenCalled();
   });
 
-  it('blocks legacy saves, secret rotation, handset enrollment, and retries before any repository or PBX write', async () => {
-    const { app, cookies, officePulse } = await setup(true);
+  it('has no legacy saves, secret rotation, handset enrollment, or retry endpoints', async () => {
+    const { app, cookies } = await setup(true);
     for (const path of [
       '/admin/extensions',
       '/admin/extensions/ext/rotate-secret',
@@ -102,12 +102,20 @@ describe('Asterisk inventory boundary', () => {
         .set('Cookie', cookies)
         .set('x-csrf-token', 'csrf')
         .send({ tenantId: '7' });
-      expect(res.status).toBe(409);
-      expect(res.body.error).toBe('pbx_owned_by_asterisk');
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('not_found');
     }
-    expect(officePulse.provisioned).toEqual([]);
-    expect(officePulse.dids).toEqual([]);
-    expect(officePulse.enrollments).toEqual([]);
+    for (const path of [
+      '/admin/tenants/7/extensions',
+      '/admin/tenants/7/ring-groups',
+      '/admin/tenants/7/did-routes',
+      '/runtime/provisioning',
+      '/runtime/fallbacks',
+    ]) {
+      const res = await request(app).get(path).set('Cookie', cookies);
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('not_found');
+    }
   });
 });
 
@@ -152,4 +160,23 @@ describe('OfficePulse inventory contract', () => {
       new HttpOfficePulseClient('http://officepulse:8080').listPbxQueues(7),
     ).rejects.toThrow();
   });
+});
+
+describe('OfficePulse call availability', () => {
+  it.each(['native_destination_unavailable', 'voice_unavailable'])(
+    'retains an explicit %s refusal as a 503 response',
+    async (error) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify({ error }), { status: 503 })),
+      );
+      const client = new HttpOfficePulseClient('http://officepulse.private');
+      expect(
+        await client.submitCallCommand('call-1', {
+          commandType: 'TAKEOVER',
+          idempotencyKey: 'test-command',
+        }),
+      ).toEqual({ status: 503, body: { error } });
+    },
+  );
 });

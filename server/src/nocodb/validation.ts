@@ -23,14 +23,6 @@ export function normalizeE164(field: string, value: string): string {
 }
 
 /** Returns the normalized MAC: 12 uppercase hex characters, no separators. */
-export function normalizeMac(field: string, value: string): string {
-  const bare = value.replace(/[:.\s-]/g, '').toUpperCase();
-  if (!/^[0-9A-F]{12}$/.test(bare)) {
-    throw new ValidationError(field, `${field} must be 12 hexadecimal characters`);
-  }
-  return bare;
-}
-
 export function validateContext(field: string, value: string): string {
   if (!CONTEXT_RE.test(value)) {
     throw new ValidationError(field, `${field} must be a valid Asterisk context name`);

@@ -71,7 +71,7 @@ export function createApp(
   app.use(authRoutes(config, logger, deps));
   app.use(sessionRoutes(config, deps));
   app.use(tenantSelectionRoutes(logger, deps));
-  app.use(pbxRoutes(config, deps));
+  app.use(pbxRoutes(deps));
   app.use(runtimeRoutes(logger, deps));
   app.use(adminRoutes(logger, deps));
   app.use(numberRoutes(deps));
@@ -80,7 +80,7 @@ export function createApp(
   // Validated appearance assets (uploaded logos).
   app.use('/assets', express.static(path.resolve(config.assetStorageDir)));
 
-  app.use('/api', (req, res) => {
+  app.use(['/api', '/admin'], (req, res) => {
     res.status(404).json({
       error: 'not_found',
       message: 'Unknown API route',

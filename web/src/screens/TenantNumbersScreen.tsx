@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { adminApi, type NumberInput, type TenantNumber } from '../api/admin';
 const EMPTY: NumberInput = {
   phoneNumber: '',
@@ -101,7 +101,6 @@ export function TenantNumbersScreen() {
                   >
                     Edit {n.phoneNumber}
                   </button>{' '}
-                  <Link to={`/tenants/${tenantId}/did-routes`}>DID routes</Link>
                 </td>
               </tr>
             ))}

@@ -26,11 +26,13 @@ function CallPanel({
   view,
   attempt,
   onTakeover,
+  takeoverUnavailableReason,
 }: {
   detail: CallDetail;
   view: CallView;
   attempt: TakeoverAttempt | undefined;
   onTakeover: () => void;
+  takeoverUnavailableReason: string | null;
 }) {
   const { call, commands, participants } = detail;
   // The durable record of takeover progress is OfficePulse's own
@@ -107,14 +109,23 @@ function CallPanel({
         </p>
       ) : null}
       {attempt?.outcome ? <p role="status">{attempt.outcome}</p> : null}
-      <button type="button" disabled={busy || ended} onClick={onTakeover}>
-        {busy ? 'Takeover in progress…' : ended ? 'Call ended' : 'Take over this call'}
-      </button>
+      {takeoverUnavailableReason ? (
+        <p role="status">{takeoverUnavailableReason}</p>
+      ) : (
+        <button type="button" disabled={busy || ended} onClick={onTakeover}>
+          {busy ? 'Takeover in progress…' : ended ? 'Call ended' : 'Take over this call'}
+        </button>
+      )}
     </div>
   );
 }
 
-export function OperationsScreen() {
+/** The canonical POC cannot resolve a native queue destination yet. */
+export function OperationsScreen({
+  takeoverUnavailableReason = 'Native PBX queue routing is not configured. Call takeover is unavailable.',
+}: {
+  takeoverUnavailableReason?: string | null;
+} = {}) {
   const [active, setActive] = useState<CallDetail[] | null>(null);
   const [recent, setRecent] = useState<RuntimeCall[]>([]);
   const [issues, setIssues] = useState<Issues | null>(null);
@@ -169,6 +180,7 @@ export function OperationsScreen() {
   }, [refresh]);
 
   const takeover = async (detail: CallDetail) => {
+    if (takeoverUnavailableReason) return;
     const call = detail.call;
     if (!window.confirm(`Take over the call ${call.callerNumber ?? call.id}?`)) return;
     const existing = attempts[call.id];
@@ -261,6 +273,7 @@ export function OperationsScreen() {
                 view={views[detail.call.id] ?? emptyCallView(detail.call.id)}
                 attempt={attempts[detail.call.id]}
                 onTakeover={() => void takeover(detail)}
+                takeoverUnavailableReason={takeoverUnavailableReason}
               />
             </div>
           ))}
