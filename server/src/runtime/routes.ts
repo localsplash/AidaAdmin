@@ -132,8 +132,8 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
     if (!deps.officePulse) {
       res.status(503).json({
         error: 'officepulse_not_configured',
-        message: 'OfficePulse is not configured: set OFFICEPULSE_PROVISIONING_BASE_URL',
-        missingConfiguration: ['OFFICEPULSE_PROVISIONING_BASE_URL'],
+        message: 'OfficePulse is not configured: set OFFICEPULSE_API_BASE_URL',
+        missingConfiguration: ['OFFICEPULSE_API_BASE_URL'],
         correlationId: req.correlationId,
       });
       return null;
@@ -407,7 +407,7 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
-  // ── Webhooks, fallbacks, orphans ──────────────────────────────────────────
+  // ── Webhooks and orphans ──────────────────────────────────────────
 
   router.get('/runtime/webhooks', async (req, res, next) => {
     try {

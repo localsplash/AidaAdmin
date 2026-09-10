@@ -1,28 +1,16 @@
-import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
 import type { DirectoryUser, IdClient, IdEvent, IdRedeemResult } from '../src/id/client.js';
-import { createRepos } from './helpers/legacy-repos.js';
+import { createRepos, directoryState } from './helpers/fake-config-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
-import type {
-  HandsetEnrollmentDelivery,
-  HandsetProvisioningDelivery,
-} from '../src/provisioning/handset-delivery.js';
 import { createLogger } from '../src/logger.js';
 import { FakeOfficePulse } from './helpers/fake-officepulse.js';
 import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
 
 const logger = createLogger({ logLevel: 'fatal' });
-
-class FakeHandsetDelivery implements HandsetProvisioningDelivery {
-  deliveries: HandsetEnrollmentDelivery[] = [];
-  async deliver(payload: HandsetEnrollmentDelivery) {
-    this.deliveries.push(payload);
-  }
-}
 
 class FakeDirectoryIdClient implements IdClient {
   users: DirectoryUser[] = [
@@ -61,7 +49,6 @@ interface Ctx {
   deps: AppDeps;
   api: FakeNocoDbApi;
   officePulse: FakeOfficePulse;
-  handset: FakeHandsetDelivery;
   cookies: string[];
   csrf: string;
 }
@@ -69,17 +56,17 @@ interface Ctx {
 let ctx: Ctx;
 
 beforeEach(async () => {
-  const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
+  const config = loadConfig({
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'fatal',
+  });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
-  await seedLegacyDirectory(api);
   const officePulse = new FakeOfficePulse();
-  const handset = new FakeHandsetDelivery();
   const deps: AppDeps = {
     ...createDeps(config),
     repos: createRepos(api),
     officePulse,
-    handsetDelivery: handset,
     idClient: new FakeDirectoryIdClient(),
   };
   const app = createApp(config, logger, deps);
@@ -99,7 +86,6 @@ beforeEach(async () => {
     deps,
     api,
     officePulse,
-    handset,
     cookies: [`aida.sid=${sid}`, `aida.csrf=${csrf}`],
     csrf,
   };
@@ -185,7 +171,7 @@ describe('authorization', () => {
     expect(list.status).toBe(403);
 
     // A USER membership is not an administrative role in their own tenant.
-    expect((await member.get(`/admin/tenants/${tenant.id}/extensions`)).status).toBe(403);
+    expect((await member.get(`/admin/tenants/${tenant.id}/profiles`)).status).toBe(403);
     expect(
       (
         await member.post('/admin/tenants', {
@@ -207,19 +193,20 @@ describe('authorization', () => {
     expect(list.status).toBe(403);
 
     expect((await admin.get(`/admin/tenants/${mine.id}/profiles`)).status).toBe(200);
-
+    expect((await admin.get(`/admin/tenants/${mine.id}/profiles`)).status).toBe(200);
+    expect((await admin.get(`/admin/tenants/${mine.id}/profiles`)).status).toBe(200);
     expect((await admin.get(`/admin/tenants/${mine.id}/appearance`)).status).toBe(200);
 
     // Another tenant is refused whether it is named in the path or the body.
-    expect((await admin.get(`/admin/tenants/${theirs.id}/extensions`)).status).toBe(403);
-    const crossTenant = await admin.post('/admin/extensions', {
+    expect((await admin.get(`/admin/tenants/${theirs.id}/profiles`)).status).toBe(403);
+    const crossTenant = await admin.post('/admin/profiles', {
       tenantId: theirs.id,
       extensionNumber: '100',
       displayName: 'Nope',
       enabled: true,
     });
-    expect(crossTenant.status).toBe(404);
-    expect(ctx.api.tableByName('aida_tbl_Extension')!.records).toHaveLength(0);
+    expect(crossTenant.status).toBe(403);
+    expect(ctx.api.tableByName('aida_tbl_AssistantProfile')!.records).toHaveLength(0);
   });
 
   it('keeps platform-wide actions to Super Admin', async () => {
@@ -272,7 +259,7 @@ describe('tenants', () => {
     expect(updated.status).toBe(200);
     expect(updated.body.tenant.revision).toBe(2);
 
-    const auditRows = ctx.api.tableByName('audit_log')!.records;
+    const auditRows = directoryState(ctx.api).audit;
     expect(auditRows.map((r) => r.action)).toEqual(['tenant.create', 'tenant.update']);
   });
 
@@ -305,7 +292,7 @@ describe('tenant users and directory', () => {
       enabled: true,
     });
     expect(res.status).toBe(200);
-    const stored = ctx.api.tableByName('tenant_user')!.records[0]!;
+    const stored = directoryState(ctx.api).memberships[0]!;
     expect(stored.identity_user_id).toBe(42);
     expect(JSON.stringify(stored)).not.toContain('pat@example.invalid');
   });
@@ -333,19 +320,6 @@ describe('tenant users and directory', () => {
     const res = await put('/admin/super-admins/42', { enabled: true });
     expect(res.status).toBe(403);
     expect(res.body.error).toBe('identity_managed_privilege');
-  });
-});
-
-describe('retired provisioning routes', () => {
-  it('has no extension, ring-group, rotation or handset legacy mutation', async () => {
-    for (const path of [
-      '/admin/extensions',
-      '/admin/ring-groups',
-      '/admin/extensions/old/rotate-secret',
-      '/admin/extensions/old/handset-enrollment',
-    ]) {
-      expect((await post(path, {})).status).toBe(404);
-    }
   });
 });
 

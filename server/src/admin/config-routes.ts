@@ -14,7 +14,6 @@ import {
   type AidaConfigRepos,
 } from '../nocodb/repos.js';
 import { ValidationError } from '../nocodb/validation.js';
-import { HandsetDeliveryError } from '../provisioning/handset-delivery.js';
 import { requireSession, requireTenantAdmin } from './authz.js';
 
 const profileBody = z.object({
@@ -51,7 +50,7 @@ function fail(res: Response, req: Request, err: unknown): void {
     res.status(409).json({ error: 'revision_conflict', message: err.message, correlationId });
   } else if (err instanceof NotFoundError) {
     res.status(404).json({ error: 'not_found', message: err.message, correlationId });
-  } else if (err instanceof HandsetDeliveryError || err instanceof IdClientError) {
+  } else if (err instanceof IdClientError) {
     res.status(502).json({ error: 'upstream_failed', correlationId });
   } else {
     throw err;
@@ -104,7 +103,7 @@ function sniffImage(buffer: Buffer): 'png' | 'jpg' | null {
 }
 
 /**
- * Assistant profiles and appearance (POC phase 5, issue #13).
+ * Assistant profiles, DID routes, and appearance (POC phase 5, issue #13).
  * Tenant-scoped like the rest of /admin — a Super Admin anywhere, a
  * TENANT_ADMIN in their own tenant — with the same CSRF guard. CRM import
  * and conversation history are future scope and have no endpoints here.

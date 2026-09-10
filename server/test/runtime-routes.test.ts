@@ -1,10 +1,9 @@
-import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import request from 'supertest';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig, SERVICE_ENV_VARS } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
-import { createRepos } from './helpers/legacy-repos.js';
+import { createRepos, directoryState } from './helpers/fake-config-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import { createLogger } from '../src/logger.js';
 import { presentCaller } from '../src/runtime/routes.js';
@@ -28,7 +27,7 @@ interface Ctx {
   api: FakeNocoDbApi;
   runtime: FakeRuntimeReader;
   officePulse: FakeOfficePulse;
-  acme: { id: string; extensionId: string };
+  acme: { id: string };
   other: { id: string };
 }
 
@@ -70,10 +69,12 @@ async function actor(
 }
 
 beforeEach(async () => {
-  const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
+  const config = loadConfig({
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'fatal',
+  });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
-  await seedLegacyDirectory(api);
   const repos = createRepos(api);
   const runtime = new FakeRuntimeReader();
   const officePulse = new FakeOfficePulse();
@@ -97,13 +98,6 @@ beforeEach(async () => {
     asteriskContext: 'other',
     enabled: true,
   });
-  const extension = await repos.extensions.create(acme.id as string, {
-    extensionNumber: '100',
-    displayName: 'Front Desk',
-    asteriskContext: 'acme',
-    enabled: true,
-  });
-
   // Members: 20 administers Acme, 21 is Acme staff, 30 administers Other.
   await repos.tenantUsers.save(acme.id as string, 20, 'TENANT_ADMIN', true);
   await repos.tenantUsers.save(acme.id as string, 21, 'USER', true);
@@ -113,7 +107,7 @@ beforeEach(async () => {
     fakeSession({
       id: 'acme-live',
       tenantId: acme.id as string,
-      destinationId: extension.id as string,
+      destinationId: 'native-endpoint',
     }),
     fakeSession({
       id: 'acme-done',
@@ -164,7 +158,7 @@ beforeEach(async () => {
     api,
     runtime,
     officePulse,
-    acme: { id: acme.id as string, extensionId: extension.id as string },
+    acme: { id: acme.id as string },
     other: { id: other.id as string },
   };
 });
@@ -297,10 +291,10 @@ describe('takeover', () => {
         body: { commandType: 'TAKEOVER', idempotencyKey: 'k-12345678', ringTimeoutSeconds: 30 },
       },
     ]);
-    const audit = ctx.api.tableByName('audit_log')!.records;
+    const audit = directoryState(ctx.api).audit;
     expect(audit.map((r) => r.action)).toEqual(['runtime.command']);
-    expect(audit[0]!.tenant_id).toBe(ctx.acme.id);
-    expect(audit[0]!.actor_identity_user_id).toBe(20);
+    expect(audit[0]!.tenantId).toBe(ctx.acme.id);
+    expect(audit[0]!.actorIdentityUserId).toBe(20);
   });
 
   it('refuses a command on another tenant call before anything is sent', async () => {
@@ -393,7 +387,7 @@ describe('degraded states', () => {
       idempotencyKey: 'k-12345678',
     });
     expect(unconfigured.status).toBe(503);
-    expect(unconfigured.body.missingConfiguration).toEqual(['OFFICEPULSE_PROVISIONING_BASE_URL']);
+    expect(unconfigured.body.missingConfiguration).toEqual(['OFFICEPULSE_API_BASE_URL']);
   });
 });
 
@@ -428,21 +422,7 @@ describe('dependencies', () => {
     const probe = await root.post('/runtime/dependencies/test', {});
     expect(probe.status).toBe(200);
     expect(ctx.officePulse.readinessProbes).toBe(2);
-    expect(ctx.api.tableByName('audit_log')!.records.map((r) => r.action)).toEqual([
-      'runtime.dependency_test',
-    ]);
-  });
-});
-
-describe('retired provisioning and fallback views', () => {
-  it('does not read retired ledgers or allow reprovisioning', async () => {
-    const admin = await actor(20, false, ctx.acme.id);
-    expect((await admin.get('/runtime/provisioning')).status).toBe(404);
-    expect((await admin.get('/runtime/fallbacks')).status).toBe(404);
-    expect(
-      (await admin.post('/runtime/provisioning/retry', { kind: 'EXTENSION', externalId: 'old' }))
-        .status,
-    ).toBe(404);
+    expect(directoryState(ctx.api).audit.map((r) => r.action)).toEqual(['runtime.dependency_test']);
   });
 });
 

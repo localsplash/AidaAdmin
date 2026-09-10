@@ -71,8 +71,8 @@ export function createApp(
   app.use(authRoutes(config, logger, deps));
   app.use(sessionRoutes(config, deps));
   app.use(tenantSelectionRoutes(logger, deps));
-  app.use(runtimeRoutes(logger, deps));
   app.use(pbxRoutes(logger, deps));
+  app.use(runtimeRoutes(logger, deps));
   app.use(adminRoutes(logger, deps));
   app.use(numberRoutes(deps));
   app.use(configRoutes(config, logger, deps));

@@ -15,7 +15,8 @@
 
 import mysql from 'mysql2/promise';
 
-export type DestinationType = 'EXTENSION' | 'RING_GROUP';
+/** Observed runtime label; no routing intent is accepted by Admin. */
+export type DestinationType = string;
 
 export interface RuntimeCallSession {
   id: string;

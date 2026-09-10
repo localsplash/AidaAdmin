@@ -23,12 +23,9 @@ describe('loadConfig', () => {
     expect(config.missingServiceConfig).toEqual(
       SERVICE_ENV_VARS.filter(
         (name) =>
-          ![
-            'ID_CLIENT_SECRET',
-            'ID_PUBLIC_BASE_URL',
-            'HANDSET_PROVISIONING_URL',
-            'OFFICEPULSE_API_BASE_URL',
-          ].includes(name),
+          !['ID_CLIENT_SECRET', 'ID_PUBLIC_BASE_URL', 'OFFICEPULSE_PROVISIONING_BASE_URL'].includes(
+            name,
+          ),
       ),
     );
   });

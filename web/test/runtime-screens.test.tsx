@@ -48,7 +48,6 @@ describe('RuntimeScreen', () => {
       .getAllByRole('tab')
       .map((t) => t.textContent);
     expect(tabs).toEqual(['Calls']);
-    expect(screen.queryByRole('tab', { name: /provisioning|fail-safes/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /dependencies/i })).not.toBeInTheDocument();
     expect(await screen.findByText(/no calls match/i)).toBeInTheDocument();
   });

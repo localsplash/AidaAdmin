@@ -1,5 +1,4 @@
 import { HttpIdClient } from '../src/id/client.js';
-import { seedLegacyDirectory } from './helpers/legacy-schema.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,7 +7,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createDeps, type AppDeps } from '../src/deps.js';
-import { createRepos } from './helpers/legacy-repos.js';
+import { createRepos } from './helpers/fake-config-repos.js';
 import { upgradeSchema } from '../src/nocodb/schema.js';
 import { createLogger } from '../src/logger.js';
 import { FakeOfficePulse } from './helpers/fake-officepulse.js';
@@ -24,7 +23,6 @@ interface Ctx {
   csrf: string;
   tenantId: string;
   profileId: string;
-  extensionId: string;
 }
 
 let ctx: Ctx;
@@ -37,7 +35,6 @@ beforeEach(async () => {
   });
   const api = new FakeNocoDbApi();
   await upgradeSchema(api);
-  await seedLegacyDirectory(api);
   const officePulse = new FakeOfficePulse();
   const repos = createRepos(api);
   const idClient = new HttpIdClient('https://id.test');
@@ -82,13 +79,6 @@ beforeEach(async () => {
     prompt: 'Screen calls politely.',
     enabled: true,
   });
-  const extension = await repos.extensions.create(tenant.id as string, {
-    extensionNumber: '100',
-    displayName: 'Front Desk',
-    asteriskContext: 'acme',
-    enabled: true,
-  });
-
   ctx = {
     app,
     api,
@@ -97,7 +87,6 @@ beforeEach(async () => {
     csrf,
     tenantId: tenant.id as string,
     profileId: profile.id as string,
-    extensionId: extension.id as string,
   };
 });
 
@@ -147,12 +136,6 @@ describe('assistant profiles', () => {
     const stored = ctx.api.tableByName('aida_tbl_AssistantProfile')!.records.at(-1)!;
     expect('voice' in stored).toBe(false);
     expect('model' in stored).toBe(false);
-  });
-});
-
-describe('retired DID provisioning routes', () => {
-  it('does not accept the former desired-state route', async () => {
-    expect((await post('/admin/did-routes', { tenantId: ctx.tenantId })).status).toBe(404);
   });
 });
 

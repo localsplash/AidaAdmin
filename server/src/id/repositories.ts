@@ -12,10 +12,7 @@ import { ValidationError, validateContext, normalizeE164 } from '../nocodb/valid
 export function platformTenantId(value: string): number {
   const id = Number(value);
   if (!Number.isSafeInteger(id) || id < 1 || String(id) !== value) {
-    throw new ValidationError(
-      'tenantId',
-      'A positive platform tenant ID is required; legacy UUIDs need an explicit migration mapping',
-    );
+    throw new ValidationError('tenantId', 'A positive platform tenant ID is required');
   }
   return id;
 }

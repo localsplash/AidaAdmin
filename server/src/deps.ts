@@ -25,10 +25,6 @@ import { reportDrift } from './nocodb/schema.js';
 import { createRepos, NocoStore, type AidaConfigRepos, type AuditLog } from './nocodb/repos.js';
 import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
 import { MysqlRuntimeReader, parseMysqlUrl, type RuntimeReader } from './officepulse/runtime-db.js';
-import {
-  HttpHandsetProvisioningDelivery,
-  type HandsetProvisioningDelivery,
-} from './provisioning/handset-delivery.js';
 
 export interface AppDeps {
   /** PBX auditing does not require a NocoDB configuration base. */
@@ -44,7 +40,6 @@ export interface AppDeps {
   baseResolver: CachedBaseResolver | null;
   officePulse: OfficePulseClient | null;
   runtimeReader: RuntimeReader | null;
-  handsetDelivery: HandsetProvisioningDelivery | null;
   pool: Pool | null;
   dbReady: () => Promise<boolean>;
   configReady?: () => Promise<boolean>;
@@ -87,8 +82,7 @@ export function createDeps(config: AppConfig): AppDeps {
   const databaseUrl = config.serviceConfig.AIDA_ADMIN_DATABASE_URL;
   const pool = databaseUrl ? createPool(databaseUrl) : null;
   const nocodb = nocodbFromConfig(config, idClient, pool);
-  const officePulseBase = config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL;
-  const handsetUrl = config.serviceConfig.HANDSET_PROVISIONING_URL;
+  const officePulseBase = config.serviceConfig.OFFICEPULSE_API_BASE_URL;
   const runtimeUrl = config.serviceConfig.OFFICEPULSE_RUNTIME_DATABASE_URL;
   const memoryDb = new MemoryAuthDb();
   return {
@@ -107,7 +101,6 @@ export function createDeps(config: AppConfig): AppDeps {
     baseResolver: nocodb?.baseResolver ?? null,
     officePulse: officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null,
     runtimeReader: runtimeUrl ? new MysqlRuntimeReader(parseMysqlUrl(runtimeUrl)) : null,
-    handsetDelivery: handsetUrl ? new HttpHandsetProvisioningDelivery(handsetUrl) : null,
     pool,
     dbReady: pool ? () => ping(pool) : async () => true,
     configReady: nocodb

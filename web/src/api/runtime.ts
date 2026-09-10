@@ -64,7 +64,7 @@ export interface RuntimeCall {
   };
   roomName: string | null;
   agentParticipantSid: string | null;
-  destinationType: 'EXTENSION' | 'RING_GROUP' | null;
+  destinationType: string | null;
   destinationId: string | null;
   disposition: string;
   state: string;

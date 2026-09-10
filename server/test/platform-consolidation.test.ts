@@ -59,7 +59,10 @@ describe('central authorization with PlatformConfig voice profiles', () => {
         throw new Error(`Unexpected Identity path: ${path}`);
       }),
     );
-    const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      LOG_LEVEL: 'fatal',
+    });
     const deps = createDeps(config);
     const id = new HttpIdClient('https://identity.example.invalid');
     const noco = new FakeNocoDbApi();
@@ -82,12 +85,12 @@ describe('central authorization with PlatformConfig voice profiles', () => {
     const list = () => request(app).get('/admin/tenants').set('Cookie', cookie);
     expect((await list()).status).toBe(403);
     const denied = await request(app)
-      .post('/admin/tenants/22/extensions')
+      .post('/admin/profiles')
       .set('Cookie', cookie)
       .set('x-csrf-token', 'csrf-token')
-      .send({ extension: '100', displayName: 'Forbidden' });
+      .send({ tenantId: '22', extensionNumber: '100', displayName: 'Forbidden' });
     expect(denied.status).toBe(403);
-    expect(noco.tableByName('aida_tbl_Extension')!.records).toHaveLength(0);
+    expect(noco.tableByName('aida_tbl_AssistantProfile')!.records).toHaveLength(0);
     superAdmin = true;
     expect((await list()).body.tenants.map((t: { id: string }) => t.id)).toEqual(['11', '22']);
     superAdmin = false;

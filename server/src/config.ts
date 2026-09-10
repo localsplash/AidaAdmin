@@ -55,7 +55,6 @@ export const SERVICE_ENV_VARS = [
   'OFFICEPULSE_API_BASE_URL',
   'OFFICEPULSE_PROVISIONING_BASE_URL',
   'OFFICEPULSE_RUNTIME_DATABASE_URL',
-  'HANDSET_PROVISIONING_URL',
 ] as const;
 
 export type ServiceEnvVar = (typeof SERVICE_ENV_VARS)[number];
@@ -103,15 +102,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const missingServiceConfig: ServiceEnvVar[] = [];
   for (const name of SERVICE_ENV_VARS) {
     const value =
-      name === 'OFFICEPULSE_PROVISIONING_BASE_URL'
-        ? env.OFFICEPULSE_API_BASE_URL?.trim() || env[name]
+      name === 'OFFICEPULSE_PROVISIONING_BASE_URL' || name === 'OFFICEPULSE_API_BASE_URL'
+        ? env.OFFICEPULSE_API_BASE_URL?.trim() || env.OFFICEPULSE_PROVISIONING_BASE_URL
         : env[name];
     if (value === undefined || value.trim() === '') {
       if (
         name !== 'ID_CLIENT_SECRET' &&
         name !== 'ID_PUBLIC_BASE_URL' &&
-        name !== 'HANDSET_PROVISIONING_URL' &&
-        name !== 'OFFICEPULSE_API_BASE_URL'
+        name !== 'OFFICEPULSE_PROVISIONING_BASE_URL'
       )
         missingServiceConfig.push(name);
     } else {

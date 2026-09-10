@@ -2,13 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { NocoDbApi, NocoRecord, NocoWhere } from './api.js';
 import { tableByCanonicalName } from './api.js';
 import { LOGICAL_SCHEMA, FIELD_NAMES, TABLE_NAMES, UNIQUE_RULES } from './schema.js';
-import {
-  normalizeE164,
-  normalizeMac,
-  requireNonEmpty,
-  validateContext,
-  ValidationError,
-} from './validation.js';
+import { requireNonEmpty, ValidationError } from './validation.js';
 
 export class NotFoundError extends Error {}
 export class ConflictError extends Error {}
@@ -103,10 +97,7 @@ export class NocoStore {
       values.tenant_id != null &&
       (!Number.isSafeInteger(Number(values.tenant_id)) || Number(values.tenant_id) < 1)
     ) {
-      throw new ValidationError(
-        'tenantId',
-        'A positive platform tenant ID is required; map legacy IDs explicitly',
-      );
+      throw new ValidationError('tenantId', 'A positive platform tenant ID is required');
     }
     return Object.fromEntries(
       Object.entries(values).map(([field, value]) => [
@@ -200,243 +191,6 @@ export interface AuditLog {
   append(entry: AuditEntry): Promise<void>;
 }
 
-export interface ExtensionInput {
-  identityUserId?: number | null | undefined;
-  extensionNumber: string;
-  displayName: string;
-  callerIdName?: string | null | undefined;
-  callerIdNumber?: string | null | undefined;
-  asteriskContext: string;
-  provisioningProfile?: string | null | undefined;
-  enabled: boolean;
-}
-
-function extensionValues(tenantId: string, input: ExtensionInput): Record<string, unknown> {
-  return {
-    tenant_id: tenantId,
-    identity_user_id: input.identityUserId ?? null,
-    extension_number: requireNonEmpty('extensionNumber', input.extensionNumber),
-    display_name: requireNonEmpty('displayName', input.displayName),
-    caller_id_name: input.callerIdName ?? null,
-    caller_id_number: input.callerIdNumber
-      ? normalizeE164('callerIdNumber', input.callerIdNumber)
-      : null,
-    asterisk_context: validateContext('asteriskContext', input.asteriskContext),
-    provisioning_profile: input.provisioningProfile ?? null,
-    enabled: input.enabled,
-  };
-}
-
-export class ExtensionRepository {
-  constructor(private readonly store: NocoStore) {}
-
-  listForTenant(tenantId: string): Promise<NocoRecord[]> {
-    return this.store.list('extension', [{ field: 'tenant_id', op: 'eq', value: tenantId }]);
-  }
-
-  get(tenantId: string, extensionId: string): Promise<NocoRecord> {
-    return this.store.getById('extension', extensionId, tenantId);
-  }
-
-  async create(tenantId: string, input: ExtensionInput): Promise<NocoRecord> {
-    return this.store.create('extension', {
-      ...extensionValues(tenantId, input),
-      device_id: null,
-      provisioning_mac: null,
-      enrollment_token_hash: null,
-      enrollment_expires_at: null,
-      enrollment_consumed_at: null,
-      device_credential_version: 1,
-    });
-  }
-
-  async update(
-    tenantId: string,
-    extensionId: string,
-    expectedRevision: number,
-    input: ExtensionInput,
-  ): Promise<NocoRecord> {
-    return this.store.update(
-      'extension',
-      extensionId,
-      expectedRevision,
-      extensionValues(tenantId, input),
-      tenantId,
-    );
-  }
-
-  /** Stores the enrollment token HASH only — never the issued token. */
-  async recordEnrollment(
-    tenantId: string,
-    extensionId: string,
-    expectedRevision: number,
-    fields: {
-      deviceId: string;
-      provisioningMac: string;
-      enrollmentTokenHash: string;
-      enrollmentExpiresAt: string;
-    },
-  ): Promise<NocoRecord> {
-    return this.store.update(
-      'extension',
-      extensionId,
-      expectedRevision,
-      {
-        device_id: fields.deviceId,
-        provisioning_mac: normalizeMac('provisioningMac', fields.provisioningMac),
-        enrollment_token_hash: fields.enrollmentTokenHash,
-        enrollment_expires_at: fields.enrollmentExpiresAt,
-        enrollment_consumed_at: null,
-      },
-      tenantId,
-    );
-  }
-
-  async bumpCredentialVersion(
-    tenantId: string,
-    extensionId: string,
-    expectedRevision: number,
-    currentVersion: number,
-  ): Promise<NocoRecord> {
-    return this.store.update(
-      'extension',
-      extensionId,
-      expectedRevision,
-      { device_credential_version: currentVersion + 1 },
-      tenantId,
-    );
-  }
-}
-
-export interface RingGroupInput {
-  name: string;
-  virtualExtension: string;
-  asteriskContext: string;
-  ringTimeoutSeconds?: number | undefined;
-  musicOnHoldClass?: string | null | undefined;
-  callerIdName?: string | null | undefined;
-  callerIdNumber?: string | null | undefined;
-  enabled: boolean;
-}
-
-export class RingGroupRepository {
-  constructor(private readonly store: NocoStore) {}
-
-  private values(tenantId: string, input: RingGroupInput): Record<string, unknown> {
-    return {
-      tenant_id: tenantId,
-      name: requireNonEmpty('name', input.name),
-      virtual_extension: requireNonEmpty('virtualExtension', input.virtualExtension),
-      asterisk_context: validateContext('asteriskContext', input.asteriskContext),
-      ring_strategy: 'RING_ALL',
-      ring_timeout_seconds: input.ringTimeoutSeconds ?? 20,
-      music_on_hold_class: input.musicOnHoldClass ?? null,
-      caller_id_name: input.callerIdName ?? null,
-      caller_id_number: input.callerIdNumber
-        ? normalizeE164('callerIdNumber', input.callerIdNumber)
-        : null,
-      enabled: input.enabled,
-    };
-  }
-
-  listForTenant(tenantId: string): Promise<NocoRecord[]> {
-    return this.store.list('ring_group', [{ field: 'tenant_id', op: 'eq', value: tenantId }]);
-  }
-
-  get(tenantId: string, ringGroupId: string): Promise<NocoRecord> {
-    return this.store.getById('ring_group', ringGroupId, tenantId);
-  }
-
-  async create(tenantId: string, input: RingGroupInput): Promise<NocoRecord> {
-    return this.store.create('ring_group', this.values(tenantId, input));
-  }
-
-  async update(
-    tenantId: string,
-    ringGroupId: string,
-    expectedRevision: number,
-    input: RingGroupInput,
-  ): Promise<NocoRecord> {
-    return this.store.update(
-      'ring_group',
-      ringGroupId,
-      expectedRevision,
-      this.values(tenantId, input),
-      tenantId,
-    );
-  }
-
-  listMembers(tenantId: string, ringGroupId: string): Promise<NocoRecord[]> {
-    return this.store.list('ring_group_member', [
-      { field: 'tenant_id', op: 'eq', value: tenantId },
-      { field: 'ring_group_id', op: 'eq', value: ringGroupId },
-    ]);
-  }
-
-  async addMember(
-    tenantId: string,
-    ringGroupId: string,
-    extensionId: string,
-    sortOrder: number,
-  ): Promise<NocoRecord> {
-    // Cross-tenant references never resolve: both sides must be this tenant's.
-    await this.store.getById('ring_group', ringGroupId, tenantId);
-    await this.store.getById('extension', extensionId, tenantId);
-    return this.store.create('ring_group_member', {
-      tenant_id: tenantId,
-      ring_group_id: ringGroupId,
-      extension_id: extensionId,
-      sort_order: sortOrder,
-      enabled: true,
-    });
-  }
-
-  /**
-   * Replaces the member set: listed extensions become enabled members in the
-   * given order; existing members not listed are disabled (NocoDB rows are
-   * never deleted).
-   */
-  async setMembers(
-    tenantId: string,
-    ringGroupId: string,
-    extensionIds: string[],
-  ): Promise<NocoRecord[]> {
-    const existing = await this.listMembers(tenantId, ringGroupId);
-    const byExtension = new Map(existing.map((m) => [m.extension_id as string, m]));
-    const wanted = new Set(extensionIds);
-
-    for (const member of existing) {
-      if (!wanted.has(member.extension_id as string) && member.enabled) {
-        await this.store.update(
-          'ring_group_member',
-          member.id as string,
-          Number(member.revision),
-          { enabled: false },
-          tenantId,
-        );
-      }
-    }
-    const result: NocoRecord[] = [];
-    for (const [index, extensionId] of extensionIds.entries()) {
-      const current = byExtension.get(extensionId);
-      if (current) {
-        result.push(
-          await this.store.update(
-            'ring_group_member',
-            current.id as string,
-            Number(current.revision),
-            { enabled: true, sort_order: index + 1 },
-            tenantId,
-          ),
-        );
-      } else {
-        result.push(await this.addMember(tenantId, ringGroupId, extensionId, index + 1));
-      }
-    }
-    return result;
-  }
-}
-
 export interface AssistantProfileInput {
   name: string;
   businessName: string;
@@ -497,75 +251,6 @@ export class AssistantProfileRepository {
   }
 }
 
-export interface DidRouteInput {
-  didE164: string;
-  assistantProfileId: string;
-  destinationType: 'EXTENSION' | 'RING_GROUP';
-  destinationId: string;
-  screeningEnabled: boolean;
-  enabled: boolean;
-}
-
-export class DidRouteRepository {
-  constructor(private readonly store: NocoStore) {}
-
-  /**
-   * Exactly one destination FK matches destination_type, and both the
-   * assistant profile and the destination must belong to the same tenant.
-   */
-  private async values(tenantId: string, input: DidRouteInput): Promise<Record<string, unknown>> {
-    await this.store.getById('assistant_profile', input.assistantProfileId, tenantId);
-    if (input.destinationType === 'EXTENSION') {
-      await this.store.getById('extension', input.destinationId, tenantId);
-    } else if (input.destinationType === 'RING_GROUP') {
-      await this.store.getById('ring_group', input.destinationId, tenantId);
-    } else {
-      throw new ValidationError(
-        'destinationType',
-        'destinationType must be EXTENSION or RING_GROUP',
-      );
-    }
-    return {
-      tenant_id: tenantId,
-      did_e164: normalizeE164('didE164', input.didE164),
-      assistant_profile_id: input.assistantProfileId,
-      destination_type: input.destinationType,
-      destination_extension_id: input.destinationType === 'EXTENSION' ? input.destinationId : null,
-      destination_ring_group_id:
-        input.destinationType === 'RING_GROUP' ? input.destinationId : null,
-      screening_enabled: input.screeningEnabled,
-      enabled: input.enabled,
-    };
-  }
-
-  listForTenant(tenantId: string): Promise<NocoRecord[]> {
-    return this.store.list('did_route', [{ field: 'tenant_id', op: 'eq', value: tenantId }]);
-  }
-
-  get(tenantId: string, didRouteId: string): Promise<NocoRecord> {
-    return this.store.getById('did_route', didRouteId, tenantId);
-  }
-
-  async create(tenantId: string, input: DidRouteInput): Promise<NocoRecord> {
-    return this.store.create('did_route', await this.values(tenantId, input));
-  }
-
-  async update(
-    tenantId: string,
-    didRouteId: string,
-    expectedRevision: number,
-    input: DidRouteInput,
-  ): Promise<NocoRecord> {
-    return this.store.update(
-      'did_route',
-      didRouteId,
-      expectedRevision,
-      await this.values(tenantId, input),
-      tenantId,
-    );
-  }
-}
-
 export interface AppearanceInput {
   brandName: string;
   primaryColor?: string | null | undefined;
@@ -611,10 +296,7 @@ export interface AidaConfigRepos {
   store: NocoStore;
   tenants: Pick<TenantRepository, 'list' | 'get' | 'create' | 'update'>;
   tenantUsers: Pick<TenantUserRepository, 'listForTenant' | 'listForUser' | 'save'>;
-  extensions: ExtensionRepository;
-  ringGroups: RingGroupRepository;
   assistantProfiles: AssistantProfileRepository;
-  didRoutes: DidRouteRepository;
   appearance: AppearanceRepository;
   audit: Pick<AuditLog, 'append'>;
 }
@@ -628,10 +310,7 @@ export function createRepos(
     store,
     tenants: authority.tenants,
     tenantUsers: authority.tenantUsers,
-    extensions: new ExtensionRepository(store),
-    ringGroups: new RingGroupRepository(store),
     assistantProfiles: new AssistantProfileRepository(store),
-    didRoutes: new DidRouteRepository(store),
     appearance: new AppearanceRepository(store),
     audit: authority.audit,
   };

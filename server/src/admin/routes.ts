@@ -25,10 +25,7 @@ const tenantUserBody = z.object({
   email: z.string().email().optional(),
 });
 
-/**
- * Maps domain errors to safe responses. Provisioning failures are reported
- * clearly and immediately — there is no background reconciliation in the POC.
- */
+/** Maps directory and business-configuration errors to safe responses. */
 function fail(res: Response, req: Request, err: unknown): void {
   const correlationId = req.correlationId;
   if (err instanceof ValidationError) {

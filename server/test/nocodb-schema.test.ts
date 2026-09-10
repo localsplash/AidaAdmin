@@ -120,16 +120,12 @@ describe('schema automation', () => {
     expect(api.tableByName('legacy_extra')).toBeDefined();
   });
 
-  it('stores no SIP secret column anywhere', () => {
+  it('stores no PBX or enrollment configuration', () => {
     for (const table of AIDA_SCHEMA) {
       for (const column of table.columns) {
         expect(column.column_name.toLowerCase()).not.toContain('secret');
         expect(column.column_name.toLowerCase()).not.toMatch(/sip/);
       }
     }
-    // The enrollment token is stored as a hash only.
-    const extension = AIDA_SCHEMA.find((t) => t.table_name === 'aida_tbl_Extension')!;
-    expect(extension.columns.some((c) => c.column_name === 'enrollment_token_hash')).toBe(true);
-    expect(extension.columns.some((c) => c.column_name === 'enrollment_token')).toBe(false);
   });
 });
