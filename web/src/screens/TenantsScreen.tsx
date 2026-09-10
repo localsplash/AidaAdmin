@@ -103,7 +103,7 @@ export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
                   </button>{' '}
                   <Link to={`/tenants/${tenant.id}/users`}>Users</Link>{' '}
                   <Link to={`/tenants/${tenant.id}/extensions`}>Extensions</Link>{' '}
-                  <Link to={`/tenants/${tenant.id}/ring-groups`}>Ring groups</Link>{' '}
+                  <Link to={`/tenants/${tenant.id}/queues`}>Queues</Link>{' '}
                   <Link to={`/tenants/${tenant.id}/profiles`}>Profiles</Link>{' '}
                   <Link to={`/tenants/${tenant.id}/did-routes`}>DID routes</Link>{' '}
                   <Link to={`/tenants/${tenant.id}/appearance`}>Appearance</Link>

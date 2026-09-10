@@ -47,7 +47,8 @@ describe('RuntimeScreen', () => {
     const tabs = within(await screen.findByRole('tablist', { name: /runtime sections/i }))
       .getAllByRole('tab')
       .map((t) => t.textContent);
-    expect(tabs).toEqual(['Calls', 'Provisioning', 'DID fail-safes']);
+    expect(tabs).toEqual(['Calls']);
+    expect(screen.queryByRole('tab', { name: /provisioning|fail-safes/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: /dependencies/i })).not.toBeInTheDocument();
     expect(await screen.findByText(/no calls match/i)).toBeInTheDocument();
   });
@@ -100,58 +101,6 @@ describe('RuntimeScreen', () => {
     await user.click(screen.getByRole('button', { name: /test dependencies now/i }));
     await waitFor(() => expect(posts).toEqual(['/runtime/dependencies/test']));
     expect(await screen.findByText(/officepulse live: unreachable/i)).toBeInTheDocument();
-  });
-
-  it('retries provisioning through the explicit action, kind and id only', async () => {
-    const posts: Array<Record<string, unknown>> = [];
-    mockFetch((url, init) => {
-      if (url.startsWith('/runtime/calls?')) return emptyCalls;
-      if (url.startsWith('/runtime/provisioning?')) {
-        return {
-          status: 200,
-          body: {
-            operations: [
-              {
-                requestId: 'r1',
-                kind: 'DID',
-                externalId: 'route-9',
-                action: 'provision',
-                status: 'provisioned',
-                createdAt: 't',
-              },
-              {
-                requestId: 'r2',
-                kind: 'HANDSET',
-                externalId: 'dev-1',
-                action: 'provision',
-                status: 'provisioned',
-                createdAt: 't',
-              },
-            ],
-          },
-        };
-      }
-      if (url === '/runtime/provisioning/retry' && init?.method === 'POST') {
-        posts.push(JSON.parse(String(init.body)));
-        return {
-          status: 200,
-          body: { retried: { kind: 'DID', externalId: 'route-9', tenantId: 'ten-1' } },
-        };
-      }
-      return null;
-    });
-    render(
-      <MemoryRouter>
-        <RuntimeScreen session={superAdmin} />
-      </MemoryRouter>,
-    );
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole('tab', { name: /provisioning/i }));
-    // Handsets are keyed by device and have no retry; DIDs do.
-    expect(await screen.findAllByRole('button', { name: /^retry/i })).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: /retry did/i }));
-    await waitFor(() => expect(posts).toEqual([{ kind: 'DID', externalId: 'route-9' }]));
-    expect(await screen.findByRole('status')).toHaveTextContent(/re-issued DID provisioning/i);
   });
 
   it('names the missing variable when the runtime database is not configured', async () => {

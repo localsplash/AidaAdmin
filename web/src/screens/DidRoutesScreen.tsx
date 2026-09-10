@@ -1,294 +1,437 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { adminApi, type DidRoute } from '../api/admin';
 import {
-  adminApi,
-  ApiError,
-  type AssistantProfile,
-  type DidRoute,
-  type Extension,
-  type RingGroup,
-  type TenantNumber,
-} from '../api/admin';
+  applyStateLabel,
+  COMMITTED_NOTICE,
+  PbxDisabledNotice,
+  PbxErrorNotice,
+} from '../components/PbxNotice';
+import { usePbxInventory } from '../hooks/usePbxInventory';
 
-const EMPTY = {
-  didE164: '',
-  assistantProfileId: '',
-  destinationType: 'EXTENSION' as 'EXTENSION' | 'RING_GROUP',
-  destinationId: '',
-  screeningEnabled: true,
-  enabled: true,
+const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+const DAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function selectedDays(value: string): string[] {
+  const days = new Set<string>();
+  for (const term of value.split('&')) {
+    const [start, end] = term.split('-');
+    if (!start || !DAYS.includes(start)) continue;
+    if (!end) {
+      days.add(start);
+      continue;
+    }
+    const finish = DAYS.indexOf(end);
+    if (finish < 0) continue;
+    for (let day = DAYS.indexOf(start), count = 0; count < 7; day = (day + 1) % 7, count++) {
+      days.add(DAYS[day]!);
+      if (day === finish) break;
+    }
+  }
+  return DAYS.filter((day) => days.has(day));
+}
+const loadInventory = async (tenant: string) => {
+  const [dids, queues] = await Promise.all([
+    adminApi.listDidRoutes(tenant),
+    adminApi.listQueues(tenant),
+  ]);
+  return {
+    ...dids,
+    queues: queues.queues,
+    provisioningEnabled: dids.provisioningEnabled && queues.provisioningEnabled,
+  };
 };
-
+const EMPTY = {
+  did: '',
+  queue: '',
+  rings: '6',
+  scheduled: false,
+  start: '09:00',
+  end: '17:00',
+  days: ['mon', 'tue', 'wed', 'thu', 'fri'],
+  timezone: '',
+  destination: '',
+};
+function formFor(route: DidRoute | undefined, did: string) {
+  if (!route?.managed) return { ...EMPTY, did };
+  const [start, end] = route.schedule?.timeRange.split('-') ?? ['09:00', '17:00'];
+  return {
+    did,
+    queue: route.queue,
+    rings: String(route.ringsBeforeAi),
+    scheduled: !!route.schedule,
+    start: start!,
+    end: end!,
+    days: route.schedule ? selectedDays(route.schedule.weekdays) : EMPTY.days,
+    timezone: route.schedule?.timezone ?? '',
+    destination: route.livekitDestination === did ? '' : route.livekitDestination,
+  };
+}
 export function DidRoutesScreen() {
   const { tenantId = '' } = useParams();
-  const [routes, setRoutes] = useState<DidRoute[] | null>(null);
-  const [numbers, setNumbers] = useState<TenantNumber[]>([]);
-  const [profiles, setProfiles] = useState<AssistantProfile[]>([]);
-  const [extensions, setExtensions] = useState<Extension[]>([]);
-  const [ringGroups, setRingGroups] = useState<RingGroup[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  return <TenantDidRoutes key={tenantId} tenantId={tenantId} />;
+}
+function TenantDidRoutes({ tenantId }: { tenantId: string }) {
+  const inventory = usePbxInventory(tenantId, loadInventory);
   const [form, setForm] = useState(EMPTY);
-  const [editing, setEditing] = useState<DidRoute | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
-
-  const load = useCallback(() => {
-    // Settled, not all: one failing list must not blank the destination
-    // choices and leave the form unusable for an unrelated reason.
-    void Promise.allSettled([
-      adminApi.listDidRoutes(tenantId),
-      adminApi.listProfiles(tenantId),
-      adminApi.listExtensions(tenantId),
-      adminApi.listRingGroups(tenantId),
-      adminApi.listNumbers(tenantId),
-    ]).then(([r, p, e, g, n]) => {
-      if (r.status === 'fulfilled') setRoutes(r.value.didRoutes);
-      else {
-        setRoutes([]);
-        setError(r.reason instanceof Error ? r.reason.message : 'Failed to load DID routes');
-      }
-      if (p.status === 'fulfilled') setProfiles(p.value.profiles);
-      if (e.status === 'fulfilled') setExtensions(e.value.extensions);
-      if (g.status === 'fulfilled') setRingGroups(g.value.ringGroups);
-      if (n.status === 'fulfilled') setNumbers(n.value.numbers);
-      else setError('Unable to load shared numbers. Refresh before saving a route.');
-    });
-  }, [tenantId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const startEdit = (route: DidRoute) => {
-    setEditing(route);
-    setFormOpen(true);
+  const lock = useRef(false);
+  const writable = inventory.data?.provisioningEnabled === true && !inventory.error;
+  const selected = inventory.data?.dids.find((route) => route.did === form.did);
+  const configurable =
+    selected?.managed ||
+    (selected && !selected.managed && selected.availability === 'unconfigured');
+  const select = (did: string) => {
+    setForm(
+      formFor(
+        inventory.data?.dids.find((route) => route.did === did),
+        did,
+      ),
+    );
     setError(null);
-    setStatus(null);
-    setForm({
-      didE164: route.did_e164,
-      assistantProfileId: route.assistant_profile_id,
-      destinationType: route.destination_type,
-      destinationId:
-        (route.destination_type === 'EXTENSION'
-          ? route.destination_extension_id
-          : route.destination_ring_group_id) ?? '',
-      screeningEnabled: route.screening_enabled,
-      enabled: route.enabled,
-    });
+    setStatus('');
   };
-
-  const cancelEdit = () => {
-    setEditing(null);
-    setFormOpen(false);
-    setForm(EMPTY);
-  };
-
-  const submit = async (event: React.FormEvent) => {
+  const save = async (event: React.FormEvent) => {
     event.preventDefault();
-    setBusy(true);
+    if (lock.current || !writable || !configurable) return;
     setError(null);
-    setStatus(null);
-    const input = { tenantId, ...form };
-    try {
-      if (editing) {
-        await adminApi.updateDidRoute(editing.id, editing.revision, input);
-        setStatus(`Saved ${form.didE164}`);
-      } else {
-        await adminApi.createDidRoute(input);
-        setStatus(`Created ${form.didE164}`);
+    setStatus('');
+    if (form.scheduled) {
+      if (!form.days.length) {
+        setError(new Error('Select at least one weekday.'));
+        return;
       }
-      cancelEdit();
-      load();
+      try {
+        if (
+          !form.timezone ||
+          form.timezone.length > 64 ||
+          (form.timezone !== 'UTC' &&
+            !/^[A-Za-z0-9_+.-]+(?:\/[A-Za-z0-9_+.-]+)+$/.test(form.timezone))
+        )
+          throw new Error();
+        new Intl.DateTimeFormat('en', { timeZone: form.timezone }).format();
+      } catch {
+        setError(new Error('Enter a valid IANA timezone, for example America/Los_Angeles or UTC.'));
+        return;
+      }
+    }
+    lock.current = true;
+    setBusy(true);
+    try {
+      const result = await adminApi.saveDidRoute(tenantId, form.did, {
+        queue: form.queue,
+        ringsBeforeAi: Number(form.rings),
+        ...(form.scheduled
+          ? {
+              schedule: {
+                timeRange: `${form.start}-${form.end}`,
+                weekdays: DAYS.filter((day) => form.days.includes(day)).join('&'),
+                timezone: form.timezone,
+              },
+            }
+          : {}),
+        ...(form.destination ? { livekitDestination: form.destination } : {}),
+      });
+      if (!inventory.current()) return;
+      setStatus(
+        `${result.applyState === 'active' ? 'DID route verified active.' : COMMITTED_NOTICE} OfficePulse returned a queue timeout of ${result.ringTimeoutSeconds} seconds.`,
+      );
+      await inventory.refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save the DID route');
+      if (inventory.current()) setError(err);
     } finally {
-      setBusy(false);
+      lock.current = false;
+      if (inventory.current()) setBusy(false);
     }
   };
-
-  const destinations = form.destinationType === 'EXTENSION' ? extensions : ringGroups;
-  const destinationNoun = form.destinationType === 'EXTENSION' ? 'extensions' : 'ring groups';
-
+  const remove = async (route: DidRoute) => {
+    if (
+      lock.current ||
+      !writable ||
+      !route.managed ||
+      !window.confirm(
+        `Disable managed PBX routing for ${route.did}? This preserves the Identity phone number, carrier service, messages and assistant profile.`,
+      )
+    )
+      return;
+    lock.current = true;
+    setBusy(true);
+    setError(null);
+    setStatus('');
+    try {
+      await adminApi.deleteDidRoute(tenantId, route.did);
+      if (!inventory.current()) return;
+      setStatus(
+        `PBX routing deletion for ${route.did} committed. The Identity phone number is unchanged; effective Asterisk state is unverified.`,
+      );
+      setForm(EMPTY);
+      await inventory.refresh();
+    } catch (err) {
+      if (inventory.current()) setError(err);
+    } finally {
+      lock.current = false;
+      if (inventory.current()) setBusy(false);
+    }
+  };
   return (
-    <section aria-labelledby="did-routes-heading">
+    <section aria-labelledby="did-heading">
       <p>
         <Link to="/">← Dashboard</Link>
       </p>
-      <h1 id="did-routes-heading">DID routes</h1>
+      <h1 id="did-heading">DID routes</h1>
       <p>
-        Inbound order is always: DID → recording disclosure → Aida screening → destination on
-        takeover or failure.
+        Route enabled Identity voice numbers through a native queue and LiveKit. Phone number
+        assignment remains in Identity.
       </p>
-      {error ? <p role="alert">{error}</p> : null}
-      {status ? <p role="status">{status}</p> : null}
-
-      {routes === null ? (
-        <p role="status">Loading…</p>
-      ) : routes.length === 0 ? (
-        <p>No DID routes yet.</p>
-      ) : (
-        <table>
-          <caption className="visually-hidden">DID routes for this tenant</caption>
-          <thead>
-            <tr>
-              <th scope="col">DID</th>
-              <th scope="col">Screening</th>
-              <th scope="col">Fallback destination</th>
-              <th scope="col">Enabled</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {routes.map((route) => (
-              <tr key={route.id}>
-                <td>{route.did_e164}</td>
-                <td>{route.screening_enabled ? 'Aida screens' : 'Direct'}</td>
-                <td>{route.fallbackPreview}</td>
-                <td>{route.enabled ? 'Yes' : 'No'}</td>
-                <td>
-                  <button type="button" onClick={() => startEdit(route)}>
-                    Edit
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <details
-        className="record-editor"
-        open={formOpen}
-        onToggle={(e) => setFormOpen(e.currentTarget.open)}
-      >
-        <summary>{editing ? 'Edit record' : 'Add DID Route…'}</summary>
-        <h2 id="route-form-heading">{editing ? `Edit ${editing.did_e164}` : 'New DID route'}</h2>
-        <form aria-labelledby="route-form-heading" onSubmit={(e) => void submit(e)}>
-          <label>
-            DID (E.164)
-            <select
-              required
-              value={form.didE164}
-              onChange={(e) => setForm({ ...form, didE164: e.target.value })}
-            >
-              <option value="">Choose a tenant number…</option>
-              {numbers.map((n) => (
-                <option
-                  key={n.iPhoneNumberId}
-                  value={n.phoneNumber}
-                  disabled={!n.bEnabled && form.enabled}
-                >
-                  {n.phoneNumber}
-                  {n.label ? ` — ${n.label}` : ''}
-                </option>
-              ))}
-            </select>
-            <Link to={`/tenants/${tenantId}/numbers`}>Manage shared numbers</Link>
-          </label>
-          <label>
-            Assistant profile
-            <select
-              required
-              value={form.assistantProfileId}
-              onChange={(e) => setForm({ ...form, assistantProfileId: e.target.value })}
-            >
-              <option value="">Choose a profile…</option>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id} disabled={!profile.enabled}>
-                  {profile.name}
-                  {profile.enabled ? '' : ' (disabled)'}
-                </option>
-              ))}
-            </select>
-          </label>
-          {profiles.length === 0 ? (
-            <p>
-              No assistant profiles for this tenant yet —{' '}
-              <Link to={`/tenants/${tenantId}/profiles`}>create one</Link> first.
-            </p>
-          ) : null}
-          <fieldset>
-            <legend>Destination on takeover or failure</legend>
-            <label>
-              <input
-                type="radio"
-                name="destinationType"
-                checked={form.destinationType === 'EXTENSION'}
-                onChange={() =>
-                  setForm({ ...form, destinationType: 'EXTENSION', destinationId: '' })
-                }
-              />
-              Extension
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="destinationType"
-                checked={form.destinationType === 'RING_GROUP'}
-                onChange={() =>
-                  setForm({ ...form, destinationType: 'RING_GROUP', destinationId: '' })
-                }
-              />
-              Ring group
-            </label>
-            <label>
-              Destination
-              <select
-                required
-                value={form.destinationId}
-                onChange={(e) => setForm({ ...form, destinationId: e.target.value })}
-              >
-                <option value="">Choose…</option>
-                {destinations.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {'extension_number' in d
-                      ? `${d.extension_number} — ${d.display_name}`
-                      : `${d.virtual_extension} — ${d.name}`}
-                  </option>
+      <PbxErrorNotice error={error || inventory.error} />
+      {status && <p role="status">{status}</p>}
+      {inventory.data && !inventory.data.provisioningEnabled && <PbxDisabledNotice />}
+      {inventory.loading && <p role="status">Loading DID routes…</p>}
+      {inventory.data &&
+        (inventory.data.dids.length === 0 ? (
+          <p>No assigned voice numbers are available in this tenant’s OfficePulse scope.</p>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <caption className="visually-hidden">DID routing for this tenant</caption>
+              <thead>
+                <tr>
+                  <th scope="col">DID</th>
+                  <th scope="col">Routing</th>
+                  <th scope="col">Schedule</th>
+                  <th scope="col">Apply state</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inventory.data.dids.map((route) => (
+                  <tr key={route.did}>
+                    <td>{route.did}</td>
+                    <td>
+                      {route.managed
+                        ? `${inventory.data!.queues.find((queue) => queue.id === route.queue)?.name ?? route.queue} → LiveKit (${route.ringTimeoutSeconds} seconds)`
+                        : route.availability === 'unconfigured'
+                          ? 'Unconfigured'
+                          : route.availability === 'manual'
+                            ? 'Manual / operator managed'
+                            : 'Routing unknown'}
+                    </td>
+                    <td>
+                      {route.managed
+                        ? route.schedule
+                          ? `${route.schedule.timeRange}, ${route.schedule.weekdays}, ${route.schedule.timezone}`
+                          : 'Always open'
+                        : '—'}
+                    </td>
+                    <td>{applyStateLabel(route.applyState)}</td>
+                    <td>
+                      {route.managed || route.availability === 'unconfigured' ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={!writable || busy}
+                            onClick={() => select(route.did)}
+                            aria-label={`${route.managed ? 'Edit' : 'Configure'} ${route.did}`}
+                          >
+                            {route.managed ? 'Edit' : 'Configure'}
+                          </button>
+                          {route.managed && (
+                            <>
+                              {' '}
+                              <button
+                                type="button"
+                                disabled={!writable || busy}
+                                onClick={() => void remove(route)}
+                                aria-label={`Disable PBX routing for ${route.did}`}
+                              >
+                                Disable PBX route
+                              </button>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        'Read-only; operator adoption is unavailable'
+                      )}
+                    </td>
+                  </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      <button
+        type="button"
+        disabled={busy || inventory.loading}
+        onClick={() => void inventory.refresh()}
+      >
+        Refresh inventory
+      </button>
+      <div className="record-editor">
+        <h2>Configure DID routing</h2>
+        <form onSubmit={(event) => void save(event)}>
+          <fieldset disabled={busy || !writable}>
+            <legend>Number and destination</legend>
+            <label>
+              DID (E.164)
+              <select required value={form.did} onChange={(event) => select(event.target.value)}>
+                <option value="">Choose an assigned voice number…</option>
+                {inventory.data?.numbers
+                  .filter(
+                    (number) =>
+                      number.bEnabled &&
+                      number.bVoice &&
+                      inventory.data?.dids.some((route) => route.did === number.phoneNumber),
+                  )
+                  .map((number) => (
+                    <option key={number.phoneNumber} value={number.phoneNumber}>
+                      {number.phoneNumber}
+                      {number.label ? ` — ${number.label}` : ''}
+                    </option>
+                  ))}
               </select>
             </label>
-            {destinations.length === 0 ? (
-              <p>
-                No {destinationNoun} for this tenant yet — create one on the{' '}
-                <Link
-                  to={`/tenants/${tenantId}/${
-                    form.destinationType === 'EXTENSION' ? 'extensions' : 'ring-groups'
-                  }`}
-                >
-                  {destinationNoun}
-                </Link>{' '}
-                page first.
+            {selected && !configurable && (
+              <p role="status">
+                This number has manual or unknown PBX routing. Automatic adoption is unavailable, so
+                it cannot be overwritten here.
               </p>
-            ) : null}
+            )}
+            <label htmlFor="did-queue">Queue</label>
+            <select
+              id="did-queue"
+              required
+              value={form.queue}
+              onChange={(event) => setForm({ ...form, queue: event.target.value })}
+            >
+              <option value="">Choose a native queue…</option>
+              {inventory.data?.queues.map((queue) => (
+                <option key={queue.id} value={queue.id}>
+                  {queue.name}
+                </option>
+              ))}
+            </select>
+            {inventory.data?.queues.length === 0 && (
+              <p>
+                <Link to={`/tenants/${tenantId}/queues`}>Create a queue</Link> first.
+              </p>
+            )}
+            <label>
+              Rings before LiveKit
+              <input
+                type="number"
+                required
+                min={1}
+                max={12}
+                step={1}
+                value={form.rings}
+                onChange={(event) => setForm({ ...form, rings: event.target.value })}
+              />
+            </label>
+            <p>
+              The POC approximates each ring as five seconds: {Number(form.rings) * 5} seconds for
+              this form.{' '}
+              {selected?.managed && (
+                <>OfficePulse’s saved queue timeout is {selected.ringTimeoutSeconds} seconds.</>
+              )}
+            </p>
           </fieldset>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.screeningEnabled}
-              onChange={(e) => setForm({ ...form, screeningEnabled: e.target.checked })}
-            />
-            Aida screening enabled
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-            />
-            Enabled
-          </label>
-          <button type="submit" disabled={busy}>
-            {busy ? 'Saving…' : editing ? 'Save DID route' : 'Save record'}
-          </button>
-          {editing ? (
-            <button type="button" onClick={cancelEdit}>
-              Cancel edit
+          <fieldset disabled={busy || !writable || !configurable}>
+            <legend>Business hours</legend>
+            <label>
+              <input
+                type="checkbox"
+                checked={form.scheduled}
+                onChange={(event) => setForm({ ...form, scheduled: event.target.checked })}
+              />
+              Enable business-hours schedule
+            </label>
+            {form.scheduled ? (
+              <>
+                <label>
+                  Local start time
+                  <input
+                    type="time"
+                    required
+                    value={form.start}
+                    onChange={(event) => setForm({ ...form, start: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Local end time
+                  <input
+                    type="time"
+                    required
+                    value={form.end}
+                    onChange={(event) => setForm({ ...form, end: event.target.value })}
+                  />
+                </label>
+                <fieldset>
+                  <legend>Weekdays</legend>
+                  {DAYS.map((day, index) => (
+                    <label key={day}>
+                      <input
+                        type="checkbox"
+                        checked={form.days.includes(day)}
+                        onChange={(event) =>
+                          setForm({
+                            ...form,
+                            days: event.target.checked
+                              ? [...form.days, day]
+                              : form.days.filter((value) => value !== day),
+                          })
+                        }
+                      />
+                      {DAY_LABELS[index]}
+                    </label>
+                  ))}
+                </fieldset>
+                <label>
+                  IANA timezone
+                  <input
+                    required
+                    maxLength={64}
+                    placeholder="America/Los_Angeles"
+                    value={form.timezone}
+                    onChange={(event) => setForm({ ...form, timezone: event.target.value })}
+                  />
+                </label>
+                <p>
+                  During scheduled hours: ring the selected queue, then LiveKit if unanswered.
+                  Outside scheduled hours: route directly to LiveKit.
+                </p>
+              </>
+            ) : (
+              <p>With no schedule: the queue is always open, then LiveKit.</p>
+            )}
+          </fieldset>
+          <fieldset disabled={busy || !writable || !configurable}>
+            <legend>Advanced routing</legend>
+            <details>
+              <summary>LiveKit destination override</summary>
+              <label>
+                LiveKit destination (optional E.164)
+                <input
+                  type="tel"
+                  pattern="\+[1-9][0-9]{6,14}"
+                  placeholder={form.did || '+15105550100'}
+                  value={form.destination}
+                  onChange={(event) => setForm({ ...form, destination: event.target.value })}
+                />
+                <small>Defaults to the selected DID.</small>
+              </label>
+            </details>
+          </fieldset>
+          <div className="form-actions">
+            <button type="submit" disabled={busy || !writable || !configurable}>
+              {busy ? 'Saving…' : 'Save DID route'}
             </button>
-          ) : null}
+            <button type="button" disabled={busy} onClick={() => setForm(EMPTY)}>
+              Clear form
+            </button>
+          </div>
         </form>
-      </details>
+      </div>
     </section>
   );
 }

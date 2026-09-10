@@ -158,45 +158,6 @@ beforeEach(async () => {
     { name: 'ari', ready: true, detail: null, changedAt: 'x' },
     { name: 'livekit', ready: false, detail: 'timeout', changedAt: 'x' },
   ];
-  runtime.provisioning = [
-    {
-      requestId: 'r1',
-      kind: 'EXTENSION',
-      externalId: extension.id as string,
-      action: 'create',
-      status: 'created',
-      createdAt: 'x',
-    },
-    {
-      requestId: 'r2',
-      kind: 'HANDSET',
-      externalId: 'device-9',
-      action: 'provision',
-      status: 'provisioned',
-      createdAt: 'x',
-    },
-  ];
-  runtime.fallbacks = [
-    {
-      didRouteId: 'route-a',
-      tenantId: acme.id as string,
-      didE164: '+15105550100',
-      destinationType: 'EXTENSION',
-      destinationId: extension.id as string,
-      enabled: true,
-      updatedAt: 'x',
-    },
-    {
-      didRouteId: 'route-o',
-      tenantId: other.id as string,
-      didE164: '+15105550200',
-      destinationType: 'RING_GROUP',
-      destinationId: 'rg-1',
-      enabled: true,
-      updatedAt: 'x',
-    },
-  ];
-
   ctx = {
     app,
     deps,
@@ -473,66 +434,19 @@ describe('dependencies', () => {
   });
 });
 
-describe('provisioning history and retry', () => {
-  it('shows a tenant administrator only operations on their own records', async () => {
+describe('retired provisioning and fallback views', () => {
+  it('does not read retired ledgers or allow reprovisioning', async () => {
     const admin = await actor(20, false, ctx.acme.id);
-    const res = await admin.get('/runtime/provisioning');
-    expect(res.body.operations.map((o: { requestId: string }) => o.requestId)).toEqual(['r1']);
-    const root = await actor(1, true, null);
-    expect((await root.get('/runtime/provisioning')).body.operations).toHaveLength(2);
-    const staff = await actor(21, false, ctx.acme.id);
-    expect((await staff.get('/runtime/provisioning')).status).toBe(403);
-  });
-
-  it('retries with the idempotent update, never a create that would mint a secret', async () => {
-    const admin = await actor(20, false, ctx.acme.id);
-    const res = await admin.post('/runtime/provisioning/retry', {
-      kind: 'EXTENSION',
-      externalId: ctx.acme.extensionId,
-    });
-    expect(res.status).toBe(200);
-    expect(ctx.officePulse.updated).toEqual([
-      {
-        extensionId: ctx.acme.extensionId,
-        body: {
-          extensionNumber: '100',
-          context: 'acme',
-          displayName: 'Front Desk',
-          callerIdName: null,
-          callerIdNumber: null,
-          provisioningProfile: null,
-          enabled: true,
-        },
-      },
-    ]);
-    expect(ctx.officePulse.provisioned).toHaveLength(0);
-    expect(ctx.api.tableByName('audit_log')!.records.map((r) => r.action)).toEqual([
-      'runtime.reprovision',
-    ]);
-  });
-
-  it('will not retry another tenant record', async () => {
-    const otherAdmin = await actor(30, false, ctx.other.id);
-    const res = await otherAdmin.post('/runtime/provisioning/retry', {
-      kind: 'EXTENSION',
-      externalId: ctx.acme.extensionId,
-    });
-    expect(res.status).toBe(404);
-    expect(ctx.officePulse.updated).toHaveLength(0);
+    expect((await admin.get('/runtime/provisioning')).status).toBe(404);
+    expect((await admin.get('/runtime/fallbacks')).status).toBe(404);
+    expect(
+      (await admin.post('/runtime/provisioning/retry', { kind: 'EXTENSION', externalId: 'old' }))
+        .status,
+    ).toBe(404);
   });
 });
 
-describe('fallbacks and orphans', () => {
-  it('scopes DID fail-safes to the tenant', async () => {
-    const admin = await actor(20, false, ctx.acme.id);
-    const res = await admin.get('/runtime/fallbacks');
-    expect(res.body.fallbacks.map((f: { didRouteId: string }) => f.didRouteId)).toEqual([
-      'route-a',
-    ]);
-    const root = await actor(1, true, null);
-    expect((await root.get('/runtime/fallbacks?tenant=all')).body.fallbacks).toHaveLength(2);
-  });
-
+describe('orphans', () => {
   it('lists lost calls with whoever is still marked present, and offers no cleanup', async () => {
     const root = await actor(1, true, null);
     const res = await root.get('/runtime/orphans');

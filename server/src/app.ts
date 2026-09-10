@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import express, { type Express } from 'express';
 import { pinoHttp } from 'pino-http';
 import { adminRoutes } from './admin/routes.js';
+import { pbxRoutes } from './admin/pbx-routes.js';
 import { numberRoutes } from './admin/number-routes.js';
 import { configRoutes } from './admin/config-routes.js';
 import { sessionMiddleware } from './auth/middleware.js';
@@ -71,6 +72,7 @@ export function createApp(
   app.use(sessionRoutes(config, deps));
   app.use(tenantSelectionRoutes(logger, deps));
   app.use(runtimeRoutes(logger, deps));
+  app.use(pbxRoutes(logger, deps));
   app.use(adminRoutes(logger, deps));
   app.use(numberRoutes(deps));
   app.use(configRoutes(config, logger, deps));
@@ -78,7 +80,7 @@ export function createApp(
   // Validated appearance assets (uploaded logos).
   app.use('/assets', express.static(path.resolve(config.assetStorageDir)));
 
-  app.use('/api', (req, res) => {
+  app.use(['/api', '/admin'], (req, res) => {
     res.status(404).json({
       error: 'not_found',
       message: 'Unknown API route',

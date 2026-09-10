@@ -1,313 +1,236 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { adminApi, ApiError, type Extension, type TenantUser } from '../api/admin';
+import { adminApi, type Extension } from '../api/admin';
 import { OneTimeSecret } from '../components/OneTimeSecret';
+import {
+  applyStateLabel,
+  COMMITTED_NOTICE,
+  PbxDisabledNotice,
+  PbxErrorNotice,
+} from '../components/PbxNotice';
+import { usePbxInventory } from '../hooks/usePbxInventory';
 
-interface Secret {
-  title: string;
-  values: Array<{ label: string; value: string }>;
-}
-
-const EMPTY = {
-  extensionNumber: '',
-  displayName: '',
-  callerIdName: '',
-  callerIdNumber: '',
-  provisioningProfile: '',
-  identityUserId: '',
-  enabled: true,
-};
-
+const EMPTY = { extension: '', displayName: '', callerIdNumber: '', context: '' };
 export function ExtensionsScreen() {
   const { tenantId = '' } = useParams();
-  const [extensions, setExtensions] = useState<Extension[] | null>(null);
-  const [members, setMembers] = useState<TenantUser[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [secret, setSecret] = useState<Secret | null>(null);
+  return <TenantExtensions key={tenantId} tenantId={tenantId} />;
+}
+function TenantExtensions({ tenantId }: { tenantId: string }) {
+  const inventory = usePbxInventory(tenantId, adminApi.listExtensions);
   const [form, setForm] = useState(EMPTY);
-  const [editing, setEditing] = useState<Extension | null>(null);
+  const [open, setOpen] = useState(false);
+  const [secret, setSecret] = useState<{ username: string; secret: string } | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
-
-  const load = useCallback(() => {
-    // Settled rather than all: the tenant's people are a convenience for the
-    // owner picker, and failing to load them must not hide the extensions.
-    void Promise.allSettled([
-      adminApi.listExtensions(tenantId),
-      adminApi.listTenantUsers(tenantId),
-    ]).then(([e, u]) => {
-      if (e.status === 'fulfilled') setExtensions(e.value.extensions);
-      else setError(e.reason instanceof Error ? e.reason.message : 'Failed to load');
-      if (u.status === 'fulfilled') setMembers(u.value.users.filter((m) => m.enabled));
-    });
-  }, [tenantId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const startEdit = (extension: Extension) => {
-    setEditing(extension);
-    setFormOpen(true);
-    setError(null);
-    setStatus(null);
-    setForm({
-      extensionNumber: extension.extension_number,
-      displayName: extension.display_name,
-      callerIdName: extension.caller_id_name ?? '',
-      callerIdNumber: extension.caller_id_number ?? '',
-      provisioningProfile: extension.provisioning_profile ?? '',
-      identityUserId: extension.identity_user_id ? String(extension.identity_user_id) : '',
-      enabled: extension.enabled,
-    });
-  };
-
-  const cancelEdit = () => {
-    setEditing(null);
-    setFormOpen(false);
-    setForm(EMPTY);
-  };
-
+  const lock = useRef(false);
+  const managed = (extension: Extension) =>
+    !!extension.extension &&
+    extension.id === `${extension.extension}-t${inventory.data?.iTenantId}`;
+  const writable = inventory.data?.provisioningEnabled === true && !inventory.error;
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (lock.current || !writable || secret) return;
+    lock.current = true;
     setBusy(true);
     setError(null);
-    setStatus(null);
-    const input = {
-      tenantId,
-      identityUserId: form.identityUserId ? Number(form.identityUserId) : null,
-      extensionNumber: form.extensionNumber,
-      displayName: form.displayName,
-      callerIdName: form.callerIdName || null,
-      callerIdNumber: form.callerIdNumber || null,
-      provisioningProfile: form.provisioningProfile || null,
-      enabled: form.enabled,
-    };
+    setStatus('');
     try {
-      if (editing) {
-        await adminApi.updateExtension(editing.id, editing.revision, input);
-        setStatus(`Saved extension ${form.extensionNumber}`);
-      } else {
-        const res = await adminApi.createExtension(input);
-        if (res.sipSecret && res.sipUsername) {
-          setSecret({
-            title: 'SIP credentials for the new extension',
-            values: [
-              { label: 'SIP username', value: res.sipUsername },
-              { label: 'SIP secret', value: res.sipSecret },
-            ],
-          });
-        } else {
-          // Saved, but this deployment has no PBX wired up.
-          setStatus(res.message ?? 'Extension saved without PBX provisioning.');
-        }
-      }
-      cancelEdit();
-      load();
+      const result = await adminApi.createExtension(tenantId, {
+        extension: form.extension,
+        displayName: form.displayName,
+        ...(form.callerIdNumber ? { callerIdNumber: form.callerIdNumber } : {}),
+        ...(inventory.data!.contexts.length > 1 ? { context: form.context } : {}),
+      });
+      if (!inventory.current()) return;
+      // Credentials exist only in this disclosure lifecycle; dismiss/unmount destroys the state.
+      setSecret({ username: result.sipUsername, secret: result.sipSecret });
+      setStatus(result.applyState === 'active' ? 'Extension verified active.' : COMMITTED_NOTICE);
+      setForm(EMPTY);
+      setOpen(false);
+      await inventory.refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not save the extension');
+      if (inventory.current()) setError(err);
     } finally {
-      setBusy(false);
+      lock.current = false;
+      if (inventory.current()) setBusy(false);
     }
   };
-
-  /** One user answers an extension; one user may answer several. */
-  const personLabel = (identityUserId: number | null): string => {
-    if (!identityUserId) return '—';
-    const person = members.find((m) => m.identity_user_id === identityUserId);
-    return (
-      [person?.display_name, person?.email].filter(Boolean).join(' — ') || `#${identityUserId}`
-    );
-  };
-
-  const rotate = async (extension: Extension) => {
-    if (!window.confirm(`Rotate the SIP secret for ${extension.extension_number}?`)) return;
+  const remove = async (extension: Extension) => {
+    if (
+      lock.current ||
+      !writable ||
+      !extension.extension ||
+      !managed(extension) ||
+      !window.confirm(
+        `Delete extension ${extension.extension} (${extension.callerId ?? extension.id})? Saved queue memberships will also be removed.`,
+      )
+    )
+      return;
+    lock.current = true;
+    setBusy(true);
     setError(null);
+    setStatus('');
     try {
-      const res = await adminApi.rotateSecret(extension.id, tenantId, false);
-      setSecret({
-        title: `New SIP secret for ${extension.extension_number}`,
-        values: [{ label: 'SIP secret', value: res.sipSecret }],
-      });
+      await adminApi.deleteExtension(tenantId, extension.extension);
+      if (!inventory.current()) return;
+      setStatus(
+        `Extension ${extension.extension} deletion committed. Effective Asterisk state has not been verified active.`,
+      );
+      await inventory.refresh();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Rotation failed');
+      if (inventory.current()) setError(err);
+    } finally {
+      lock.current = false;
+      if (inventory.current()) setBusy(false);
     }
   };
-
-  const enroll = async (extension: Extension) => {
-    setError(null);
-    try {
-      const res = await adminApi.issueEnrollment(extension.id, tenantId);
-      setSecret({
-        title: `Handset enrollment for ${extension.extension_number}`,
-        values: [
-          { label: 'Enrollment token', value: res.enrollmentToken },
-          { label: 'Expires', value: res.expiresAt },
-        ],
-      });
-      load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Enrollment failed');
-    }
-  };
-
   return (
     <section aria-labelledby="extensions-heading">
       <p>
         <Link to="/">← Dashboard</Link>
       </p>
       <h1 id="extensions-heading">Extensions</h1>
-      {error ? <p role="alert">{error}</p> : null}
-      {status ? <p role="status">{status}</p> : null}
-      {secret ? (
+      <p>
+        Native OfficePulse extensions. Inventory alone does not verify effective Asterisk state.
+      </p>
+      <PbxErrorNotice error={error || inventory.error} />
+      {status && <p role="status">{status}</p>}
+      {inventory.data && !inventory.data.provisioningEnabled && <PbxDisabledNotice />}
+      {secret && (
         <OneTimeSecret
-          title={secret.title}
-          values={secret.values}
+          title="SIP credentials for the new extension"
+          values={[
+            { label: 'SIP username', value: secret.username },
+            { label: 'SIP secret', value: secret.secret },
+          ]}
           onDismiss={() => setSecret(null)}
         />
-      ) : null}
-
-      {extensions === null ? (
-        <p role="status">Loading…</p>
-      ) : extensions.length === 0 ? (
-        <p>No extensions yet.</p>
-      ) : (
-        <table>
-          <caption className="visually-hidden">Extensions for this tenant</caption>
-          <thead>
-            <tr>
-              <th scope="col">Number</th>
-              <th scope="col">Name</th>
-              <th scope="col">User</th>
-              <th scope="col">Enabled</th>
-              <th scope="col">Handset MAC</th>
-              <th scope="col">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {extensions.map((extension) => (
-              <tr key={extension.id}>
-                <td>{extension.extension_number}</td>
-                <td>{extension.display_name}</td>
-                <td>{personLabel(extension.identity_user_id)}</td>
-                <td>{extension.enabled ? 'Yes' : 'No'}</td>
-                <td>{extension.provisioning_mac ?? '—'}</td>
-                <td>
-                  <button type="button" onClick={() => startEdit(extension)}>
-                    Edit
-                  </button>{' '}
-                  <button type="button" onClick={() => void rotate(extension)}>
-                    Rotate SIP secret
-                  </button>{' '}
-                  <button type="button" onClick={() => void enroll(extension)}>
-                    Issue handset enrollment
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       )}
-
-      <details
-        className="record-editor"
-        open={formOpen}
-        onToggle={(e) => setFormOpen(e.currentTarget.open)}
+      {inventory.loading && <p role="status">Loading extensions…</p>}
+      {inventory.data &&
+        (inventory.data.extensions.length === 0 ? (
+          <p>No native extensions yet.</p>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <caption className="visually-hidden">Extensions for this tenant</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Extension</th>
+                  <th scope="col">Display / caller ID</th>
+                  <th scope="col">Context</th>
+                  <th scope="col">Apply state</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inventory.data.extensions.map((ext) => (
+                  <tr key={ext.id}>
+                    <td>{ext.extension ?? ext.id}</td>
+                    <td>{ext.callerId ?? '—'}</td>
+                    <td>{ext.context}</td>
+                    <td>{applyStateLabel(ext.applyState)}</td>
+                    <td>
+                      {managed(ext) ? (
+                        <button
+                          type="button"
+                          disabled={busy || !writable}
+                          onClick={() => void remove(ext)}
+                          aria-label={`Delete extension ${ext.extension}`}
+                        >
+                          Delete
+                        </button>
+                      ) : (
+                        'Operator managed'
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      <button
+        type="button"
+        disabled={busy || inventory.loading}
+        onClick={() => void inventory.refresh()}
       >
-        <summary>{editing ? 'Edit record' : 'Add Extension…'}</summary>
-        <h2 id="extension-form-heading">
-          {editing ? `Edit extension ${editing.extension_number}` : 'New extension'}
-        </h2>
-        <form aria-labelledby="extension-form-heading" onSubmit={(e) => void submit(e)}>
-          <label>
-            Extension number
-            <input
-              required
-              value={form.extensionNumber}
-              onChange={(e) => setForm({ ...form, extensionNumber: e.target.value })}
-            />
-          </label>
-          <label>
-            Display name
-            <input
-              required
-              value={form.displayName}
-              onChange={(e) => setForm({ ...form, displayName: e.target.value })}
-            />
-          </label>
-          <label>
-            User
-            <select
-              value={form.identityUserId}
-              onChange={(e) => {
-                const identityUserId = e.target.value;
-                const person = members.find((m) => String(m.identity_user_id) === identityUserId);
-                // Filling an empty display name from the person is a
-                // convenience only; an explicit one is never overwritten.
-                setForm((current) => ({
-                  ...current,
-                  identityUserId,
-                  displayName: current.displayName || (person?.display_name ?? current.displayName),
-                }));
-              }}
-            >
-              <option value="">Nobody yet</option>
-              {members.map((member) => (
-                <option key={member.id} value={String(member.identity_user_id)}>
-                  {[member.display_name, member.email].filter(Boolean).join(' — ') ||
-                    `User ${member.identity_user_id}`}
-                </option>
-              ))}
-            </select>
-          </label>
-          {members.length === 0 ? (
-            <p>
-              No users are mapped to this tenant yet — add one on the{' '}
-              <Link to={`/tenants/${tenantId}/users`}>tenant users</Link> page to assign this
-              extension to a person.
-            </p>
-          ) : null}
-          <label>
-            Caller ID name
-            <input
-              value={form.callerIdName}
-              onChange={(e) => setForm({ ...form, callerIdName: e.target.value })}
-            />
-          </label>
-          <label>
-            Provisioning profile
-            <input
-              value={form.provisioningProfile}
-              onChange={(e) => setForm({ ...form, provisioningProfile: e.target.value })}
-            />
-          </label>
-          <label>
-            Caller ID number
-            <input
-              type="tel"
-              value={form.callerIdNumber}
-              onChange={(e) => setForm({ ...form, callerIdNumber: e.target.value })}
-            />
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={form.enabled}
-              onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
-            />
-            Enabled
-          </label>
-          <button type="submit" disabled={busy}>
-            {busy ? 'Saving…' : editing ? 'Save extension' : 'Save record'}
-          </button>
-          {editing ? (
-            <button type="button" onClick={cancelEdit}>
-              Cancel edit
-            </button>
-          ) : null}
-        </form>
-      </details>
+        Refresh inventory
+      </button>{' '}
+      <button type="button" disabled={!writable || busy || !!secret} onClick={() => setOpen(true)}>
+        Create extension
+      </button>
+      {open && (
+        <div className="record-editor">
+          <h2>Create extension</h2>
+          <form onSubmit={(event) => void submit(event)}>
+            <fieldset disabled={busy || !writable}>
+              <legend>Extension details</legend>
+              <label>
+                Extension number
+                <input
+                  required
+                  inputMode="numeric"
+                  pattern="[0-9]{2,12}"
+                  minLength={2}
+                  maxLength={12}
+                  value={form.extension}
+                  onChange={(event) => setForm({ ...form, extension: event.target.value })}
+                />
+              </label>
+              <label>
+                Display name
+                <input
+                  required
+                  maxLength={60}
+                  value={form.displayName}
+                  onChange={(event) => setForm({ ...form, displayName: event.target.value })}
+                />
+              </label>
+              <label>
+                Caller-ID number (optional E.164)
+                <input
+                  type="tel"
+                  pattern="\+[1-9][0-9]{6,14}"
+                  value={form.callerIdNumber}
+                  onChange={(event) => setForm({ ...form, callerIdNumber: event.target.value })}
+                />
+              </label>
+              {(inventory.data?.contexts.length ?? 0) > 1 && (
+                <label>
+                  Context
+                  <select
+                    required
+                    value={form.context}
+                    onChange={(event) => setForm({ ...form, context: event.target.value })}
+                  >
+                    <option value="">Choose an approved context…</option>
+                    {inventory.data!.contexts.map((context) => (
+                      <option key={context}>{context}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </fieldset>
+            <div className="form-actions">
+              <button type="submit" disabled={busy || !writable}>
+                {busy ? 'Creating…' : 'Create extension and show credentials'}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setOpen(false);
+                  setForm(EMPTY);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }

@@ -4,6 +4,7 @@ export interface ApiFailure {
   status: number;
   error?: string;
   message?: string;
+  correlationId?: string;
 }
 
 export class ApiError extends Error {
@@ -32,6 +33,10 @@ async function call<T>(path: string, method: string, body?: unknown): Promise<T>
       status: res.status,
       error: typeof parsed.error === 'string' ? parsed.error : undefined,
       message: typeof parsed.message === 'string' ? parsed.message : undefined,
+      correlationId:
+        typeof parsed.correlationId === 'string'
+          ? parsed.correlationId
+          : (res.headers.get('x-correlation-id') ?? undefined),
     });
   }
   return parsed as T;
@@ -68,31 +73,50 @@ export interface DirectoryUser {
   lastLoginAt?: string | null;
 }
 
+export type ApplyState = 'committed' | 'active' | 'unknown';
 export interface Extension {
   id: string;
-  extension_number: string;
-  display_name: string;
-  identity_user_id: number | null;
-  caller_id_name: string | null;
-  caller_id_number: string | null;
-  provisioning_profile?: string | null;
-  provisioning_mac: string | null;
-  device_credential_version: number;
-  enabled: boolean;
-  revision: number;
+  extension: string | null;
+  context: string;
+  callerId: string | null;
+  transport?: string | null;
+  aors?: string | null;
+  applyState: ApplyState;
 }
-
-export interface RingGroup {
+export interface QueueMember {
+  interface: string;
+  memberName: string | null;
+  penalty: number;
+  paused: boolean;
+}
+export const QUEUE_STRATEGIES = [
+  'ringall',
+  'leastrecent',
+  'fewestcalls',
+  'random',
+  'rrmemory',
+  'linear',
+  'wrandom',
+] as const;
+export type QueueStrategy = (typeof QUEUE_STRATEGIES)[number];
+export interface NativeQueue {
   id: string;
   name: string;
-  virtual_extension: string;
-  ring_timeout_seconds: number;
-  music_on_hold_class?: string | null;
-  caller_id_name?: string | null;
-  caller_id_number?: string | null;
-  enabled: boolean;
-  revision: number;
-  members: Array<{ extension_id: string }>;
+  strategy: string | null;
+  members: QueueMember[];
+  applyState: ApplyState;
+}
+export interface NativeInventory {
+  source: 'asterisk';
+  iTenantId: number;
+  provisioningEnabled: boolean;
+}
+export interface ExtensionInventory extends NativeInventory {
+  extensions: Extension[];
+  contexts: string[];
+}
+export interface QueueInventory extends NativeInventory {
+  queues: NativeQueue[];
 }
 
 export interface TenantInput {
@@ -116,17 +140,37 @@ export interface AssistantProfile {
   revision: number;
 }
 
-export interface DidRoute {
-  id: string;
-  did_e164: string;
-  assistant_profile_id: string;
-  destination_type: 'EXTENSION' | 'RING_GROUP';
-  destination_extension_id: string | null;
-  destination_ring_group_id: string | null;
-  screening_enabled: boolean;
-  enabled: boolean;
-  revision: number;
-  fallbackPreview: string;
+export interface DidSchedule {
+  timeRange: string;
+  weekdays: string;
+  timezone: string;
+}
+export interface DidSettings {
+  queue: string;
+  ringsBeforeAi: number;
+  schedule?: DidSchedule;
+  livekitDestination?: string;
+}
+export type DidRoute =
+  | {
+      did: string;
+      managed: true;
+      queue: string;
+      ringsBeforeAi: number;
+      schedule?: DidSchedule;
+      livekitDestination: string;
+      ringTimeoutSeconds: number;
+      applyState: ApplyState;
+    }
+  | {
+      did: string;
+      managed: false;
+      availability: 'unconfigured' | 'manual' | 'unknown';
+      applyState: 'unknown';
+    };
+export interface DidInventory extends NativeInventory {
+  dids: DidRoute[];
+  numbers: TenantNumber[];
 }
 
 export interface Appearance {
@@ -138,37 +182,15 @@ export interface Appearance {
 }
 
 export interface ExtensionInput {
-  tenantId: string;
-  /** The one platform user who answers this extension, if any. */
-  identityUserId?: number | null;
-  extensionNumber: string;
+  extension: string;
   displayName: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  provisioningProfile?: string | null;
-  enabled: boolean;
+  callerIdNumber?: string;
+  context?: string;
 }
-
-export interface RingGroupInput {
-  tenantId: string;
-  name: string;
-  virtualExtension: string;
-  ringTimeoutSeconds: number;
-  memberExtensionIds: string[];
-  musicOnHoldClass?: string | null;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  enabled: boolean;
-}
-
-export interface DidRouteInput {
-  tenantId: string;
-  didE164: string;
-  assistantProfileId: string;
-  destinationType: 'EXTENSION' | 'RING_GROUP';
-  destinationId: string;
-  screeningEnabled: boolean;
-  enabled: boolean;
+export interface MemberInput {
+  penalty: number;
+  paused: boolean;
+  context?: string;
 }
 
 export interface ProfileInput {
@@ -253,41 +275,42 @@ export const adminApi = {
     }),
 
   listExtensions: (tenantId: string) =>
-    call<{ extensions: Extension[] }>(`/admin/tenants/${tenantId}/extensions`, 'GET'),
-  createExtension: (input: ExtensionInput) =>
-    call<{
-      extension: Extension;
-      sipUsername?: string;
-      sipSecret?: string;
-      provisioning?: string;
-      message?: string;
-    }>('/admin/extensions', 'POST', input),
-  updateExtension: (extensionId: string, expectedRevision: number, input: ExtensionInput) =>
-    call<{ extension: Extension }>(`/admin/extensions/${extensionId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
-  rotateSecret: (extensionId: string, tenantId: string, reprovisionDevice: boolean) =>
-    call<{ sipSecret: string }>(`/admin/extensions/${extensionId}/rotate-secret`, 'POST', {
-      tenantId,
-      reprovisionDevice,
-    }),
-  issueEnrollment: (extensionId: string, tenantId: string) =>
-    call<{ enrollmentToken: string; expiresAt: string }>(
-      `/admin/extensions/${extensionId}/handset-enrollment`,
+    call<ExtensionInventory>(`/admin/tenants/${encodeURIComponent(tenantId)}/extensions`, 'GET'),
+  createExtension: (tenantId: string, input: ExtensionInput) =>
+    call<{ extension: string; sipUsername: string; sipSecret: string; applyState: ApplyState }>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/extensions`,
       'POST',
-      { tenantId },
+      input,
     ),
-
-  listRingGroups: (tenantId: string) =>
-    call<{ ringGroups: RingGroup[] }>(`/admin/tenants/${tenantId}/ring-groups`, 'GET'),
-  createRingGroup: (input: RingGroupInput) =>
-    call<{ ringGroup: RingGroup }>('/admin/ring-groups', 'POST', input),
-  updateRingGroup: (ringGroupId: string, expectedRevision: number, input: RingGroupInput) =>
-    call<{ ringGroup: RingGroup }>(`/admin/ring-groups/${ringGroupId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
+  deleteExtension: (tenantId: string, extension: string) =>
+    call<void>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/extensions/${encodeURIComponent(extension)}`,
+      'DELETE',
+    ),
+  listQueues: (tenantId: string) =>
+    call<QueueInventory>(`/admin/tenants/${encodeURIComponent(tenantId)}/queues`, 'GET'),
+  createQueue: (tenantId: string, input: { name: string; strategy: QueueStrategy }) =>
+    call<{ name: string; strategy: QueueStrategy; applyState: ApplyState }>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/queues`,
+      'POST',
+      input,
+    ),
+  deleteQueue: (tenantId: string, queue: string) =>
+    call<void>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/queues/${encodeURIComponent(queue)}`,
+      'DELETE',
+    ),
+  setQueueMember: (tenantId: string, queue: string, extension: string, input: MemberInput) =>
+    call<{ applyState: ApplyState }>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/queues/${encodeURIComponent(queue)}/members/${encodeURIComponent(extension)}`,
+      'PUT',
+      input,
+    ),
+  deleteQueueMember: (tenantId: string, queue: string, extension: string) =>
+    call<void>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/queues/${encodeURIComponent(queue)}/members/${encodeURIComponent(extension)}`,
+      'DELETE',
+    ),
 
   listProfiles: (tenantId: string) =>
     call<{ profiles: AssistantProfile[] }>(`/admin/tenants/${tenantId}/profiles`, 'GET'),
@@ -300,14 +323,18 @@ export const adminApi = {
     }),
 
   listDidRoutes: (tenantId: string) =>
-    call<{ didRoutes: DidRoute[] }>(`/admin/tenants/${tenantId}/did-routes`, 'GET'),
-  createDidRoute: (input: DidRouteInput) =>
-    call<{ didRoute: DidRoute }>('/admin/did-routes', 'POST', input),
-  updateDidRoute: (didRouteId: string, expectedRevision: number, input: DidRouteInput) =>
-    call<{ didRoute: DidRoute }>(`/admin/did-routes/${didRouteId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
+    call<DidInventory>(`/admin/tenants/${encodeURIComponent(tenantId)}/did-routes`, 'GET'),
+  saveDidRoute: (tenantId: string, did: string, input: DidSettings) =>
+    call<{ did: string; ringTimeoutSeconds: number; applyState: ApplyState }>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/did-routes/${encodeURIComponent(did)}`,
+      'PUT',
+      input,
+    ),
+  deleteDidRoute: (tenantId: string, did: string) =>
+    call<void>(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/did-routes/${encodeURIComponent(did)}`,
+      'DELETE',
+    ),
 
   getAppearance: (tenantId: string) =>
     call<{ appearance: Appearance | null }>(`/admin/tenants/${tenantId}/appearance`, 'GET'),

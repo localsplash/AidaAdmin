@@ -22,7 +22,7 @@ import { MemoryIdentityEventStore, type IdentityEventStore } from './id/event-st
 import { HttpNocoDbApi } from './nocodb/api.js';
 import { CachedBaseResolver, resolveBaseId } from './nocodb/base.js';
 import { reportDrift } from './nocodb/schema.js';
-import { createRepos, NocoStore, type AidaConfigRepos } from './nocodb/repos.js';
+import { createRepos, NocoStore, type AidaConfigRepos, type AuditLog } from './nocodb/repos.js';
 import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
 import { MysqlRuntimeReader, parseMysqlUrl, type RuntimeReader } from './officepulse/runtime-db.js';
 import {
@@ -31,6 +31,8 @@ import {
 } from './provisioning/handset-delivery.js';
 
 export interface AppDeps {
+  /** PBX auditing does not require a NocoDB configuration base. */
+  audit?: AuditLog | null;
   idClient: IdClient | null;
   sessionStore: SessionRepository;
   stateStore: AuthStateRepository;
@@ -91,6 +93,7 @@ export function createDeps(config: AppConfig): AppDeps {
   const memoryDb = new MemoryAuthDb();
   return {
     idClient,
+    audit: pool ? new MysqlAuditLog(pool) : null,
     // Memory sessions exist only in credential-free tests; configuring Identity
     // always selects centralized sessions, regardless of the local SQL store.
     sessionStore: idClient

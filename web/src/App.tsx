@@ -14,7 +14,7 @@ import { OperationsScreen } from './screens/OperationsScreen';
 import { DidRoutesScreen } from './screens/DidRoutesScreen';
 import { ExtensionsScreen } from './screens/ExtensionsScreen';
 import { ProfilesScreen } from './screens/ProfilesScreen';
-import { RingGroupsScreen } from './screens/RingGroupsScreen';
+import { QueuesScreen } from './screens/QueuesScreen';
 import { RuntimeScreen } from './screens/RuntimeScreen';
 import { CallDetailScreen } from './screens/CallDetailScreen';
 import { TenantsScreen } from './screens/TenantsScreen';
@@ -25,7 +25,7 @@ const TENANT_SCREENS = [
   { path: 'users', label: 'Users' },
   { path: 'numbers', label: 'Numbers' },
   { path: 'extensions', label: 'Extensions' },
-  { path: 'ring-groups', label: 'Ring groups' },
+  { path: 'queues', label: 'Queues' },
   { path: 'profiles', label: 'Profiles' },
   { path: 'did-routes', label: 'DID routes' },
   { path: 'appearance', label: 'Appearance' },
@@ -151,10 +151,10 @@ function AuthenticatedShell({
             }
           />
           <Route
-            path="/tenants/:tenantId/ring-groups"
+            path="/tenants/:tenantId/queues"
             element={
               <TenantPage session={session} onChanged={onSessionChanged}>
-                <RingGroupsScreen />
+                <QueuesScreen />
               </TenantPage>
             }
           />

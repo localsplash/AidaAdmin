@@ -18,6 +18,11 @@ export default defineConfig({
   },
   webServer: [
     {
+      command: 'node --import tsx e2e/native-server.ts',
+      url: 'http://127.0.0.1:3102/healthz',
+      reuseExistingServer: false,
+    },
+    {
       command: 'node server/dist/index.js',
       env: { NODE_ENV: 'test', PORT: '3100', LOG_LEVEL: 'warn' },
       url: 'http://localhost:3100/healthz',

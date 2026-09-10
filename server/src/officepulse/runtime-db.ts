@@ -76,30 +76,11 @@ export interface RuntimeWebhookDelivery {
   receivedAt: string;
 }
 
-export interface RuntimeProvisioningOperation {
-  requestId: string;
-  kind: string;
-  externalId: string;
-  action: string;
-  status: string;
-  createdAt: string;
-}
-
 export interface RuntimeDependencyStatus {
   name: string;
   ready: boolean;
   detail: string | null;
   changedAt: string;
-}
-
-export interface RuntimeDidFallback {
-  didRouteId: string;
-  tenantId: string;
-  didE164: string;
-  destinationType: DestinationType;
-  destinationId: string;
-  enabled: boolean;
-  updatedAt: string;
 }
 
 /**
@@ -124,9 +105,7 @@ export interface RuntimeReader {
   listControlCommands(callSessionId: string): Promise<RuntimeControlCommand[]>;
   listParticipants(callSessionId: string): Promise<RuntimeParticipant[]>;
   listWebhookDeliveries(limit?: number): Promise<RuntimeWebhookDelivery[]>;
-  listProvisioningOperations(limit?: number): Promise<RuntimeProvisioningOperation[]>;
   listDependencyStatus(): Promise<RuntimeDependencyStatus[]>;
-  listDidFallbacks(tenantId?: string): Promise<RuntimeDidFallback[]>;
   /** Failed control commands across calls, newest first, for the issues view. */
   listFailedCommands(
     sinceHours: number,
@@ -378,21 +357,6 @@ export class MysqlRuntimeReader implements RuntimeReader {
     }));
   }
 
-  async listProvisioningOperations(limit?: number): Promise<RuntimeProvisioningOperation[]> {
-    const rows = await this.select(
-      'SELECT request_id, kind, external_id, action, status, created_at FROM provisioning_operation ' +
-        `ORDER BY created_at DESC LIMIT ${clampInt(limit, 100, 500)}`,
-    );
-    return rows.map((row) => ({
-      requestId: String(row.request_id),
-      kind: String(row.kind),
-      externalId: String(row.external_id),
-      action: String(row.action),
-      status: String(row.status),
-      createdAt: iso(row.created_at),
-    }));
-  }
-
   async listDependencyStatus(): Promise<RuntimeDependencyStatus[]> {
     const rows = await this.select(
       'SELECT name, ready, detail, changed_at FROM dependency_status ORDER BY name',
@@ -402,29 +366,6 @@ export class MysqlRuntimeReader implements RuntimeReader {
       ready: Number(row.ready) === 1,
       detail: (row.detail as string | null) ?? null,
       changedAt: iso(row.changed_at),
-    }));
-  }
-
-  async listDidFallbacks(tenantId?: string): Promise<RuntimeDidFallback[]> {
-    const params: Param[] = [];
-    let clause = '';
-    if (tenantId !== undefined) {
-      clause = 'WHERE tenant_id = ?';
-      params.push(tenantId);
-    }
-    const rows = await this.select(
-      'SELECT did_route_id, tenant_id, did_e164, destination_type, destination_id, enabled, updated_at ' +
-        `FROM did_fallback ${clause} ORDER BY did_e164`,
-      params,
-    );
-    return rows.map((row) => ({
-      didRouteId: String(row.did_route_id),
-      tenantId: String(row.tenant_id),
-      didE164: String(row.did_e164),
-      destinationType: String(row.destination_type) as DestinationType,
-      destinationId: String(row.destination_id),
-      enabled: Number(row.enabled) === 1,
-      updatedAt: iso(row.updated_at),
     }));
   }
 

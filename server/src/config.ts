@@ -52,6 +52,7 @@ export const SERVICE_ENV_VARS = [
   'ID_PARENT_DOMAIN',
   'NOCODB_BASE_URL',
   'NOCODB_API_TOKEN',
+  'OFFICEPULSE_API_BASE_URL',
   'OFFICEPULSE_PROVISIONING_BASE_URL',
   'OFFICEPULSE_RUNTIME_DATABASE_URL',
   'HANDSET_PROVISIONING_URL',
@@ -101,12 +102,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const serviceConfig: Partial<Record<ServiceEnvVar, string>> = {};
   const missingServiceConfig: ServiceEnvVar[] = [];
   for (const name of SERVICE_ENV_VARS) {
-    const value = env[name];
+    const value =
+      name === 'OFFICEPULSE_PROVISIONING_BASE_URL'
+        ? env.OFFICEPULSE_API_BASE_URL?.trim() || env[name]
+        : env[name];
     if (value === undefined || value.trim() === '') {
       if (
         name !== 'ID_CLIENT_SECRET' &&
         name !== 'ID_PUBLIC_BASE_URL' &&
-        name !== 'HANDSET_PROVISIONING_URL'
+        name !== 'HANDSET_PROVISIONING_URL' &&
+        name !== 'OFFICEPULSE_API_BASE_URL'
       )
         missingServiceConfig.push(name);
     } else {

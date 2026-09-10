@@ -82,10 +82,10 @@ describe('central authorization with PlatformConfig voice profiles', () => {
     const list = () => request(app).get('/admin/tenants').set('Cookie', cookie);
     expect((await list()).status).toBe(403);
     const denied = await request(app)
-      .post('/admin/extensions')
+      .post('/admin/tenants/22/extensions')
       .set('Cookie', cookie)
       .set('x-csrf-token', 'csrf-token')
-      .send({ tenantId: '22', extensionNumber: '100', displayName: 'Forbidden' });
+      .send({ extension: '100', displayName: 'Forbidden' });
     expect(denied.status).toBe(403);
     expect(noco.tableByName('aida_tbl_Extension')!.records).toHaveLength(0);
     superAdmin = true;

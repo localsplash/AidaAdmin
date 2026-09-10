@@ -23,7 +23,12 @@ describe('loadConfig', () => {
     expect(config.missingServiceConfig).toEqual(
       SERVICE_ENV_VARS.filter(
         (name) =>
-          !['ID_CLIENT_SECRET', 'ID_PUBLIC_BASE_URL', 'HANDSET_PROVISIONING_URL'].includes(name),
+          ![
+            'ID_CLIENT_SECRET',
+            'ID_PUBLIC_BASE_URL',
+            'HANDSET_PROVISIONING_URL',
+            'OFFICEPULSE_API_BASE_URL',
+          ].includes(name),
       ),
     );
   });
@@ -90,4 +95,14 @@ describe('loadConfig', () => {
     env.ID_TRUSTED_PROXY_CIDRS = ' , ';
     expect(() => loadConfig(env)).toThrowError(/ID_TRUSTED_PROXY_CIDRS/);
   });
+});
+
+it('accepts canonical OfficePulse URL while preserving the existing server-only setting', () => {
+  expect(
+    loadConfig({
+      NODE_ENV: 'test',
+      OFFICEPULSE_API_BASE_URL: 'https://pbx.test',
+      OFFICEPULSE_PROVISIONING_BASE_URL: 'https://old.test',
+    }).serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL,
+  ).toBe('https://pbx.test');
 });

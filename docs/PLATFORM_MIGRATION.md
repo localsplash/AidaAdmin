@@ -1,7 +1,7 @@
 # Platform consolidation cutover
 
 This change requires the companion Identity platform-session/directory API and
-OfficePulse platform tenant/config/device API changes. Deploy those before
+OfficePulse native PBX API changes. Deploy those before
 switching AidaAdmin. It does not alter an existing Echo service or database.
 
 ## Identity contracts
@@ -32,11 +32,11 @@ A legacy UUID is never interpreted as a platform tenant ID.
 | `tenant` master fields  | Identity business; no local name/slug/enabled authority |
 | Tenant voice fields     | `aida_tbl_TenantProfile`                                |
 | `tenant_user`           | Identity membership API                                 |
-| `extension`             | `aida_tbl_Extension`                                    |
-| `ring_group`            | `aida_tbl_RingGroup`                                    |
-| `ring_group_member`     | `aida_tbl_RingGroupMember`                              |
+| `extension`             | Native OfficePulse; legacy `aida_tbl_Extension` archive |
+| `ring_group`            | Native queues; legacy `aida_tbl_RingGroup` archive      |
+| `ring_group_member`     | Native queue members; legacy table archive              |
 | `assistant_profile`     | `aida_tbl_AssistantProfile`                             |
-| `did_route`             | `aida_tbl_DidRoute`                                     |
+| `did_route`             | Native managed DID; legacy `aida_tbl_DidRoute` archive  |
 | `configuration_source`  | `aida_tbl_ConfigurationSource`                          |
 | `appearance`            | `aida_tbl_Appearance`                                   |
 | `audit_log`             | MySQL `admin_tbl_Audit`                                 |
@@ -57,8 +57,9 @@ reviewed importer; this PR does not silently discard or automatically import
 unknown remote data. No source table/base/database is renamed or deleted.
 
 The legacy enrollment hash fields remain available for explicit migration
-inspection, but Admin no longer issues or consumes them. Fresh device grants
-are owned by OfficePulse. Do not copy old bearer grants into new authority.
+inspection, but Admin no longer issues or consumes them. Native handset enrollment is outside this release. Do not copy old bearer
+grants into new authority. Legacy native tables are for reviewed export only;
+follow [native PBX cleanup and rollback](NATIVE_PBX_ADMINISTRATION.md).
 
 ## Admin MySQL
 
@@ -84,8 +85,8 @@ blindly fed into old local tenant tables.
 Verify one SUPER_ADMIN and two distinct business memberships, immediate access
 removal after disable/revoke, tenant selection after Admin restart, and denial
 of cross-business extension/call operations. Configure existing and new tenants,
-then exercise actual OfficePulse provisioning, handset grant redemption, live
-transcription and takeover. Inspect upstream failure/retry states separately
-from the saved configuration. Confirm Echo sign-in and messaging with the
+then exercise native extension/queue/DID administration and its external call
+acceptance. Inspect committed versus verified active state separately. Handset
+enrollment and legacy reprovision/retry are outside this release. Confirm Echo sign-in and messaging with the
 companion Identity change. Back up and restore platform, configuration and
 runtime stores before retiring legacy copies.

@@ -1,80 +1,7 @@
-/**
- * OfficePulseAidaIntegration's private-LAN HTTP API (its issue #9): the
- * provisioning routes AidaAdmin has always used, plus the call-control and
- * readiness routes that AidaControl used to front. Only AidaAdmin's server
- * calls it, from an address inside OfficePulse's TRUSTED_SERVER_CIDRS.
- *
- * OfficePulse generates SIP secrets, stores them solely in Asterisk's
- * ps_auths, and returns a new secret exactly once — AidaAdmin never persists
- * it, and a replayed create or rotation is answered "already applied", never
- * with the existing secret.
- */
-
+/** Server-only client for the canonical native PBX and call-control API. */
+import { z } from 'zod';
+import * as pbx from './pbx-contract.js';
 const UPSTREAM_TIMEOUT_MS = 10_000;
-
-export interface ProvisionExtensionRequest {
-  requestId: string;
-  tenantId: string;
-  extensionId: string;
-  extensionNumber: string;
-  context: string;
-  displayName: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  provisioningProfile?: string | null;
-}
-
-export interface ProvisionExtensionResult {
-  status?: 'created' | 'already-applied';
-  sipUsername: string;
-  /** Returned once; displayed once; never stored. Absent on a replay. */
-  sipSecret?: string;
-  provisioningResult?: unknown;
-}
-
-export interface UpdateExtensionRequest {
-  extensionNumber: string;
-  context: string;
-  displayName: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  provisioningProfile?: string | null;
-  enabled: boolean;
-}
-
-export interface RotateSecretResult {
-  status?: 'rotated' | 'already-applied';
-  /** Absent on a replay: recovering a lost response needs a new rotation. */
-  sipSecret?: string;
-  provisioningResult?: unknown;
-}
-
-export interface ProvisionRingGroupRequest {
-  tenantId: string;
-  virtualExtension: string;
-  context: string;
-  memberExtensions: string[];
-  ringTimeoutSeconds: number;
-  musicOnHoldClass?: string | null;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  enabled: boolean;
-}
-
-/**
- * The fail-safe fields (tenantId, destinationType, destinationId) are what
- * OfficePulse projects into `did_fallback`: without them a DID has no
- * destination of its own when NocoDB or LiveKit is unavailable.
- */
-export interface ProvisionDidRequest {
-  didE164: string;
-  context: string;
-  fastAgiPath: '/bootstrap';
-  enabled: boolean;
-  tenantId: string;
-  destinationType: 'EXTENSION' | 'RING_GROUP';
-  destinationId: string;
-}
 
 /** The one staff command OfficePulse acts on; DRAIN_ACK is the agent's. */
 export interface CallCommandRequest {
@@ -109,19 +36,41 @@ export interface OfficePulseReadiness {
 }
 
 export interface OfficePulseClient {
-  issueDeviceEnrollment?(
+  listExtensions(iTenantId: number, correlationId: string): Promise<pbx.ExtensionInventory>;
+  createExtension(
     iTenantId: number,
-    extensionId: string,
-  ): Promise<{ enrollmentToken: string; expiresIn: number }>;
-  provisionExtension(req: ProvisionExtensionRequest): Promise<ProvisionExtensionResult>;
-  updateProvisionedExtension(extensionId: string, req: UpdateExtensionRequest): Promise<void>;
-  rotateProvisionedExtensionSecret(
-    extensionId: string,
-    requestId: string,
-    reprovisionDevice: boolean,
-  ): Promise<RotateSecretResult>;
-  provisionRingGroup(ringGroupId: string, req: ProvisionRingGroupRequest): Promise<void>;
-  provisionDid(didRouteId: string, req: ProvisionDidRequest): Promise<void>;
+    input: pbx.CreateExtension,
+    correlationId: string,
+  ): Promise<pbx.ExtensionCreated>;
+  deleteExtension(iTenantId: number, extension: string, correlationId: string): Promise<void>;
+  listQueues(iTenantId: number, correlationId: string): Promise<pbx.QueueInventory>;
+  createQueue(
+    iTenantId: number,
+    input: pbx.CreateQueue,
+    correlationId: string,
+  ): Promise<pbx.QueueCreated>;
+  deleteQueue(iTenantId: number, queue: string, correlationId: string): Promise<void>;
+  putQueueMember(
+    iTenantId: number,
+    queue: string,
+    extension: string,
+    input: pbx.QueueMemberInput,
+    correlationId: string,
+  ): Promise<pbx.MemberSaved>;
+  deleteQueueMember(
+    iTenantId: number,
+    queue: string,
+    extension: string,
+    correlationId: string,
+  ): Promise<void>;
+  listDids(iTenantId: number, correlationId: string): Promise<pbx.DidInventory>;
+  putDid(
+    iTenantId: number,
+    did: string,
+    input: pbx.DidSettings,
+    correlationId: string,
+  ): Promise<pbx.ManagedDid>;
+  deleteDid(iTenantId: number, did: string, correlationId: string): Promise<void>;
   submitCallCommand(callSessionId: string, req: CallCommandRequest): Promise<UpstreamOutcome>;
   /** OfficePulse's own /readyz: never throws — an unreachable service is a result. */
   readiness(): Promise<OfficePulseReadiness>;
@@ -166,60 +115,96 @@ export class HttpOfficePulseClient implements OfficePulseClient {
     return { status: res.status, body: parsed };
   }
 
-  private async request(path: string, method: string, body: unknown): Promise<unknown> {
-    const { status, body: parsed } = await this.fetchJson(path, method, body);
-    if (status < 200 || status >= 300) {
-      throw new OfficePulseError(
-        `OfficePulse ${path.split('?')[0]} failed`,
-        status,
-        typeof parsed.error === 'string' ? parsed.error : undefined,
-      );
-    }
-    return parsed;
-  }
-
-  async issueDeviceEnrollment(
+  private async pbxRequest<S extends z.ZodTypeAny>(
     iTenantId: number,
-    extensionId: string,
-  ): Promise<{ enrollmentToken: string; expiresIn: number }> {
-    return (await this.request('/v1/provisioning/device-enrollments', 'POST', {
-      iTenantId,
-      extensionId,
-    })) as { enrollmentToken: string; expiresIn: number };
+    parts: string[],
+    method: string,
+    correlationId: string,
+    schema: S,
+    input?: unknown,
+  ): Promise<z.infer<S>> {
+    const path = `/v1/admin/pbx/${parts.map(encodeURIComponent).join('/')}?iTenantId=${iTenantId}`;
+    let response: Response;
+    try {
+      response = await fetch(new URL(path, this.baseUrl), {
+        method,
+        redirect: 'error',
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+        headers: {
+          accept: 'application/json',
+          'x-aida-correlation-id': correlationId,
+          ...(input === undefined ? {} : { 'content-type': 'application/json' }),
+        },
+        ...(input === undefined ? {} : { body: JSON.stringify(input) }),
+      });
+    } catch {
+      throw new OfficePulseError('OfficePulse could not be reached', 503);
+    }
+    if (!response.ok) {
+      // Never retain an upstream error body: it may contain secrets or SQL.
+      await response.body?.cancel().catch(() => {});
+      throw new OfficePulseError('OfficePulse PBX request failed', response.status);
+    }
+    if (response.status === 204) return schema.parse(undefined) as z.infer<S>;
+    const body: unknown = await response.json().catch(() => null);
+    const parsed = schema.safeParse(body);
+    if (!parsed.success)
+      throw new OfficePulseError('OfficePulse returned an invalid PBX response', 502);
+    if (
+      parsed.data &&
+      typeof parsed.data === 'object' &&
+      'iTenantId' in parsed.data &&
+      parsed.data.iTenantId !== iTenantId
+    ) {
+      throw new OfficePulseError('OfficePulse returned an invalid tenant scope', 502);
+    }
+    return parsed.data;
   }
-
-  async provisionExtension(req: ProvisionExtensionRequest): Promise<ProvisionExtensionResult> {
-    return (await this.request(
-      '/v1/provisioning/extensions',
-      'POST',
-      req,
-    )) as ProvisionExtensionResult;
+  listExtensions(id: number, cid: string) {
+    return this.pbxRequest(id, ['extensions'], 'GET', cid, pbx.extensionInventory);
   }
-
-  async updateProvisionedExtension(
-    extensionId: string,
-    req: UpdateExtensionRequest,
-  ): Promise<void> {
-    await this.request(`/v1/provisioning/extensions/${extensionId}`, 'PUT', req);
+  createExtension(id: number, input: pbx.CreateExtension, cid: string) {
+    return this.pbxRequest(id, ['extensions'], 'POST', cid, pbx.extensionCreated, input);
   }
-
-  async rotateProvisionedExtensionSecret(
-    extensionId: string,
-    requestId: string,
-    reprovisionDevice: boolean,
-  ): Promise<RotateSecretResult> {
-    return (await this.request(`/v1/provisioning/extensions/${extensionId}/rotate-secret`, 'POST', {
-      requestId,
-      reprovisionDevice,
-    })) as RotateSecretResult;
+  deleteExtension(id: number, extension: string, cid: string) {
+    return this.pbxRequest(id, ['extensions', extension], 'DELETE', cid, z.void());
   }
-
-  async provisionRingGroup(ringGroupId: string, req: ProvisionRingGroupRequest): Promise<void> {
-    await this.request(`/v1/provisioning/ring-groups/${ringGroupId}`, 'PUT', req);
+  listQueues(id: number, cid: string) {
+    return this.pbxRequest(id, ['queues'], 'GET', cid, pbx.queueInventory);
   }
-
-  async provisionDid(didRouteId: string, req: ProvisionDidRequest): Promise<void> {
-    await this.request(`/v1/provisioning/dids/${didRouteId}`, 'PUT', req);
+  createQueue(id: number, input: pbx.CreateQueue, cid: string) {
+    return this.pbxRequest(id, ['queues'], 'POST', cid, pbx.queueCreated, input);
+  }
+  deleteQueue(id: number, queue: string, cid: string) {
+    return this.pbxRequest(id, ['queues', queue], 'DELETE', cid, z.void());
+  }
+  putQueueMember(
+    id: number,
+    queue: string,
+    extension: string,
+    input: pbx.QueueMemberInput,
+    cid: string,
+  ) {
+    return this.pbxRequest(
+      id,
+      ['queues', queue, 'extensions', extension],
+      'PUT',
+      cid,
+      pbx.memberSaved,
+      input,
+    );
+  }
+  deleteQueueMember(id: number, queue: string, extension: string, cid: string) {
+    return this.pbxRequest(id, ['queues', queue, 'extensions', extension], 'DELETE', cid, z.void());
+  }
+  listDids(id: number, cid: string) {
+    return this.pbxRequest(id, ['dids'], 'GET', cid, pbx.didInventory);
+  }
+  putDid(id: number, did: string, input: pbx.DidSettings, cid: string) {
+    return this.pbxRequest(id, ['dids', did], 'PUT', cid, pbx.managedDid, input);
+  }
+  deleteDid(id: number, did: string, cid: string) {
+    return this.pbxRequest(id, ['dids', did], 'DELETE', cid, z.void());
   }
 
   async submitCallCommand(

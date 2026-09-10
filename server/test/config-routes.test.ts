@@ -109,17 +109,6 @@ function post(pathName: string, body: unknown) {
     .send(body as object);
 }
 
-const routeInput = (overrides: Record<string, unknown> = {}) => ({
-  tenantId: ctx.tenantId,
-  didE164: '+15105550100',
-  assistantProfileId: ctx.profileId,
-  destinationType: 'EXTENSION',
-  destinationId: ctx.extensionId,
-  screeningEnabled: true,
-  enabled: true,
-  ...overrides,
-});
-
 describe('assistant profiles', () => {
   it('creates and updates a profile with validation', async () => {
     const created = await post('/admin/profiles', {
@@ -161,66 +150,9 @@ describe('assistant profiles', () => {
   });
 });
 
-describe('DID routes', () => {
-  it('refuses numbers absent from the central tenant assignment before provisioning', async () => {
-    const response = await post('/admin/did-routes', routeInput({ didE164: '+15105550999' }));
-    expect(response.status).toBe(400);
-    expect(ctx.officePulse.dids).toHaveLength(0);
-  });
-  it('creates a route, provisions the DID, and previews the fallback destination', async () => {
-    const res = await post('/admin/did-routes', routeInput({ didE164: '+1 (510) 555-0100' }));
-    expect(res.status).toBe(201);
-    expect(res.body.didRoute.did_e164).toBe('+15105550100');
-    expect(res.body.didRoute.fallbackPreview).toBe('Extension 100 — Front Desk');
-    // The destination travels with the DID so OfficePulse can project the
-    // local fail-safe (its issue #9); without it the DID has no fallback.
-    const sent = ctx.officePulse.dids[0]!.body;
-    expect(sent).toMatchObject({
-      didE164: '+15105550100',
-      context: 'acme',
-      fastAgiPath: '/bootstrap',
-      enabled: true,
-      tenantId: ctx.tenantId,
-      destinationType: 'EXTENSION',
-    });
-    expect(typeof sent.destinationId).toBe('string');
-    expect(sent.destinationId).not.toBe('');
-  });
-
-  it('rejects an invalid DID and a duplicate route', async () => {
-    const bad = await post('/admin/did-routes', routeInput({ didE164: 'not-a-did' }));
-    expect(bad.status).toBe(400);
-    await post('/admin/did-routes', routeInput());
-    const dup = await post('/admin/did-routes', routeInput());
-    expect(dup.status).toBe(409);
-  });
-
-  it('rejects a route whose destination type does not match the record', async () => {
-    const res = await post(
-      '/admin/did-routes',
-      routeInput({ destinationType: 'RING_GROUP', destinationId: ctx.extensionId }),
-    );
-    expect(res.status).toBe(404);
-  });
-
-  it('rejects enabling a route with a disabled profile', async () => {
-    const repos = createRepos(ctx.api);
-    const disabled = await repos.assistantProfiles.create(ctx.tenantId, {
-      name: 'Disabled',
-      businessName: 'Acme',
-      prompt: 'Hi.',
-      enabled: false,
-    });
-    const res = await post('/admin/did-routes', routeInput({ assistantProfileId: disabled.id }));
-    expect(res.status).toBe(400);
-    expect(res.body.message).toMatch(/disabled/i);
-  });
-
-  it('reports DID provisioning failure with the route saved', async () => {
-    ctx.officePulse.failNext = true;
-    const res = await post('/admin/did-routes', routeInput());
-    expect(res.status).toBe(502);
-    expect(ctx.api.tableByName('aida_tbl_DidRoute')!.records).toHaveLength(1);
+describe('retired DID provisioning routes', () => {
+  it('does not accept the former desired-state route', async () => {
+    expect((await post('/admin/did-routes', { tenantId: ctx.tenantId })).status).toBe(404);
   });
 });
 
