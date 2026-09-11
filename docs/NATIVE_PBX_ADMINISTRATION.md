@@ -22,7 +22,7 @@ Request schemas and native response types are in `server/src/officepulse/pbx-con
 
 ## Screens and lifecycle
 
-- Extensions list native IDs, dialable numbers, caller ID, context and activation state. Create discloses SIP username/secret once. Dismissal or tenant navigation destroys that disclosure state; inventory/retries cannot reopen it, and no browser storage is used. Losing the secret requires a future rotation capability. Create/delete operates on OfficePulse-generated `<extension>-tN` bundles; imported endpoints remain operator managed. Delete confirmation explains removal of saved queue memberships. Edit, rotation and handset-enrollment controls are retired.
+- Extensions list native IDs, dialable numbers, caller ID, context and activation state. Create discloses SIP username/secret once. Dismissal or tenant navigation destroys that disclosure state; inventory/retries cannot reopen it, and no browser storage is used. Losing the secret requires a future rotation capability. Contexts and formatted caller IDs are constrained to the installed 40-character Asterisk columns. Create/delete operates on OfficePulse-generated `<extension>-tN` bundles; imported endpoints remain operator managed. Delete confirmation explains removal of saved queue memberships. Edit, rotation and handset-enrollment controls are retired.
 - Queues replace Ring Groups. Friendly names become native `tN.slug` IDs, or explicitly mapped native legacy names. Membership edits compute minimal PUT/DELETE differences and retain a partial-success baseline for retry. Penalty is 0–100; paused is Boolean. Imported member interfaces remain read-only. A referenced-queue conflict links to DID routes.
 - DID choices intersect enabled Identity voice numbers with OfficePulse's exact allowed DIDs. Unconfigured routes may be created; manual routes are explicitly displayed and cannot be adopted. The form requires an owned queue, 1–12 rings, and optionally local business hours, weekdays and a valid IANA timezone. The queue timeout is approximately five seconds per ring and the returned value is shown. LiveKit is the only destination provider; an advanced E.164 destination override defaults to the DID. Assistant profiles are not sent as PBX destinations.
 
@@ -34,7 +34,7 @@ Every mutation disables duplicate submits. Recoverable failures preserve inputs.
 
 ## Deployment, cleanup and rollback
 
-1. Deploy the companion OfficePulse contract, least-privilege grants and explicit tenant ownership maps. An operator must install the shared `aida-managed-did-v1` include and narrow Realtime delegation before routing calls. Remove or explicitly redirect the winning static `+19496501147` entry; inspect its actual ingress trace, queue and LiveKit endpoint.
+1. Deploy the companion OfficePulse contract, least-privilege grants and explicit tenant ownership maps. An operator must install the shared `aida-managed-did-v1` include and one generic Realtime lookup on the reviewed ingress context before routing calls. Managed DID destinations, schedules, queues and fallbacks live in Realtime data rows; remove the corresponding DID-specific static route after its managed rows exist.
 2. Deploy this backend with server-only OfficePulse URL, central Identity session/directory access and audit persistence. Verify a Tenant Admin and Super Admin across two tenants before exposing mutations.
 3. Expose the UI after inventory and managed-DID readback succeed. `provisioningEnabled=false` keeps inventory read-only. An unavailable OfficePulse endpoint is not treated as empty inventory.
 

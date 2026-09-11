@@ -3,6 +3,7 @@ import { z } from 'zod';
 /** Canonical /v1/admin/pbx contract; PBX state is owned solely by OfficePulse. */
 export const extensionNumber = z.string().regex(/^[0-9]{2,12}$/);
 export const nativeName = z.string().regex(/^[a-zA-Z0-9_.-]{1,80}$/);
+export const contextName = z.string().regex(/^[a-zA-Z0-9_.-]{1,40}$/);
 export const e164 = z.string().regex(/^\+[1-9][0-9]{6,14}$/);
 export const queueStrategy = z.enum([
   'ringall',
@@ -59,7 +60,7 @@ export const createExtensionBody = z
     displayName: z
       .string()
       .min(1)
-      .max(60)
+      .max(33)
       .refine(
         (value) =>
           !/["<>\\]/.test(value) &&
@@ -70,18 +71,18 @@ export const createExtensionBody = z
       )
       .optional(),
     callerIdNumber: e164.optional(),
-    context: nativeName.optional(),
+    context: contextName.optional(),
   })
   .strict()
   .superRefine((body, ctx) => {
     if (
       body.displayName &&
-      body.displayName.length + (body.callerIdNumber ?? body.extension).length + 5 > 80
+      body.displayName.length + (body.callerIdNumber ?? body.extension).length + 5 > 40
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['displayName'],
-        message: 'Display name and caller ID exceed the native 80-character limit',
+        message: 'Display name and caller ID exceed the native 40-character limit',
       });
     }
   });
@@ -95,7 +96,7 @@ export const memberBody = z
   .object({
     penalty: z.number().int().min(0).max(100).optional(),
     paused: z.boolean().optional(),
-    context: nativeName.optional(),
+    context: contextName.optional(),
   })
   .strict();
 export const didBody = z
@@ -121,7 +122,7 @@ const inventory = {
 // disclose future secret-bearing fields returned by an upstream deployment.
 export const extensionInventory = z.object({
   ...inventory,
-  contexts: z.array(nativeName),
+  contexts: z.array(contextName),
   extensions: z.array(
     z.object({
       id: z.string(),

@@ -193,6 +193,10 @@ describe('native PBX writes and credential safety', () => {
     ['/extensions', { extension: '1' }],
     ['/extensions', { extension: '100', displayName: 'bad\nname' }],
     ['/extensions', { extension: '100', callerIdNumber: '555' }],
+    [
+      '/extensions',
+      { extension: '100', displayName: 'x'.repeat(25), callerIdNumber: '+19496501147' },
+    ],
     ['/extensions', { extension: '100', role: 'SUPER_ADMIN' }],
     ['/queues', { name: 'sales', strategy: 'retell' }],
     ['/queues', { name: 'bad/name' }],

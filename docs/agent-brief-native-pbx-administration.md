@@ -131,7 +131,7 @@ Audit the current NocoDB extension/ring-group/DID repositories, runtime provisio
 - Update README/setup language to distinguish Identity number assignment, AidaAdmin business metadata, OfficePulse PBX mutations, and carrier provisioning.
 - Document deployment ordering: OfficePulse contract and one-time Asterisk delegation first, AidaAdmin backend second, UI exposure last.
 - Document rollback behavior: hide/disable mutation UI without deleting PBX objects; never attempt to restore the legacy synchronization workflow automatically.
-- Add an operator note explaining static DID shadowing and why a database-committed result may not yet be verified active.
+- Add an operator note requiring DID-specific static routes to be removed after their managed Realtime rows exist, and explain why a database-committed result may not yet be verified active.
 
 ## Tests and acceptance criteria
 

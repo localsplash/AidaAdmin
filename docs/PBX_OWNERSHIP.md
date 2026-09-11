@@ -36,9 +36,11 @@ from code and must be deleted from this disposable DEV base.
 
 The supplied runbook identifies PJSIP Realtime `ps_endpoints`, native `queues`
 and `queue_members`. Queue `ringall` is a strategy, not a ring-group object.
-Endpoint IDs are not automatically dialable extension numbers. Effective DID
-routing also lives in `/etc/asterisk/extensions.conf`, while some trunks use
-`pjsip_wizard.conf`; inventory SQL cannot describe or replace those files.
+Endpoint IDs are not automatically dialable extension numbers. Managed DID
+destinations, schedules, queues and fallbacks live in `asterisk.extensions`.
+The reviewed carrier ingress context contains one generic Realtime lookup and
+no DID-specific exception; other operator-owned trunk and PJSIP configuration
+remains outside AidaAdmin.
 
 Native call history is UTC `asterisk.cdr`; `userfield` contains the recording
 basename. `aidacalls_db` is separate integration diagnostics. Native CDR pagination,

@@ -28,6 +28,8 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
     !!extension.extension &&
     extension.id === `${extension.extension}-t${inventory.data?.iTenantId}`;
   const writable = inventory.data?.provisioningEnabled === true && !inventory.error;
+  const callerIdLength = (form.callerIdNumber || form.extension).length;
+  const displayNameMax = Math.min(33, Math.max(1, 40 - callerIdLength - 5));
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (lock.current || !writable || secret) return;
@@ -183,7 +185,7 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
                 Display name
                 <input
                   required
-                  maxLength={60}
+                  maxLength={displayNameMax}
                   value={form.displayName}
                   onChange={(event) => setForm({ ...form, displayName: event.target.value })}
                 />
