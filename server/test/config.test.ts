@@ -23,6 +23,7 @@ describe('loadConfig', () => {
     expect(config.missingServiceConfig).toEqual(
       SERVICE_ENV_VARS.filter(
         (name) =>
+          !name.startsWith('LIVEKIT_') &&
           !['ID_CLIENT_SECRET', 'ID_PUBLIC_BASE_URL', 'OFFICEPULSE_PROVISIONING_BASE_URL'].includes(
             name,
           ),

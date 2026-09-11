@@ -220,6 +220,57 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
     }
   });
 
+  // Explicit tenant selection is required even for Super Admin observers.
+  router.post('/runtime/calls/:callSessionId/observer', async (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const ctx = await resolveContext(req, res);
+      if (!ctx) return;
+      if (!ctx.tenantId || !['TENANT_ADMIN', 'SUPER_ADMIN'].includes(ctx.role)) {
+        res.status(403).json({
+          error: 'observer_forbidden',
+          message: 'Select a tenant you administer before observing.',
+        });
+        return;
+      }
+      const db = reader(req, res);
+      if (!db) return;
+      const call = await db.getCallSession(req.params.callSessionId as string, ctx.tenantId);
+      if (!call) {
+        res.status(404).json({ error: 'call_not_found' });
+        return;
+      }
+      if (call.endedAt || ['hangup', 'ended', 'completed'].includes(call.state)) {
+        res.status(409).json({ error: 'call_ended' });
+        return;
+      }
+      if (!call.roomName || !call.agentParticipantSid) {
+        res.status(409).json({
+          error: 'agent_not_ready',
+          message: 'No bound agent participant is recorded for this call yet.',
+        });
+        return;
+      }
+      if (!deps.observerIssuer) {
+        res.status(503).json({
+          error: 'observer_not_configured',
+          message: 'LiveKit observation is not configured.',
+        });
+        return;
+      }
+      res.json({
+        ...(await deps.observerIssuer(call.roomName)),
+        agentParticipantSid: call.agentParticipantSid,
+      });
+    } catch (err) {
+      try {
+        fail(res, req, err);
+      } catch (unhandled) {
+        next(unhandled);
+      }
+    }
+  });
+
   /** Everything known about one call, in one round trip. */
   router.get('/runtime/calls/:callSessionId', async (req, res, next) => {
     try {

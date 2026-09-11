@@ -149,6 +149,12 @@ export type CallListState = 'active' | 'recent' | 'orphaned' | 'all';
 const tenantQuery = (tenant?: string) => (tenant ? `&tenant=${encodeURIComponent(tenant)}` : '');
 
 export const runtimeApi = {
+  observe: (id: string) =>
+    call<{ url: string; token: string; expiresIn: number; agentParticipantSid: string }>(
+      `/runtime/calls/${encodeURIComponent(id)}/observer`,
+      'POST',
+      {},
+    ),
   listCalls: (state: CallListState, tenant?: string) =>
     call<{ calls: RuntimeCall[] }>(`/runtime/calls?state=${state}${tenantQuery(tenant)}`, 'GET'),
   getCall: (callSessionId: string, tenant?: string) =>

@@ -231,7 +231,7 @@ describe('CallDetailScreen', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByRole('heading', { name: /call call-1/i })).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent(/ended/i);
+    expect(screen.getAllByRole('status')[0]).toHaveTextContent(/ended/i);
     expect(screen.getByText(/profile-1 \(rev 2\)/)).toBeInTheDocument();
     expect(screen.getByText(/route-1 \(rev 3\)/)).toBeInTheDocument();
     const timeline = screen.getByRole('table', { name: /durable call events/i });

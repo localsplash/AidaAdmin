@@ -445,3 +445,50 @@ describe('trust configuration', () => {
     expect(SERVICE_ENV_VARS.some((name) => name.includes('STAFF'))).toBe(false);
   });
 });
+
+describe('live observer authorization', () => {
+  beforeEach(() => {
+    ctx.runtime.sessions.forEach((s) => {
+      s.roomName = `room-${s.id}`;
+      s.agentParticipantSid = 'PA_agent';
+    });
+    ctx.deps.observerIssuer = async () => ({
+      url: 'wss://test.invalid',
+      token: 'test-only',
+      expiresIn: 60,
+    });
+  });
+  const path = (id = 'acme-live') => `/runtime/calls/${id}/observer`;
+  it('rejects anonymous and staff access', async () => {
+    expect((await request(ctx.app).post(path()).send({})).status).toBeGreaterThanOrEqual(400);
+    expect((await (await actor(21, false, ctx.acme.id)).post(path(), {})).status).toBe(403);
+  });
+  it('isolates both tenants and ignores scope overrides', async () => {
+    const a = await actor(20, false, ctx.acme.id);
+    const b = await actor(30, false, ctx.other.id);
+    expect((await a.post(path(), {})).status).toBe(200);
+    expect((await a.post(path('other-live') + '?tenant=all', {})).status).toBe(404);
+    expect((await b.post(path(), {})).status).toBe(404);
+    expect((await b.post(path('other-live'), {})).status).toBe(200);
+    await ctx.deps.repos!.tenantUsers.save(ctx.acme.id, 20, 'USER', true);
+    expect((await a.post(path(), {})).status).toBe(403);
+  });
+  it('requires explicit Super Admin tenant selection and scopes it', async () => {
+    const root = await actor(1, true, null);
+    expect((await root.post(path(), {})).status).toBe(403);
+    await root.post('/api/session/tenant', { tenantId: ctx.acme.id });
+    const result = await root.post(path(), {});
+    expect(result.status).toBe(200);
+    expect(result.headers['cache-control']).toBe('no-store');
+    expect((await root.post(path('other-live'), {})).status).toBe(404);
+  });
+  it('rejects ended calls, unbound agents and unavailable configuration', async () => {
+    const a = await actor(20, false, ctx.acme.id);
+    expect((await a.post(path('acme-done'), {})).status).toBe(409);
+    ctx.runtime.sessions[0]!.agentParticipantSid = null;
+    expect((await a.post(path(), {})).body.error).toBe('agent_not_ready');
+    ctx.runtime.sessions[0]!.agentParticipantSid = 'PA_agent';
+    ctx.deps.observerIssuer = null;
+    expect((await a.post(path(), {})).status).toBe(503);
+  });
+});

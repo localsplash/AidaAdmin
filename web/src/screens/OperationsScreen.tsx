@@ -1,3 +1,4 @@
+import { LiveTranscript } from '../components/LiveTranscript';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -79,6 +80,14 @@ function CallPanel({
           : ''}
       </p>
 
+      <p>
+        Call arrival: recorded. AI admission:{' '}
+        {call.roomName ? 'room assigned; admission not independently confirmed' : 'not confirmed'}.
+        Agent readiness:{' '}
+        {call.agentParticipantSid ? 'participant bound; speech not yet confirmed' : 'not confirmed'}
+        .
+      </p>
+      <LiveTranscript callId={call.id} ended={ended} />
       <h3>Timeline</h3>
       {view.timeline.length === 0 ? (
         <p>No events yet.</p>
@@ -150,8 +159,8 @@ export function OperationsScreen({
           details.push(detail);
           const current = viewsRef.current[call.id] ?? emptyCallView(call.id);
           nextViews[call.id] = reduceEvents(current, detail.events);
-        } catch {
-          // A call that vanished between the list and the detail is gone.
+        } catch (err) {
+          if (!(err instanceof RuntimeApiError && err.status === 404)) throw err;
         }
       }
       setActive(details);
@@ -165,6 +174,7 @@ export function OperationsScreen({
       ]);
       if (recentList.status === 'fulfilled') setRecent(recentList.value.calls);
       if (issueList.status === 'fulfilled') setIssues(issueList.value);
+      else setIssues(null);
     } catch (err) {
       setError(err);
       if (err instanceof RuntimeApiError && (err.status === 403 || err.status === 401)) {
@@ -243,7 +253,7 @@ export function OperationsScreen({
       {active === null ? (
         <p role="status">Loading…</p>
       ) : active.length === 0 ? (
-        <p>No active calls.</p>
+        <p>{error ? 'Active call diagnostics unavailable.' : 'No active calls.'}</p>
       ) : (
         <>
           <div role="tablist" aria-label="Active calls" className="call-tabs">
@@ -297,7 +307,9 @@ export function OperationsScreen({
       )}
 
       <h2>Operational errors</h2>
-      {!issues || (issues.failedCommands.length === 0 && issues.events.length === 0) ? (
+      {!issues ? (
+        <p>Operational error diagnostics unavailable.</p>
+      ) : issues.failedCommands.length === 0 && issues.events.length === 0 ? (
         <p>No operational errors{issues ? ` in the last ${issues.windowHours} hours` : ''}.</p>
       ) : (
         <ul>
