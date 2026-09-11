@@ -1,3 +1,4 @@
+import { LiveTranscript } from '../components/LiveTranscript';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { runtimeApi, type CallDetail } from '../api/runtime';
@@ -26,6 +27,8 @@ export function CallDetailScreen() {
 
   useEffect(() => {
     load();
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
   }, [load]);
 
   // One section and one heading for every state, so the page's landmark
@@ -65,6 +68,11 @@ function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => vo
         Refresh
       </button>
 
+      <LiveTranscript
+        key={call.id}
+        callId={call.id}
+        ended={Boolean(call.endedAt) || view.phase === 'ended'}
+      />
       <h2>Call</h2>
       <dl>
         <dt>Tenant</dt>

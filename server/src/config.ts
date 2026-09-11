@@ -40,6 +40,9 @@ const envSchema = z.object({
  * same private HTTP API that handles provisioning.
  */
 export const SERVICE_ENV_VARS = [
+  'LIVEKIT_URL',
+  'LIVEKIT_API_KEY',
+  'LIVEKIT_API_SECRET',
   'PUBLIC_BASE_URL',
   'SESSION_SECRET',
   'AIDA_ADMIN_DATABASE_URL',
@@ -107,6 +110,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         : env[name];
     if (value === undefined || value.trim() === '') {
       if (
+        !name.startsWith('LIVEKIT_') &&
         name !== 'ID_CLIENT_SECRET' &&
         name !== 'ID_PUBLIC_BASE_URL' &&
         name !== 'OFFICEPULSE_PROVISIONING_BASE_URL'

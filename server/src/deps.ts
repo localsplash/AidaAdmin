@@ -1,3 +1,4 @@
+import { observerIssuer, type ObserverIssuer } from './runtime/observer.js';
 import type { Pool } from 'mysql2/promise';
 import {
   MemoryAuthDb,
@@ -27,6 +28,7 @@ import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/cli
 import { MysqlRuntimeReader, parseMysqlUrl, type RuntimeReader } from './officepulse/runtime-db.js';
 
 export interface AppDeps {
+  observerIssuer?: ObserverIssuer | null;
   /** PBX auditing does not require a NocoDB configuration base. */
   audit?: AuditLog | null;
   idClient: IdClient | null;
@@ -87,6 +89,7 @@ export function createDeps(config: AppConfig): AppDeps {
   const memoryDb = new MemoryAuthDb();
   return {
     idClient,
+    observerIssuer: observerIssuer(config.serviceConfig),
     audit: pool ? new MysqlAuditLog(pool) : null,
     // Memory sessions exist only in credential-free tests; configuring Identity
     // always selects centralized sessions, regardless of the local SQL store.

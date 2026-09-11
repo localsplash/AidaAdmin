@@ -237,7 +237,7 @@ describe('OperationsScreen', () => {
         detail(
           call('call-a', '+15105550001'),
           [
-            ev(1, 'bootstrapped'),
+            ev(1, 'aida-connected'),
             // Sequence 2 is missing: the gap must be surfaced.
             ev(3, 'takeover-failed', { reason: 'destination did not answer' }),
           ],
