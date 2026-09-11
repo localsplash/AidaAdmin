@@ -90,7 +90,7 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
             409,
             'conflict',
             action === 'queue.delete'
-              ? 'The queue may still be referenced by a DID route. Review DID routes before deleting it'
+              ? 'The queue may still be referenced by a DID route. Review routing in Numbers before deleting it'
               : 'The PBX configuration conflicts with this change. Refresh the inventory; manual DID routes cannot be adopted here',
           );
         case 400:
@@ -203,33 +203,42 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
         'Identity number assignment could not be verified',
       );
     }
-    const numbers = directory.numbers.filter(
-      (number) => number.iTenantId === ctx.iTenantId && number.bVoice && number.bEnabled,
-    );
+    // Identity is the canonical list, including disabled assignments. Absence
+    // from OfficePulse means missing scope, never permission to create a route.
+    const numbers = directory.numbers.filter((number) => number.iTenantId === ctx.iTenantId);
     const inventory = await ctx.api.listDids(ctx.iTenantId, req.correlationId);
-    const dids = inventory.dids.filter((did) =>
-      numbers.some((number) => number.phoneNumber === did.did),
+    const routes = new Map(inventory.dids.map((route) => [route.did, route]));
+    const dids = numbers.map(
+      (number) =>
+        routes.get(number.phoneNumber) ?? {
+          did: number.phoneNumber,
+          managed: false as const,
+          availability: 'scope_missing' as const,
+          applyState: 'unknown' as const,
+        },
     );
-    return {
-      ...inventory,
-      dids,
-      numbers: numbers.filter((number) => dids.some((did) => did.did === number.phoneNumber)),
-    };
+    return { ...inventory, dids, numbers };
   }
   async function allowedDid(req: Request, ctx: Context, did: string) {
     const inventory = await didScope(req, ctx);
+    const number = inventory.numbers.find((entry) => entry.phoneNumber === did);
     const current = inventory.dids.find((entry) => entry.did === did);
-    if (!current)
+    if (
+      !number?.bEnabled ||
+      !number.bVoice ||
+      !current ||
+      (!current.managed && current.availability === 'scope_missing')
+    )
       throw new PbxResponseError(
         404,
         'not_found',
         'Choose an enabled Identity voice number within this tenant’s OfficePulse scope',
       );
-    if (!current.managed && current.availability === 'manual') {
+    if (!current.managed && current.availability !== 'unconfigured') {
       throw new PbxResponseError(
         409,
         'manual_route',
-        'This DID has a manual route; operator adoption is outside this administration flow',
+        'This DID has manual or unknown routing; operator adoption is outside this administration flow',
       );
     }
   }

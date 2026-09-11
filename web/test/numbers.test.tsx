@@ -19,7 +19,8 @@ it('saves an explicit all-members assignment with both services and preserves im
   const saved: unknown[] = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (_url, init?: RequestInit) => {
+    vi.fn(async (url, init?: RequestInit) => {
+      if (!String(url).includes('/numbers')) return new Response('{}', { status: 503 });
       if (init?.method === 'PUT') {
         saved.push(JSON.parse(String(init.body)));
         return new Response(JSON.stringify({ number }));

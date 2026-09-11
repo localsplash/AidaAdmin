@@ -193,7 +193,7 @@ function TenantQueues({ tenantId }: { tenantId: string }) {
       {error instanceof ApiError && error.failure.status === 409 && (
         <p>
           A DID may still reference this queue. Review{' '}
-          <Link to={`/tenants/${tenantId}/did-routes`}>DID routes</Link> before deleting it.
+          <Link to={`/tenants/${tenantId}/numbers`}>Numbers</Link> before deleting it.
         </p>
       )}
       {status && <p role="status">{status}</p>}

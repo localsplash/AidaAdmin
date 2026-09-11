@@ -61,20 +61,20 @@ Required operations:
 
 - List OfficePulse native queues and their saved members.
 - Create a queue using a tenant-friendly name/slug and a small strategy selector matching the OfficePulse enum, defaulting to `ringall`.
-- Delete only after confirmation. Surface the specific conflict when a DID still references the queue and link the user to DID routes.
+- Delete only after confirmation. Surface the specific conflict when a DID still references the queue and link the user to Numbers.
 - Edit membership using the current tenant extension inventory. Compute minimal changes and call the mapping PUT/DELETE operations; do not delete and recreate the entire queue for membership edits.
 - Support optional bounded penalty and paused state without requiring advanced fields for the common case.
 - Distinguish empty inventory from OfficePulse unavailable.
 
 Avoid retaining NocoDB ring-group revisions, simultaneous-ring wording, music-on-hold controls, or background reprovision semantics in the new queue workflow unless the accepted OfficePulse contract explicitly supports them.
 
-## DID routes screen
+## Number routing controls
 
-Rework the form around the managed DID behavior implemented by OfficePulse.
+Attach the managed DID behavior implemented by OfficePulse to the canonical Numbers screen. Every Identity-assigned Number remains visible exactly once, even when OfficePulse has no matching entry or is unavailable. Show configured, unconfigured, manual/operator-managed, PBX-scope-missing, and unavailable routing states. Open the editor automatically when the tenant has one Number; multiple Numbers use independent inline editors. Remove the separate DID navigation and unpublished route without a compatibility redirect.
 
 Source choices:
 
-- DID selector: enabled voice numbers assigned to the selected tenant by Identity.
+- Number card: the matching Identity assignment; there is no global DID selector.
 - Queue selector: current native OfficePulse queues for that tenant.
 - Assistant profile association may remain an AidaAdmin-owned business/LiveKit concern, but it must not be presented as an Asterisk fallback destination or sent as an unsupported PBX provisioning field.
 

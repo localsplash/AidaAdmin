@@ -11,7 +11,6 @@ import { TenantPage } from './components/TenantPage';
 import { TenantContextBanner } from './components/TenantContextBanner';
 import { AppearanceScreen } from './screens/AppearanceScreen';
 import { OperationsScreen } from './screens/OperationsScreen';
-import { DidRoutesScreen } from './screens/DidRoutesScreen';
 import { ExtensionsScreen } from './screens/ExtensionsScreen';
 import { ProfilesScreen } from './screens/ProfilesScreen';
 import { QueuesScreen } from './screens/QueuesScreen';
@@ -27,7 +26,6 @@ const TENANT_SCREENS = [
   { path: 'extensions', label: 'Extensions' },
   { path: 'queues', label: 'Queues' },
   { path: 'profiles', label: 'Profiles' },
-  { path: 'did-routes', label: 'DID routes' },
   { path: 'appearance', label: 'Appearance' },
 ] as const;
 
@@ -171,14 +169,6 @@ function AuthenticatedShell({
             element={
               <TenantPage session={session} onChanged={onSessionChanged}>
                 <TenantNumbersScreen />
-              </TenantPage>
-            }
-          />
-          <Route
-            path="/tenants/:tenantId/did-routes"
-            element={
-              <TenantPage session={session} onChanged={onSessionChanged}>
-                <DidRoutesScreen />
               </TenantPage>
             }
           />

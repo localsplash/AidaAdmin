@@ -11,6 +11,8 @@ import { REDACT_PATHS } from '../src/logger.js';
 import type { AuditEntry } from '../src/nocodb/repos.js';
 import { OfficePulseError } from '../src/officepulse/client.js';
 import { FakeOfficePulse } from './helpers/fake-officepulse.js';
+import { createRepos as createTestRepos } from './helpers/fake-config-repos.js';
+import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
 
 const did = '+15559870001';
 const schedule = { timeRange: '09:00-17:00', weekdays: 'mon-fri', timezone: 'America/Los_Angeles' };
@@ -302,7 +304,7 @@ describe('Identity-authorized managed DID settings', () => {
       (await send('put', `${base}/did-routes/${did}`, { queue: 't7.sales', ringsBeforeAi: 4 }))
         .status,
     ).toBe(404);
-    expect((await send('get', `${base}/did-routes`)).body.dids).toEqual([]);
+    expect((await send('get', `${base}/did-routes`)).body.numbers).toEqual(numbers);
     numbers[0]!.bEnabled = true;
     api.dids.set(7, []);
     expect(
@@ -319,6 +321,52 @@ describe('Identity-authorized managed DID settings', () => {
     ).toBe(409);
     expect((await send('delete', `${base}/did-routes/${did}`)).status).toBe(409);
     expect(api.requests.every((row) => row.method === 'did.list')).toBe(true);
+  });
+  it('left joins every tenant assignment exactly once, including absent scope and disabled numbers', async () => {
+    numbers.push(
+      { ...numbers[0]!, iPhoneNumberId: 2, phoneNumber: '+15559870002' },
+      { ...numbers[0]!, iPhoneNumberId: 3, phoneNumber: '+15559870003', bEnabled: false },
+    );
+    api.dids.set(7, [
+      { did, managed: false, availability: 'unconfigured', applyState: 'unknown' },
+      { did, managed: false, availability: 'unconfigured', applyState: 'unknown' },
+      { did: '+15559879999', managed: false, availability: 'manual', applyState: 'unknown' },
+    ]);
+    const res = await send('get', `${base}/did-routes`);
+    expect(res.status).toBe(200);
+    expect(res.body.numbers).toEqual(numbers);
+    expect(res.body.dids).toEqual([
+      { did, managed: false, availability: 'unconfigured', applyState: 'unknown' },
+      {
+        did: numbers[1]!.phoneNumber,
+        managed: false,
+        availability: 'scope_missing',
+        applyState: 'unknown',
+      },
+      {
+        did: numbers[2]!.phoneNumber,
+        managed: false,
+        availability: 'scope_missing',
+        applyState: 'unknown',
+      },
+    ]);
+    expect((await send('delete', `${base}/did-routes/${numbers[1]!.phoneNumber}`)).status).toBe(
+      404,
+    );
+    expect(api.requests.some((entry) => entry.method === 'did.delete')).toBe(false);
+  });
+  it('keeps the canonical Numbers endpoint available when OfficePulse fails', async () => {
+    if (!snapshot.active) throw Error('fixture');
+    snapshot.user.superAdmin = true;
+    deps.repos = createTestRepos(new FakeNocoDbApi());
+    api.failNext = 503;
+    expect((await send('get', `${base}/did-routes`)).status).toBe(503);
+    const res = await send('get', `${base}/numbers`);
+    expect(res.status).toBe(200);
+    expect(res.body.numbers).toEqual(numbers);
+    deps.officePulse = null;
+    expect((await send('get', `${base}/did-routes`)).status).toBe(503);
+    expect((await send('get', `${base}/numbers`)).body.numbers).toEqual(numbers);
   });
   it('does not relay upstream error details or failed Identity bodies', async () => {
     identity.listTenantNumbers = async () => {

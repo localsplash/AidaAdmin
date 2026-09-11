@@ -391,3 +391,22 @@ input[readonly] {
     flex-wrap: wrap;
   }
 }
+
+.number-card {
+  margin: 1rem 0;
+  padding: 1.25rem;
+  background: var(--color-surface);
+  border: 1px solid #c8d4e6;
+  border-radius: 10px;
+}
+.number-card h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+.number-card button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.number-card .record-editor {
+  margin: 1rem 0;
+}

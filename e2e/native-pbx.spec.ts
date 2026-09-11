@@ -39,8 +39,7 @@ test('Tenant Admin manages native extension, queue and DID lifecycle within its 
   await page.getByLabel('Include extension 105').check();
   await page.getByRole('button', { name: 'Save members' }).click();
   await expect(page.getByRole('cell', { name: /105 \(penalty 0\)/ })).toBeVisible();
-  await page.goto(`${origin}/tenants/7/did-routes`);
-  await page.getByRole('button', { name: 'Configure +15555550107' }).click();
+  await page.goto(`${origin}/tenants/7/numbers`);
   await page.getByLabel('Queue', { exact: true }).selectOption('t7.reception');
   await page.getByLabel('Enable business-hours schedule').check();
   await page.getByLabel('IANA timezone').fill('America/Los_Angeles');
@@ -50,17 +49,17 @@ test('Tenant Admin manages native extension, queue and DID lifecycle within its 
     /not been verified active/,
   );
   await page.reload();
-  await page.getByRole('button', { name: 'Edit +15555550107' }).click();
   await expect(page.getByLabel('IANA timezone')).toHaveValue('America/Los_Angeles');
   await expect(page.getByLabel('Monday')).toBeChecked();
   await page.goto(`${origin}/tenants/7/queues`);
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Delete queue t7.reception' }).click();
   await expect(page.getByRole('alert')).toContainText('DID route');
-  await page.goto(`${origin}/tenants/7/did-routes`);
+  await page.goto(`${origin}/tenants/7/numbers`);
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Disable PBX routing for +15555550107' }).click();
-  await expect(page.getByRole('button', { name: 'Configure +15555550107' })).toBeVisible();
+  await expect(page.getByText('Configure PBX routing', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '+15555550107', exact: true })).toBeVisible();
   await page.goto(`${origin}/tenants/7/queues`);
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: 'Delete queue t7.reception' }).click();

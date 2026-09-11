@@ -1,6 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { adminApi, type NumberInput, type TenantNumber } from '../api/admin';
+import { NumberRouting } from '../components/NumberRouting';
+import { PbxDisabledNotice, PbxErrorNotice } from '../components/PbxNotice';
+import { usePbxInventory } from '../hooks/usePbxInventory';
+import { useNumberRouting } from '../hooks/useNumberRouting';
 const EMPTY: NumberInput = {
   phoneNumber: '',
   label: '',
@@ -11,28 +15,30 @@ const EMPTY: NumberInput = {
 };
 export function TenantNumbersScreen() {
   const { tenantId = '' } = useParams();
-  const [numbers, setNumbers] = useState<TenantNumber[]>([]);
+  return <TenantNumbers key={tenantId} tenantId={tenantId} />;
+}
+function TenantNumbers({ tenantId }: { tenantId: string }) {
+  const identity = usePbxInventory(tenantId, adminApi.listNumbers);
+  const routing = useNumberRouting(tenantId);
+  const numbers = identity.data?.numbers ?? [];
+  const lock = useRef(false);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<TenantNumber | null>(null);
   const [form, setForm] = useState<NumberInput>(EMPTY);
-  const load = useCallback(async () => {
-    try {
-      const result = await adminApi.listNumbers(tenantId);
-      setNumbers(result.numbers);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not load numbers');
-    } finally {
-      setLoading(false);
-    }
-  }, [tenantId]);
-  useEffect(() => {
-    void load();
-  }, [load]);
   async function save(e: React.FormEvent) {
     e.preventDefault();
+    if (lock.current || identity.error || identity.loading) return;
+    if (
+      editing?.bEnabled &&
+      !form.bEnabled &&
+      !window.confirm(
+        `Disable Identity number ${editing.phoneNumber}? This removes members’ access to this number in Echo. PBX routing and carrier service are unchanged. Disable PBX routing first if you also want to stop routing calls.`,
+      )
+    )
+      return;
+    lock.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -40,14 +46,17 @@ export function TenantNumbersScreen() {
         ...form,
         ...(editing ? { expectedVersion: editing.iVersion } : {}),
       });
+      if (!identity.current()) return;
       setEditing(null);
       setForm(EMPTY);
       setOpen(false);
-      await load();
+      await identity.refresh();
+      if (identity.current()) await routing.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not save number');
+      if (identity.current()) setError(e instanceof Error ? e.message : 'Could not save number');
     } finally {
-      setBusy(false);
+      lock.current = false;
+      if (identity.current()) setBusy(false);
     }
   }
   return (
@@ -58,61 +67,94 @@ export function TenantNumbersScreen() {
         members can use every enabled number in Echo, including users who cannot administer Aida.
       </p>
       <p>
-        Adding a number records its assignment. Configure its DID route for voice and complete
-        carrier setup before using it.
+        Adding a number records its assignment. Configure its PBX routing below and complete carrier
+        setup before using it.
       </p>
       {error && <p role="alert">{error}</p>}
-      {loading ? (
-        <p role="status">Loading numbers…</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Number</th>
-              <th>Label</th>
-              <th>Access</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {numbers.map((n) => (
-              <tr key={n.iPhoneNumberId}>
-                <td>{n.phoneNumber}</td>
-                <td>{n.label || '—'}</td>
-                <td>All tenant members</td>
-                <td>{n.bEnabled ? 'Enabled' : 'Disabled'}</td>
-                <td>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditing(n);
-                      setForm({
-                        phoneNumber: n.phoneNumber,
-                        label: n.label,
-                        bVoice: true,
-                        bMessaging: true,
-                        bEnabled: n.bEnabled,
-                        accessPolicy: 'TENANT_MEMBERS',
-                      });
-                      setOpen(true);
-                      setError(null);
-                    }}
-                  >
-                    Edit {n.phoneNumber}
-                  </button>{' '}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {!!identity.error && (
+        <p role="alert">
+          Could not load Identity numbers:{' '}
+          {identity.error instanceof Error ? identity.error.message : 'Refresh and try again.'}
+        </p>
       )}
-      {!loading && numbers.length === 0 && (
+      <PbxErrorNotice error={routing.error} />
+      {!!routing.error && identity.data && !identity.error && (
+        <p role="status">
+          PBX routing is unavailable. Number assignments remain available; routing actions are
+          disabled.
+        </p>
+      )}
+      {routing.data && !routing.data.provisioningEnabled && <PbxDisabledNotice />}
+      {identity.loading && <p role="status">Loading numbers…</p>}
+      {numbers.map((n) => {
+        const route = routing.data?.dids.find((entry) => entry.did === n.phoneNumber);
+        return (
+          <article
+            key={n.iPhoneNumberId}
+            aria-labelledby={`number-${n.iPhoneNumberId}`}
+            className="number-card"
+          >
+            <h2 id={`number-${n.iPhoneNumberId}`}>{n.phoneNumber}</h2>
+            <p>
+              {n.label || 'No label'} · All tenant members · {n.bEnabled ? 'Enabled' : 'Disabled'}
+            </p>
+            <button
+              type="button"
+              disabled={busy || identity.loading || !!identity.error}
+              onClick={() => {
+                setEditing(n);
+                setForm({
+                  phoneNumber: n.phoneNumber,
+                  label: n.label,
+                  bVoice: true,
+                  bMessaging: true,
+                  bEnabled: n.bEnabled,
+                  accessPolicy: 'TENANT_MEMBERS',
+                });
+                setOpen(true);
+                setError(null);
+              }}
+            >
+              Edit {n.phoneNumber}
+            </button>
+            {routing.data ? (
+              <NumberRouting
+                tenantId={tenantId}
+                number={n}
+                route={
+                  route ?? {
+                    did: n.phoneNumber,
+                    managed: false,
+                    availability: 'scope_missing',
+                    applyState: 'unknown',
+                  }
+                }
+                inventory={routing}
+                identityAvailable={!identity.error && !identity.loading && !busy}
+                autoExpand={numbers.length === 1}
+              />
+            ) : (
+              <p>PBX routing: {routing.loading ? 'Loading…' : 'Unavailable'}</p>
+            )}
+          </article>
+        );
+      })}
+      {!identity.loading && !identity.error && numbers.length === 0 && (
         <p>
           No numbers assigned yet. Members can sign in to Echo and will see a message to contact
           their admin.
         </p>
       )}
+      <button
+        type="button"
+        disabled={busy || identity.loading || routing.loading}
+        onClick={() => {
+          void identity.refresh();
+          void routing.refresh();
+        }}
+      >
+        Refresh numbers and routing
+      </button>
       <details
         open={open}
         onToggle={(e) => setOpen(e.currentTarget.open)}
@@ -148,7 +190,7 @@ export function TenantNumbersScreen() {
             />
             Enabled
           </label>
-          <button disabled={busy} type="submit">
+          <button disabled={busy || identity.loading || !!identity.error} type="submit">
             {busy ? 'Saving…' : 'Save number'}
           </button>{' '}
           <button

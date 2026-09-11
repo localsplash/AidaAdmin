@@ -165,7 +165,7 @@ export type DidRoute =
   | {
       did: string;
       managed: false;
-      availability: 'unconfigured' | 'manual' | 'unknown';
+      availability: 'unconfigured' | 'manual' | 'unknown' | 'scope_missing';
       applyState: 'unknown';
     };
 export interface DidInventory extends NativeInventory {

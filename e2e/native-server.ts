@@ -7,6 +7,12 @@ import { HttpIdClient, type SessionIntrospection } from '../server/src/id/client
 import { IdentitySessionRepository } from '../server/src/auth/session-store.js';
 import { FakeOfficePulse } from '../server/test/helpers/fake-officepulse.js';
 import { OfficePulseError } from '../server/src/officepulse/client.js';
+import { createRepos, NocoStore } from '../server/src/nocodb/repos.js';
+import {
+  PlatformMembershipRepository,
+  PlatformTenantRepository,
+} from '../server/src/id/repositories.js';
+import { FakeNocoDbApi } from '../server/test/helpers/fake-nocodb.js';
 const config = loadConfig({ NODE_ENV: 'test', LOG_LEVEL: 'fatal' });
 const deps = createDeps(config);
 const selected = new Map([
@@ -86,6 +92,13 @@ api.deleteQueue = async (id, queue, cid) => {
     throw new OfficePulseError('Referenced DID', 409);
   await deleteQueue(id, queue, cid);
 };
+// Numbers uses the central membership repository through the admin guard.
+const noco = new FakeNocoDbApi();
+deps.repos = createRepos(noco, {
+  tenants: new PlatformTenantRepository(identity, new NocoStore(noco)),
+  tenantUsers: new PlatformMembershipRepository(identity),
+  audit: { append: async () => {} },
+});
 deps.idClient = identity;
 deps.sessionStore = new IdentitySessionRepository(identity);
 deps.officePulse = api;

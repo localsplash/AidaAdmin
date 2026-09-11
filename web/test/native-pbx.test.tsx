@@ -1,10 +1,10 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ExtensionsScreen } from '../src/screens/ExtensionsScreen';
 import { QueuesScreen } from '../src/screens/QueuesScreen';
-import { DidRoutesScreen } from '../src/screens/DidRoutesScreen';
+import { TenantNumbersScreen } from '../src/screens/TenantNumbersScreen';
 import type { DidRoute, Extension, NativeQueue } from '../src/api/admin';
 
 // Native DTO fixtures follow OfficePulse's published /v1/admin/pbx contract.
@@ -56,6 +56,7 @@ function mockFetch(handler: Handler = () => undefined) {
     const url = String(input);
     let result = await handler(url, init);
     if (!result && init.method === 'GET') {
+      if (url.endsWith('/numbers')) result = { body: { numbers: [number] } };
       if (url.endsWith('/extensions'))
         result = {
           body: { ...native, extensions: [extension, second, third], contexts: ['office'] },
@@ -72,7 +73,7 @@ function mockFetch(handler: Handler = () => undefined) {
   vi.stubGlobal('fetch', fetcher);
   return fetcher;
 }
-function renderScreen(kind: 'extensions' | 'queues' | 'did-routes', element: React.ReactElement) {
+function renderScreen(kind: 'extensions' | 'queues' | 'numbers', element: React.ReactElement) {
   return render(
     <MemoryRouter initialEntries={[`/tenants/1/${kind}`]}>
       <Link to={`/tenants/2/${kind}`}>Switch test tenant</Link>
@@ -311,9 +312,9 @@ describe('native queues', () => {
     await user.click(await screen.findByRole('button', { name: 'Delete queue reception' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Conflict');
     expect(screen.getByRole('alert')).toHaveTextContent('q-conflict');
-    expect(screen.getByRole('link', { name: 'DID routes' })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'Numbers' })).toHaveAttribute(
       'href',
-      '/tenants/1/did-routes',
+      '/tenants/1/numbers',
     );
   });
 });
@@ -337,10 +338,8 @@ describe('managed DID routes', () => {
           : undefined,
     );
     const user = userEvent.setup();
-    renderScreen('did-routes', <DidRoutesScreen />);
-    await user.click(
-      await screen.findByRole('button', { name: `Configure ${number.phoneNumber}` }),
-    );
+    renderScreen('numbers', <TenantNumbersScreen />);
+    await screen.findByLabelText('Queue');
     await user.selectOptions(screen.getByLabelText('Queue'), queue.id);
     await user.clear(screen.getByLabelText('Rings before LiveKit'));
     await user.type(screen.getByLabelText('Rings before LiveKit'), '7');
@@ -382,8 +381,8 @@ describe('managed DID routes', () => {
           : undefined,
     );
     const user = userEvent.setup();
-    renderScreen('did-routes', <DidRoutesScreen />);
-    await user.click(await screen.findByRole('button', { name: `Edit ${number.phoneNumber}` }));
+    renderScreen('numbers', <TenantNumbersScreen />);
+    await screen.findByLabelText('Queue');
     expect(screen.getByLabelText('IANA timezone')).toHaveValue('America/Los_Angeles');
     expect(screen.getByLabelText('Monday')).toBeChecked();
     expect(screen.getByLabelText('Sunday')).not.toBeChecked();
@@ -399,10 +398,8 @@ describe('managed DID routes', () => {
   it('validates weekday and timezone without sending a mutation', async () => {
     const fetcher = mockFetch();
     const user = userEvent.setup();
-    renderScreen('did-routes', <DidRoutesScreen />);
-    await user.click(
-      await screen.findByRole('button', { name: `Configure ${number.phoneNumber}` }),
-    );
+    renderScreen('numbers', <TenantNumbersScreen />);
+    await screen.findByLabelText('Queue');
     await user.selectOptions(screen.getByLabelText('Queue'), queue.id);
     await user.click(screen.getByLabelText('Enable business-hours schedule'));
     await user.type(screen.getByLabelText('IANA timezone'), 'Unknown/Zone');
@@ -417,26 +414,29 @@ describe('managed DID routes', () => {
   });
   it('refuses manual adoption and deletes only PBX routing after an explicit confirmation', async () => {
     const manual = { ...unconfigured, did: '+15105550101', availability: 'manual' };
+    const assigned = [number, { ...number, iPhoneNumberId: 2, phoneNumber: manual.did }];
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     const fetcher = mockFetch((url, init) =>
       init.method === 'DELETE'
         ? { status: 204 }
-        : url.endsWith('/did-routes')
-          ? {
-              body: {
-                ...native,
-                numbers: [number, { ...number, phoneNumber: manual.did }],
-                dids: [managed, manual],
-              },
-            }
-          : undefined,
+        : url.endsWith('/numbers')
+          ? { body: { numbers: assigned } }
+          : url.endsWith('/did-routes')
+            ? {
+                body: {
+                  ...native,
+                  numbers: assigned,
+                  dids: [managed, manual],
+                },
+              }
+            : undefined,
     );
     const user = userEvent.setup();
-    renderScreen('did-routes', <DidRoutesScreen />);
-    await screen.findByText('Manual / operator managed');
-    await user.selectOptions(screen.getByLabelText('DID (E.164)'), manual.did);
-    expect(screen.getByRole('button', { name: 'Save DID route' })).toBeDisabled();
-    expect(screen.getByText(/Automatic adoption is unavailable/)).toBeInTheDocument();
+    renderScreen('numbers', <TenantNumbersScreen />);
+    const card = await screen.findByRole('article', { name: manual.did });
+    expect(card).toHaveTextContent('Manual / operator managed');
+    expect(within(card).queryByRole('button', { name: 'Save DID route' })).not.toBeInTheDocument();
+    expect(card).toHaveTextContent('Routing is read-only');
     await user.click(
       screen.getByRole('button', { name: `Disable PBX routing for ${number.phoneNumber}` }),
     );
@@ -448,8 +448,191 @@ describe('managed DID routes', () => {
   });
 });
 
+describe('unified Numbers routing', () => {
+  it('opens the single-number editor without submitting defaults', async () => {
+    const fetcher = mockFetch();
+    renderScreen('numbers', <TenantNumbersScreen />);
+    const form = await screen.findByRole('form', { name: `PBX routing for ${number.phoneNumber}` });
+    expect(form.closest('details')).toHaveAttribute('open');
+    expect(screen.getAllByRole('article')).toHaveLength(1);
+    expect(screen.getAllByRole('heading', { name: number.phoneNumber })).toHaveLength(1);
+    expect(screen.queryByLabelText('DID (E.164)')).not.toBeInTheDocument();
+    expect(mutations(fetcher)).toEqual([]);
+  });
+
+  it('preserves an assigned number with missing PBX scope and prefills settings when scope later appears', async () => {
+    let scoped = false;
+    const fetcher = mockFetch((url) =>
+      url.endsWith('/did-routes')
+        ? { body: { ...native, numbers: scoped ? [number] : [], dids: scoped ? [managed] : [] } }
+        : undefined,
+    );
+    const user = userEvent.setup();
+    renderScreen('numbers', <TenantNumbersScreen />);
+    const card = await screen.findByRole('article', { name: number.phoneNumber });
+    await waitFor(() => expect(card).toHaveTextContent('PBX scope missing'));
+    expect(screen.getAllByRole('article')).toHaveLength(1);
+    expect(within(card).queryByRole('button', { name: 'Save DID route' })).not.toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: `Edit ${number.phoneNumber}` })).toBeEnabled();
+    scoped = true;
+    await user.click(screen.getByRole('button', { name: 'Refresh numbers and routing' }));
+    expect(await screen.findByLabelText('IANA timezone')).toHaveValue('America/Los_Angeles');
+    expect(screen.getByLabelText('Queue')).toHaveValue(queue.id);
+    expect(mutations(fetcher)).toEqual([]);
+  });
+
+  it('keeps multiple numbers in separate cards with independent editors and no DID selector', async () => {
+    const other = { ...number, iPhoneNumberId: 2, phoneNumber: '+15105550102' };
+    const fetcher = mockFetch((url, init) =>
+      init.method === 'PUT'
+        ? { body: { ...managed, did: other.phoneNumber } }
+        : url.endsWith('/numbers')
+          ? { body: { numbers: [number, other] } }
+          : url.endsWith('/did-routes')
+            ? {
+                body: {
+                  ...native,
+                  numbers: [number, other],
+                  dids: [unconfigured, unconfigured, { ...unconfigured, did: other.phoneNumber }],
+                },
+              }
+            : undefined,
+    );
+    const user = userEvent.setup();
+    renderScreen('numbers', <TenantNumbersScreen />);
+    const first = await screen.findByRole('article', { name: number.phoneNumber });
+    const second = screen.getByRole('article', { name: other.phoneNumber });
+    await waitFor(() =>
+      expect(
+        within(first).getByText('Configure PBX routing').closest('details'),
+      ).not.toHaveAttribute('open'),
+    );
+    expect(screen.getAllByRole('article')).toHaveLength(2);
+    await user.click(within(first).getByText('Configure PBX routing'));
+    await user.selectOptions(within(first).getByLabelText('Queue'), queue.id);
+    await user.clear(within(first).getByLabelText('Rings before LiveKit'));
+    await user.type(within(first).getByLabelText('Rings before LiveKit'), '4');
+    await user.click(within(second).getByText('Configure PBX routing'));
+    expect(within(second).getByLabelText('Rings before LiveKit')).toHaveValue(6);
+    await user.selectOptions(within(second).getByLabelText('Queue'), queue.id);
+    await user.click(within(second).getByRole('button', { name: 'Save DID route' }));
+    await waitFor(() => expect(mutations(fetcher)).toHaveLength(1));
+    expect(mutations(fetcher)[0]).toMatchObject({
+      url: '/admin/tenants/1/did-routes/%2B15105550102',
+      body: { queue: queue.id, ringsBeforeAi: 6 },
+    });
+    await waitFor(() =>
+      expect(within(second).getByRole('button', { name: 'Save DID route' })).toBeEnabled(),
+    );
+    expect(within(first).getByLabelText('Rings before LiveKit')).toHaveValue(4);
+    expect(screen.queryByLabelText('DID (E.164)')).not.toBeInTheDocument();
+  });
+
+  it.each(['did-routes', 'queues'] as const)(
+    'keeps Numbers available when %s fails',
+    async (endpoint) => {
+      const fetcher = mockFetch((url) =>
+        url.endsWith(`/${endpoint}`)
+          ? { status: 503, body: { message: 'OfficePulse unavailable' } }
+          : undefined,
+      );
+      renderScreen('numbers', <TenantNumbersScreen />);
+      const card = await screen.findByRole('article', { name: number.phoneNumber });
+      await waitFor(() => expect(card).toHaveTextContent('PBX routing: Unavailable'));
+      expect(
+        within(card).getByRole('button', { name: `Edit ${number.phoneNumber}` }),
+      ).toBeEnabled();
+      expect(screen.queryByRole('button', { name: 'Save DID route' })).not.toBeInTheDocument();
+      expect(screen.queryByText(/No numbers assigned yet/)).not.toBeInTheDocument();
+      expect(mutations(fetcher)).toEqual([]);
+    },
+  );
+
+  it('disables stale routing after a failed refresh while retaining the draft for recovery', async () => {
+    let unavailable = false;
+    const fetcher = mockFetch((url) =>
+      unavailable && url.endsWith('/did-routes')
+        ? { status: 503, body: { message: 'OfficePulse unavailable' } }
+        : undefined,
+    );
+    const user = userEvent.setup();
+    renderScreen('numbers', <TenantNumbersScreen />);
+    await user.selectOptions(await screen.findByLabelText('Queue'), queue.id);
+    await user.clear(screen.getByLabelText('Rings before LiveKit'));
+    await user.type(screen.getByLabelText('Rings before LiveKit'), '8');
+    unavailable = true;
+    await user.click(screen.getByRole('button', { name: 'Refresh numbers and routing' }));
+    await screen.findByRole('alert');
+    expect(screen.getByRole('article')).toHaveTextContent('PBX routing: Unavailable');
+    expect(screen.getByLabelText('Queue')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save DID route' })).toBeDisabled();
+    unavailable = false;
+    await user.click(screen.getByRole('button', { name: 'Refresh numbers and routing' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save DID route' })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText('Rings before LiveKit')).toHaveValue(8);
+    expect(mutations(fetcher)).toEqual([]);
+  });
+
+  it('keeps disabled Identity numbers and their managed settings visible, with routing read-only', async () => {
+    mockFetch((url) =>
+      url.endsWith('/numbers')
+        ? { body: { numbers: [{ ...number, bEnabled: false }] } }
+        : url.endsWith('/did-routes')
+          ? { body: { ...native, numbers: [], dids: [managed] } }
+          : undefined,
+    );
+    renderScreen('numbers', <TenantNumbersScreen />);
+    expect(await screen.findByLabelText('IANA timezone')).toHaveValue('America/Los_Angeles');
+    expect(screen.getByRole('article')).toHaveTextContent('Configured');
+    expect(screen.getByRole('button', { name: 'Save DID route' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: `Disable PBX routing for ${number.phoneNumber}` }),
+    ).toBeDisabled();
+  });
+
+  it('confirms Identity disabling separately and never changes PBX routing', async () => {
+    let enabled = true;
+    const confirm = vi
+      .spyOn(window, 'confirm')
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    const fetcher = mockFetch((url, init) =>
+      init.method === 'PUT' && url.includes('/numbers/')
+        ? ((enabled = false), { body: { number: { ...number, bEnabled: false } } })
+        : url.endsWith('/numbers')
+          ? { body: { numbers: [{ ...number, bEnabled: enabled, iVersion: 3 }] } }
+          : url.endsWith('/did-routes')
+            ? { body: { ...native, numbers: [number], dids: [managed] } }
+            : undefined,
+    );
+    const user = userEvent.setup();
+    renderScreen('numbers', <TenantNumbersScreen />);
+    await user.click(await screen.findByRole('button', { name: `Edit ${number.phoneNumber}` }));
+    await user.click(screen.getByLabelText('Enabled'));
+    await user.click(screen.getByRole('button', { name: 'Save number' }));
+    expect(mutations(fetcher)).toEqual([]);
+    await user.click(screen.getByRole('button', { name: 'Save number' }));
+    await waitFor(() => expect(mutations(fetcher)).toHaveLength(1));
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining('PBX routing and carrier service are unchanged'),
+    );
+    expect(mutations(fetcher)[0]).toMatchObject({
+      url: '/admin/tenants/1/numbers/1',
+      method: 'PUT',
+      body: { bEnabled: false, expectedVersion: 3 },
+    });
+    await waitFor(() => expect(screen.getByRole('article')).toHaveTextContent('Disabled'));
+    expect(screen.getByRole('article')).toHaveTextContent('Configured');
+    expect(
+      screen.getByRole('button', { name: `Disable PBX routing for ${number.phoneNumber}` }),
+    ).toBeDisabled();
+  });
+});
+
 describe('tenant request isolation', () => {
-  it.each(['extensions', 'queues', 'did-routes'] as const)(
+  it.each(['extensions', 'queues', 'numbers'] as const)(
     'ignores a stale %s inventory after switching tenants',
     async (kind) => {
       let resolve!: (result: Result) => void;
@@ -480,15 +663,11 @@ describe('tenant request isolation', () => {
         ) : kind === 'queues' ? (
           <QueuesScreen />
         ) : (
-          <DidRoutesScreen />
+          <TenantNumbersScreen />
         ),
       );
       await user.click(screen.getByRole('link', { name: 'Switch test tenant' }));
-      await waitFor(() =>
-        expect(
-          screen.queryByText(`Loading ${kind === 'did-routes' ? 'DID routes' : kind}…`),
-        ).not.toBeInTheDocument(),
-      );
+      await waitFor(() => expect(screen.queryByText(`Loading ${kind}…`)).not.toBeInTheDocument());
       await act(async () =>
         resolve({
           body: {
