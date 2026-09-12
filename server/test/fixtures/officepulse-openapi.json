@@ -803,8 +803,8 @@
     "/v1/admin/pbx/dids": {
       "get": {
         "tags": ["Backend API"],
-        "summary": "Read recognized managed routes and explicitly identify manual/unconfigured allowed DIDs",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "summary": "Read recognized managed routes and explicitly identify manual/unconfigured Identity Numbers",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -816,6 +816,17 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 9007199254740991
+            }
+          },
+          {
+            "name": "authorizedDid",
+            "in": "query",
+            "required": true,
+            "description": "Repeatable globally unique E.164 Number freshly authorized for this tenant by Identity through the trusted AidaAdmin backend.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\+[1-9][0-9]{6,14}$",
+              "example": "+19496501147"
             }
           }
         ],
@@ -887,7 +898,7 @@
       "put": {
         "tags": ["Backend API"],
         "summary": "Set queue hours and ring budget before LiveKit; refuse manual route adoption",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -902,6 +913,17 @@
             }
           },
           {
+            "name": "authorizedDid",
+            "in": "query",
+            "required": true,
+            "description": "Repeatable globally unique E.164 Number freshly authorized for this tenant by Identity through the trusted AidaAdmin backend.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\+[1-9][0-9]{6,14}$",
+              "example": "+19496501147"
+            }
+          },
+          {
             "name": "did",
             "in": "path",
             "required": true,
@@ -910,7 +932,7 @@
               "pattern": "^\\+[1-9][0-9]{6,14}$",
               "example": "+19496501147"
             },
-            "description": "Exact tenant-allowlisted E.164 DID. URL encode the plus as %2B."
+            "description": "Exact Identity-assigned E.164 DID. URL encode the plus as %2B."
           }
         ],
         "requestBody": {
@@ -989,7 +1011,7 @@
       "delete": {
         "tags": ["Backend API"],
         "summary": "Delete recognized managed Realtime rows only; retain Identity number assignment",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -1004,6 +1026,17 @@
             }
           },
           {
+            "name": "authorizedDid",
+            "in": "query",
+            "required": true,
+            "description": "Repeatable globally unique E.164 Number freshly authorized for this tenant by Identity through the trusted AidaAdmin backend.",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\+[1-9][0-9]{6,14}$",
+              "example": "+19496501147"
+            }
+          },
+          {
             "name": "did",
             "in": "path",
             "required": true,
@@ -1012,7 +1045,7 @@
               "pattern": "^\\+[1-9][0-9]{6,14}$",
               "example": "+19496501147"
             },
-            "description": "Exact tenant-allowlisted E.164 DID. URL encode the plus as %2B."
+            "description": "Exact Identity-assigned E.164 DID. URL encode the plus as %2B."
           }
         ],
         "responses": {

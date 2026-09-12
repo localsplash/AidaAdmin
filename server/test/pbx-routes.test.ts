@@ -298,7 +298,7 @@ describe('Identity-authorized managed DID settings', () => {
     ).toBe(400);
     expect(api.requests).toEqual([]);
   });
-  it('requires enabled Identity voice assignment and OfficePulse tenant scope', async () => {
+  it('requires enabled Identity voice assignment and authorizes new Numbers dynamically', async () => {
     numbers[0]!.bEnabled = false;
     expect(
       (await send('put', `${base}/did-routes/${did}`, { queue: 't7.sales', ringsBeforeAi: 4 }))
@@ -307,11 +307,14 @@ describe('Identity-authorized managed DID settings', () => {
     expect((await send('get', `${base}/did-routes`)).body.numbers).toEqual(numbers);
     numbers[0]!.bEnabled = true;
     api.dids.set(7, []);
-    expect(
-      (await send('put', `${base}/did-routes/${did}`, { queue: 't7.sales', ringsBeforeAi: 4 }))
-        .status,
-    ).toBe(404);
-    expect(api.requests.some((row) => row.method === 'did.save')).toBe(false);
+    const saved = await send('put', `${base}/did-routes/${did}`, {
+      queue: 't7.sales',
+      ringsBeforeAi: 4,
+    });
+    expect(saved.status).toBe(200);
+    expect(api.requests.find((row) => row.method === 'did.save')?.body).toMatchObject({
+      authorizedDids: [did],
+    });
   });
   it('refuses manual routes on save and delete', async () => {
     api.dids.set(7, [{ did, managed: false, availability: 'manual', applyState: 'unknown' }]);
@@ -322,7 +325,7 @@ describe('Identity-authorized managed DID settings', () => {
     expect((await send('delete', `${base}/did-routes/${did}`)).status).toBe(409);
     expect(api.requests.every((row) => row.method === 'did.list')).toBe(true);
   });
-  it('left joins every tenant assignment exactly once, including absent scope and disabled numbers', async () => {
+  it('left joins and dynamically authorizes every tenant assignment, including disabled numbers', async () => {
     numbers.push(
       { ...numbers[0]!, iPhoneNumberId: 2, phoneNumber: '+15559870002' },
       { ...numbers[0]!, iPhoneNumberId: 3, phoneNumber: '+15559870003', bEnabled: false },
@@ -340,20 +343,22 @@ describe('Identity-authorized managed DID settings', () => {
       {
         did: numbers[1]!.phoneNumber,
         managed: false,
-        availability: 'scope_missing',
+        availability: 'unconfigured',
         applyState: 'unknown',
       },
       {
         did: numbers[2]!.phoneNumber,
         managed: false,
-        availability: 'scope_missing',
+        availability: 'unconfigured',
         applyState: 'unknown',
       },
     ]);
     expect((await send('delete', `${base}/did-routes/${numbers[1]!.phoneNumber}`)).status).toBe(
-      404,
+      204,
     );
-    expect(api.requests.some((entry) => entry.method === 'did.delete')).toBe(false);
+    expect(api.requests.find((entry) => entry.method === 'did.delete')?.body).toMatchObject({
+      authorizedDids: [numbers[1]!.phoneNumber],
+    });
   });
   it('keeps the canonical Numbers endpoint available when OfficePulse fails', async () => {
     if (!snapshot.active) throw Error('fixture');

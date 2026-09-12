@@ -30,9 +30,10 @@ const actions: Record<string, (body: unknown) => Promise<unknown>> = {
   putQueueMember: (body) =>
     client.putQueueMember(7, 't7.sales', '100', pbx.memberBody.parse(body), cid),
   deleteQueueMember: () => client.deleteQueueMember(7, 't7.sales', '100', cid),
-  listDids: () => client.listDids(7, cid),
-  putDid: (body) => client.putDid(7, '+19496501147', pbx.didBody.parse(body), cid),
-  deleteDid: () => client.deleteDid(7, '+19496501147', cid),
+  listDids: () => client.listDids(7, cid, ['+19496501147']),
+  putDid: (body) =>
+    client.putDid(7, '+19496501147', pbx.didBody.parse(body), cid, ['+19496501147']),
+  deleteDid: () => client.deleteDid(7, '+19496501147', cid, ['+19496501147']),
 };
 afterEach(() => vi.unstubAllGlobals());
 describe('canonical native OfficePulse contract', () => {

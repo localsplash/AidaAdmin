@@ -67,8 +67,8 @@ function TenantNumbers({ tenantId }: { tenantId: string }) {
         members can use every enabled number in Echo, including users who cannot administer Aida.
       </p>
       <p>
-        Adding a number records its assignment. Configure its PBX routing below and complete carrier
-        setup before using it.
+        Adding a Number / DID creates its globally unique Identity assignment. Configure its PBX
+        routing below and complete carrier setup before using it.
       </p>
       {error && <p role="alert">{error}</p>}
       {!!identity.error && (
@@ -160,7 +160,7 @@ function TenantNumbers({ tenantId }: { tenantId: string }) {
         onToggle={(e) => setOpen(e.currentTarget.open)}
         className="record-editor"
       >
-        <summary>{editing ? 'Edit number' : 'Add Number…'}</summary>
+        <summary>{editing ? 'Edit number' : 'Add Number / DID…'}</summary>
         <form onSubmit={(e) => void save(e)}>
           <label>
             Phone number

@@ -11,7 +11,7 @@ This brief is paired with the OfficePulseAidaIntegration native PBX provisioning
 - The browser calls only AidaAdmin's authenticated same-origin backend. It must never call the private OfficePulse listener directly.
 - The AidaAdmin backend revalidates the Identity application session, tenant role, selected tenant, and CSRF proof before every mutation, then calls OfficePulse from its admitted server network.
 - OfficePulse/Asterisk owns native extensions, queues, membership, and effective DID dialplan. Do not recreate these as NocoDB desired-state records or direct Asterisk SQL writes in AidaAdmin.
-- Identity remains authoritative for tenant membership and E.164 number assignment. A DID can be managed only when it is an enabled voice number assigned to the selected tenant and OfficePulse also recognizes it in the tenant PBX scope.
+- Identity remains authoritative for tenant membership and globally unique E.164 number assignment. A DID can be managed only when it is an enabled voice number assigned to the selected tenant; AidaAdmin passes that current assignment to OfficePulse while OfficePulse validates the tenant's mapped ingress context and PBX objects.
 - Native queues replace the prior ring-group administration path for this POC. Retire misleading ring-group creation/provisioning UI and client calls rather than silently translating simultaneous-dial records.
 - LiveKit is the only AI provider. Do not expose a provider selector or retain a Retell option.
 - Show the difference between an OfficePulse transaction being `committed` and effective Asterisk state being verified `active`. Never display a generic success that implies a reload/activation was confirmed when it was not.
@@ -95,7 +95,7 @@ There is no provider field. User-facing copy should say:
 - Outside scheduled hours: route directly to LiveKit.
 - With no schedule: the queue is always open, then LiveKit.
 
-Use OfficePulse's managed-DID GET response for editing. If an allowed Identity number is reported as unmanaged/manual, display that state and do not overwrite it without an explicit operator-safe adoption flow; adoption is outside this POC unless added to both contracts.
+Use OfficePulse's managed-DID GET response for editing. A newly assigned Identity Number is reported as unconfigured and can be routed without a per-number environment change. If an Identity number is reported as unmanaged/manual, display that state and do not overwrite it without an explicit operator-safe adoption flow; adoption is outside this POC unless added to both contracts.
 
 Deleting a managed DID route disables OfficePulse PBX routing only. It must not delete, disable, or reassign the Identity phone number, carrier service, message history, or assistant profile.
 

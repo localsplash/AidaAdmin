@@ -76,7 +76,10 @@ AidaAdmin calls OfficePulse's canonical private `/v1/admin/pbx` API from its
 same-origin backend. It creates/deletes extensions and native queues, edits saved
 queue members and configures DID schedules/ring budgets before LiveKit. Identity
 session, tenant/role, selected tenant and CSRF checks precede every mutation.
-Managed DIDs require both enabled Identity voice assignment and OfficePulse scope.
+Managed DIDs require an enabled Identity voice assignment and an operator-mapped
+OfficePulse ingress context. AidaAdmin sends the current Identity-owned Numbers
+with each DID request, so new assignments require no per-number OfficePulse
+environment change.
 
 Set server-only `OFFICEPULSE_API_BASE_URL` (the previous
 `OFFICEPULSE_PROVISIONING_BASE_URL` remains a compatibility alias). Deploy the
@@ -115,7 +118,7 @@ PBX, real Identity login, a carrier number or a physical Android handset.
 
 ## Shared numbers and Echo access
 
-Manage each tenant’s **Numbers** in AidaAdmin. Identity owns the unique E.164 number-to-tenant assignment in `platform_db.identity_tbl_PhoneNumber`; every number supports both voice and messaging and explicitly grants access to all enabled tenant members. Enabled USER members can sign in to Echo even though they cannot use AidaAdmin. No separate Echo user or business provisioning grants access. Members without numbers see a contact-admin warning in Echo.
+Manage each tenant’s **Numbers** in AidaAdmin. The Add Number / DID form creates the assignment through Identity, which owns and enforces the globally unique E.164 number-to-tenant assignment in `platform_db.identity_tbl_PhoneNumber`; every number supports both voice and messaging and explicitly grants access to all enabled tenant members. Enabled USER members can sign in to Echo even though they cannot use AidaAdmin. No separate Echo user or business provisioning grants access. Members without numbers see a contact-admin warning in Echo.
 
 Each Number shows its PBX routing state and an inline routing editor; single-number tenants open it by default. Identity assignments remain visible when PBX scope is missing or OfficePulse is unavailable, with routing actions disabled as appropriate. The immutable E.164 value is their reference; managed routing settings are read from and committed to OfficePulse/Asterisk. Number assignment does not provision carrier service. Disable an existing DID route separately when stopping PBX routing; disabling the shared number removes Echo access and prevents PBX mutations for it until its enabled voice assignment is restored. Tenant/number reassignment is deliberately unsupported to protect historical messages and media.
 

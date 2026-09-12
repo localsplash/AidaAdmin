@@ -1,4 +1,4 @@
-import { HttpIdClient } from '../src/id/client.js';
+import { HttpIdClient, IdClientError } from '../src/id/client.js';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -19,6 +19,7 @@ interface Ctx {
   app: ReturnType<typeof createApp>;
   api: FakeNocoDbApi;
   officePulse: FakeOfficePulse;
+  idClient: HttpIdClient;
   cookies: string[];
   csrf: string;
   tenantId: string;
@@ -83,6 +84,7 @@ beforeEach(async () => {
     app,
     api,
     officePulse,
+    idClient,
     cookies: [`aida.sid=${sid}`, `aida.csrf=${csrf}`],
     csrf,
     tenantId: tenant.id as string,
@@ -97,6 +99,31 @@ function post(pathName: string, body: unknown) {
     .set('x-csrf-token', ctx.csrf)
     .send(body as object);
 }
+
+describe('tenant numbers', () => {
+  it('surfaces the global uniqueness conflict enforced by Identity', async () => {
+    ctx.idClient.saveTenantNumber = async () => {
+      throw new IdClientError(
+        'duplicate Identity number',
+        409,
+        'Phone number is already assigned to a tenant',
+      );
+    };
+    const res = await post(`/admin/tenants/${ctx.tenantId}/numbers`, {
+      phoneNumber: '+15105550100',
+      label: 'Reception',
+      bVoice: true,
+      bMessaging: true,
+      bEnabled: true,
+      accessPolicy: 'TENANT_MEMBERS',
+    });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      error: 'number_save_failed',
+      message: 'Phone number is already assigned to a tenant',
+    });
+  });
+});
 
 describe('assistant profiles', () => {
   it('creates and updates a profile with validation', async () => {

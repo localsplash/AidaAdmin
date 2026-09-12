@@ -150,13 +150,26 @@ export class FakeOfficePulse implements OfficePulseClient {
     if (!(this.queues.get(id) ?? []).some((row) => row.name === queue))
       throw new OfficePulseError('not found', 404);
   }
-  async listDids(iTenantId: number, cid: string): Promise<pbx.DidInventory> {
-    this.record('did.list', iTenantId, cid);
+  async listDids(
+    iTenantId: number,
+    cid: string,
+    authorizedDids: readonly string[] = [],
+  ): Promise<pbx.DidInventory> {
+    this.record('did.list', iTenantId, cid, undefined, { authorizedDids });
+    const stored = this.dids.get(iTenantId) ?? [];
     return {
       source: 'asterisk',
       iTenantId,
       provisioningEnabled: this.provisioningEnabled,
-      dids: this.dids.get(iTenantId) ?? [],
+      dids: authorizedDids.map(
+        (did) =>
+          stored.find((route) => route.did === did) ?? {
+            did,
+            managed: false,
+            availability: 'unconfigured',
+            applyState: 'unknown',
+          },
+      ),
     };
   }
   async putDid(
@@ -164,8 +177,9 @@ export class FakeOfficePulse implements OfficePulseClient {
     did: string,
     body: pbx.DidSettings,
     cid: string,
+    authorizedDids: readonly string[] = [],
   ): Promise<pbx.ManagedDid> {
-    this.record('did.save', id, cid, did, body);
+    this.record('did.save', id, cid, did, { settings: body, authorizedDids });
     const result: pbx.ManagedDid = {
       ...body,
       did,
@@ -177,8 +191,8 @@ export class FakeOfficePulse implements OfficePulseClient {
     this.dids.set(id, [...(this.dids.get(id) ?? []).filter((row) => row.did !== did), result]);
     return result;
   }
-  async deleteDid(id: number, did: string, cid: string) {
-    this.record('did.delete', id, cid, did);
+  async deleteDid(id: number, did: string, cid: string, authorizedDids: readonly string[] = []) {
+    this.record('did.delete', id, cid, did, { authorizedDids });
     this.dids.set(
       id,
       (this.dids.get(id) ?? []).map((row) =>

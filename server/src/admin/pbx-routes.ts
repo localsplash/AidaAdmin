@@ -203,10 +203,14 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
         'Identity number assignment could not be verified',
       );
     }
-    // Identity is the canonical list, including disabled assignments. Absence
-    // from OfficePulse means missing scope, never permission to create a route.
+    // Identity is the canonical list, including disabled assignments. The
+    // OfficePulse response determines whether the mapped ingress context is usable.
     const numbers = directory.numbers.filter((number) => number.iTenantId === ctx.iTenantId);
-    const inventory = await ctx.api.listDids(ctx.iTenantId, req.correlationId);
+    const inventory = await ctx.api.listDids(
+      ctx.iTenantId,
+      req.correlationId,
+      numbers.map((number) => number.phoneNumber),
+    );
     const routes = new Map(inventory.dids.map((route) => [route.did, route]));
     const dids = numbers.map(
       (number) =>
@@ -302,13 +306,13 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
     const did = contract.e164.parse(req.params.did);
     const settings = contract.didBody.parse(req.body);
     await allowedDid(req, ctx, did);
-    return ctx.api.putDid(ctx.iTenantId, did, settings, req.correlationId);
+    return ctx.api.putDid(ctx.iTenantId, did, settings, req.correlationId, [did]);
   });
   route('delete', '/did-routes/:did', 'did.delete', 204, async (req, ctx) => {
     empty(req);
     const did = contract.e164.parse(req.params.did);
     await allowedDid(req, ctx, did);
-    return ctx.api.deleteDid(ctx.iTenantId, did, req.correlationId);
+    return ctx.api.deleteDid(ctx.iTenantId, did, req.correlationId, [did]);
   });
   return router;
 }

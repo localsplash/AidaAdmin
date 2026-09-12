@@ -63,14 +63,24 @@ export interface OfficePulseClient {
     extension: string,
     correlationId: string,
   ): Promise<void>;
-  listDids(iTenantId: number, correlationId: string): Promise<pbx.DidInventory>;
+  listDids(
+    iTenantId: number,
+    correlationId: string,
+    authorizedDids?: readonly string[],
+  ): Promise<pbx.DidInventory>;
   putDid(
     iTenantId: number,
     did: string,
     input: pbx.DidSettings,
     correlationId: string,
+    authorizedDids?: readonly string[],
   ): Promise<pbx.ManagedDid>;
-  deleteDid(iTenantId: number, did: string, correlationId: string): Promise<void>;
+  deleteDid(
+    iTenantId: number,
+    did: string,
+    correlationId: string,
+    authorizedDids?: readonly string[],
+  ): Promise<void>;
   submitCallCommand(callSessionId: string, req: CallCommandRequest): Promise<UpstreamOutcome>;
   /** OfficePulse's own /readyz: never throws — an unreachable service is a result. */
   readiness(): Promise<OfficePulseReadiness>;
@@ -122,8 +132,11 @@ export class HttpOfficePulseClient implements OfficePulseClient {
     correlationId: string,
     schema: S,
     input?: unknown,
+    authorizedDids: readonly string[] = [],
   ): Promise<z.infer<S>> {
-    const path = `/v1/admin/pbx/${parts.map(encodeURIComponent).join('/')}?iTenantId=${iTenantId}`;
+    const query = new URLSearchParams({ iTenantId: String(iTenantId) });
+    for (const did of authorizedDids) query.append('authorizedDid', did);
+    const path = `/v1/admin/pbx/${parts.map(encodeURIComponent).join('/')}?${query}`;
     let response: Response;
     try {
       response = await fetch(new URL(path, this.baseUrl), {
@@ -197,14 +210,20 @@ export class HttpOfficePulseClient implements OfficePulseClient {
   deleteQueueMember(id: number, queue: string, extension: string, cid: string) {
     return this.pbxRequest(id, ['queues', queue, 'extensions', extension], 'DELETE', cid, z.void());
   }
-  listDids(id: number, cid: string) {
-    return this.pbxRequest(id, ['dids'], 'GET', cid, pbx.didInventory);
+  listDids(id: number, cid: string, authorizedDids: readonly string[] = []) {
+    return this.pbxRequest(id, ['dids'], 'GET', cid, pbx.didInventory, undefined, authorizedDids);
   }
-  putDid(id: number, did: string, input: pbx.DidSettings, cid: string) {
-    return this.pbxRequest(id, ['dids', did], 'PUT', cid, pbx.managedDid, input);
+  putDid(
+    id: number,
+    did: string,
+    input: pbx.DidSettings,
+    cid: string,
+    authorizedDids: readonly string[] = [],
+  ) {
+    return this.pbxRequest(id, ['dids', did], 'PUT', cid, pbx.managedDid, input, authorizedDids);
   }
-  deleteDid(id: number, did: string, cid: string) {
-    return this.pbxRequest(id, ['dids', did], 'DELETE', cid, z.void());
+  deleteDid(id: number, did: string, cid: string, authorizedDids: readonly string[] = []) {
+    return this.pbxRequest(id, ['dids', did], 'DELETE', cid, z.void(), undefined, authorizedDids);
   }
 
   async submitCallCommand(

@@ -16,7 +16,9 @@ and strips unapproved fields. SIP secrets are never part of inventory; a newly
 created extension's secret is disclosed once after its transaction commits.
 
 OfficePulse uses a dedicated SELECT-only PBX account and explicit
-`PBX_INVENTORY_TENANTS_JSON` tenant-to-context/queue mappings. Enable
+`PBX_INVENTORY_TENANTS_JSON` tenant-to-context/queue/managed-ingress mappings. AidaAdmin
+passes the current globally unique Identity Number assignments with managed-DID
+requests; per-number environment allowlists are unnecessary. Enable
 `PBX_INVENTORY_ENABLED` and configure those reviewed mappings before rollout.
 Missing mappings, query failures and incompatible schema produce errors.
 Inventory describes persisted PBX configuration, not live registrations.
@@ -38,6 +40,8 @@ The supplied runbook identifies PJSIP Realtime `ps_endpoints`, native `queues`
 and `queue_members`. Queue `ringall` is a strategy, not a ring-group object.
 Endpoint IDs are not automatically dialable extension numbers. Managed DID
 destinations, schedules, queues and fallbacks live in `asterisk.extensions`.
+Identity remains the sole number-to-tenant registry; neither NocoDB nor
+OfficePulse configuration duplicates it.
 The reviewed carrier ingress context contains one generic Realtime lookup and
 no DID-specific exception; other operator-owned trunk and PJSIP configuration
 remains outside AidaAdmin.
