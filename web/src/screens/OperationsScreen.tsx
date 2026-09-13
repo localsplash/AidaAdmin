@@ -1,3 +1,4 @@
+import { ObservationAvailability } from '../components/ObservationAvailability';
 import { LiveTranscript } from '../components/LiveTranscript';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -249,6 +250,8 @@ export function OperationsScreen({
         Refresh now
       </button>
 
+      <ObservationAvailability />
+
       <h2>Active calls</h2>
       {active === null ? (
         <p role="status">Loading…</p>
@@ -333,9 +336,6 @@ export function OperationsScreen({
           ))}
         </ul>
       )}
-
-      <h2>Historical conversations</h2>
-      <p>Coming soon — live transcripts are not historical records.</p>
     </section>
   );
 }

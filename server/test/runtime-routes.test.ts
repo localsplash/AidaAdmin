@@ -492,3 +492,57 @@ describe('live observer authorization', () => {
     expect((await a.post(path(), {})).status).toBe(503);
   });
 });
+
+describe('observation availability without an active call', () => {
+  it('requires a current administrator and selected tenant', async () => {
+    expect((await request(ctx.app).get('/runtime/observation-status')).status).toBe(401);
+    expect(
+      (await (await actor(21, false, ctx.acme.id)).get('/runtime/observation-status')).status,
+    ).toBe(403);
+    expect((await (await actor(1, true, null)).get('/runtime/observation-status')).status).toBe(
+      403,
+    );
+    const a = await actor(20, false, ctx.acme.id);
+    expect((await a.get('/runtime/observation-status')).status).toBe(200);
+    await ctx.deps.repos!.tenantUsers.save(ctx.acme.id, 20, 'USER', true);
+    expect((await a.get('/runtime/observation-status')).status).toBe(403);
+  });
+  it('reports missing configuration and runtime prerequisites with no upstream details', async () => {
+    ctx.runtime.sessions = [];
+    ctx.deps.observerIssuer = null;
+    ctx.officePulse.readinessSnapshot = {
+      reachable: true,
+      ready: true,
+      fullyOperational: false,
+      components: {
+        'native-pbx-admission': {
+          ready: false,
+          criticality: 'degraded',
+          detail: 'private diagnostic',
+        },
+        livekit: { ready: false, criticality: 'degraded', detail: 'private diagnostic' },
+      },
+    };
+    const result = await (await actor(20, false, ctx.acme.id)).get('/runtime/observation-status');
+    expect(result.body).toEqual({
+      observerConfigured: false,
+      admissionReady: false,
+      livekitReady: false,
+    });
+    expect(result.headers['cache-control']).toBe('no-store');
+  });
+  it('distinguishes unknown diagnostics from a failed prerequisite', async () => {
+    ctx.deps.officePulse = null;
+    ctx.deps.observerIssuer = async () => ({
+      url: 'wss://example.invalid',
+      token: 'secret',
+      expiresIn: 60,
+    });
+    const result = await (await actor(30, false, ctx.other.id)).get('/runtime/observation-status');
+    expect(result.body).toEqual({
+      observerConfigured: true,
+      admissionReady: null,
+      livekitReady: null,
+    });
+  });
+});

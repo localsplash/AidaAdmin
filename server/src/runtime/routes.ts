@@ -191,6 +191,33 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
     return { ...session, callerNumber: presentCaller(session.callerNumber, role) };
   }
 
+  // Safe availability summary for tenant administrators, including when no call exists.
+  // Never return credentials, upstream details or another tenant's call metadata.
+  router.get('/runtime/observation-status', async (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+      const ctx = await resolveContext(req, res);
+      if (!ctx) return;
+      if (!ctx.tenantId || !['TENANT_ADMIN', 'SUPER_ADMIN'].includes(ctx.role)) {
+        res.status(403).json({ error: 'observer_forbidden' });
+        return;
+      }
+      const live = await deps.officePulse?.readiness().catch(() => null);
+      const component = (name: string): boolean | null => {
+        if (!live?.reachable) return null;
+        const ready = live.components?.[name]?.ready;
+        return typeof ready === 'boolean' ? ready : null;
+      };
+      res.json({
+        observerConfigured: Boolean(deps.observerIssuer),
+        admissionReady: component('native-pbx-admission'),
+        livekitReady: component('livekit'),
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ── Calls ──────────────────────────────────────────────────────────────────
 
   router.get('/runtime/calls', async (req, res, next) => {

@@ -148,7 +148,14 @@ export type CallListState = 'active' | 'recent' | 'orphaned' | 'all';
 
 const tenantQuery = (tenant?: string) => (tenant ? `&tenant=${encodeURIComponent(tenant)}` : '');
 
+export interface ObservationStatus {
+  observerConfigured: boolean;
+  admissionReady: boolean | null;
+  livekitReady: boolean | null;
+}
+
 export const runtimeApi = {
+  observationStatus: () => call<ObservationStatus>('/runtime/observation-status', 'GET'),
   observe: (id: string) =>
     call<{ url: string; token: string; expiresIn: number; agentParticipantSid: string }>(
       `/runtime/calls/${encodeURIComponent(id)}/observer`,
