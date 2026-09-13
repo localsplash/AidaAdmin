@@ -58,6 +58,12 @@ function mockRuntime(upstream: Upstream) {
       const respond = (status: number, body: unknown) =>
         new Response(JSON.stringify(body), { status });
       if (upstream.failWith) return respond(upstream.failWith.status, upstream.failWith.body);
+      if (url === '/runtime/observation-status')
+        return respond(200, {
+          observerConfigured: false,
+          admissionReady: false,
+          livekitReady: false,
+        });
       if (url.includes('/runtime/calls?state=active')) {
         return respond(200, { calls: upstream.active.map((d) => d.call) });
       }
@@ -102,6 +108,19 @@ const detail = (
 });
 
 describe('OperationsScreen', () => {
+  it('shows live transcription and unavailable setup even without call cards', async () => {
+    mockRuntime({ active: [], commands: [] });
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('No active calls.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Live transcription' })).toBeInTheDocument();
+    expect(
+      await screen.findByText(/LiveKit observation has not been configured/),
+    ).toBeInTheDocument();
+  });
   it('keeps simultaneous calls isolated in their own tabs', async () => {
     mockRuntime({
       active: [
@@ -268,16 +287,15 @@ describe('OperationsScreen', () => {
     expect(screen.getByText(/takeover failed — no-answer/i)).toBeInTheDocument();
   });
 
-  it('marks historical conversations as coming soon and says where transcripts live', async () => {
+  it('explains live-only observation without a misleading coming-soon placeholder', async () => {
     mockRuntime({ active: [], commands: [] });
     render(
       <MemoryRouter>
         <OperationsScreen />
       </MemoryRouter>,
     );
-    expect(
-      await screen.findByRole('heading', { name: /historical conversations/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /live transcription/i })).toBeInTheDocument();
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Earlier speech is not replayed/)).toBeInTheDocument();
   });
 });

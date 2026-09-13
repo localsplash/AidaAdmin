@@ -410,3 +410,13 @@ input[readonly] {
 .number-card .record-editor {
   margin: 1rem 0;
 }
+
+.observation-availability {
+  margin-block: 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+}
+.observation-availability h2 {
+  margin-top: 0;
+}
