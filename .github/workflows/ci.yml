@@ -60,7 +60,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image
-        run: docker build -t aida-admin:ci .
+        run: |
+          docker build -t aida-admin:ci \
+            --build-arg BUILD_REVISION="$(git rev-parse HEAD)" \
+            --build-arg SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)" \
+            --build-arg BUILD_DIRTY=false .
       - name: Container starts and serves /healthz
         run: |
           docker run -d --name aida-admin -e NODE_ENV=test -p 3001:3001 aida-admin:ci

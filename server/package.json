@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node ../scripts/write-build-info.mjs dist/build-info.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "nocodb": "tsx src/nocodb/cli.ts",

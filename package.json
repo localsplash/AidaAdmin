@@ -2,7 +2,7 @@
   "name": "aida-admin",
   "private": true,
   "version": "0.1.0",
-  "description": "AidaAdmin — administration UI and backend-for-frontend for the Aida Office POC",
+  "description": "AidaAdmin \u2014 administration UI and backend-for-frontend for the Aida Office POC",
   "type": "module",
   "workspaces": [
     "server",
@@ -18,9 +18,10 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "npm run test --workspaces",
+    "test": "npm run test:version && npm run test --workspaces",
     "test:e2e": "playwright test",
-    "start": "node server/dist/index.js"
+    "start": "node server/dist/index.js",
+    "test:version": "node --test scripts/check-build-info.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
