@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { adminApi, type Extension } from '../api/admin';
 import { OneTimeSecret } from '../components/OneTimeSecret';
+import { PbxScope } from '../components/PbxScope';
 import {
   applyStateLabel,
   COMMITTED_NOTICE,
@@ -10,13 +11,15 @@ import {
 } from '../components/PbxNotice';
 import { usePbxInventory } from '../hooks/usePbxInventory';
 
-const EMPTY = { extension: '', displayName: '', callerIdNumber: '', context: '' };
+const EMPTY = { extension: '', displayName: '', callerIdNumber: '' };
 export function ExtensionsScreen() {
   const { tenantId = '' } = useParams();
   return <TenantExtensions key={tenantId} tenantId={tenantId} />;
 }
 function TenantExtensions({ tenantId }: { tenantId: string }) {
-  const inventory = usePbxInventory(tenantId, adminApi.listExtensions);
+  // The selected context is one of the tenant's own; undefined means its primary.
+  const [context, setContext] = useState<string | undefined>();
+  const inventory = usePbxInventory(tenantId, adminApi.listExtensions, context);
   const [form, setForm] = useState(EMPTY);
   const [open, setOpen] = useState(false);
   const [secret, setSecret] = useState<{ username: string; secret: string } | null>(null);
@@ -24,9 +27,9 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
-  const managed = (extension: Extension) =>
-    !!extension.extension &&
-    extension.id === `${extension.extension}-t${inventory.data?.iTenantId}`;
+  // OfficePulse derives `managed` from the Dial route it owns in this context;
+  // imported endpoints stay operator managed whatever their id looks like.
+  const managed = (extension: Extension) => !!extension.extension && extension.managed;
   const writable = inventory.data?.provisioningEnabled === true && !inventory.error;
   const callerIdLength = (form.callerIdNumber || form.extension).length;
   const displayNameMax = Math.min(33, Math.max(1, 40 - callerIdLength - 5));
@@ -38,12 +41,15 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
     setError(null);
     setStatus('');
     try {
-      const result = await adminApi.createExtension(tenantId, {
-        extension: form.extension,
-        displayName: form.displayName,
-        ...(form.callerIdNumber ? { callerIdNumber: form.callerIdNumber } : {}),
-        ...(inventory.data!.contexts.length > 1 ? { context: form.context } : {}),
-      });
+      const result = await adminApi.createExtension(
+        tenantId,
+        {
+          extension: form.extension,
+          displayName: form.displayName,
+          ...(form.callerIdNumber ? { callerIdNumber: form.callerIdNumber } : {}),
+        },
+        context,
+      );
       if (!inventory.current()) return;
       // Credentials exist only in this disclosure lifecycle; dismiss/unmount destroys the state.
       setSecret({ username: result.sipUsername, secret: result.sipSecret });
@@ -74,7 +80,7 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
     setError(null);
     setStatus('');
     try {
-      await adminApi.deleteExtension(tenantId, extension.extension);
+      await adminApi.deleteExtension(tenantId, extension.extension, context);
       if (!inventory.current()) return;
       setStatus(
         `Extension ${extension.extension} deletion committed. Effective Asterisk state has not been verified active.`,
@@ -96,6 +102,14 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
       <p>
         Native OfficePulse extensions. Inventory alone does not verify effective Asterisk state.
       </p>
+      {inventory.data && (
+        <PbxScope
+          inventory={inventory.data}
+          context={context}
+          onSelect={setContext}
+          disabled={busy || !!secret}
+        />
+      )}
       <PbxErrorNotice error={error || inventory.error} />
       {status && <p role="status">{status}</p>}
       {inventory.data && !inventory.data.provisioningEnabled && <PbxDisabledNotice />}
@@ -199,21 +213,11 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
                   onChange={(event) => setForm({ ...form, callerIdNumber: event.target.value })}
                 />
               </label>
-              {(inventory.data?.contexts.length ?? 0) > 1 && (
-                <label>
-                  Context
-                  <select
-                    required
-                    value={form.context}
-                    onChange={(event) => setForm({ ...form, context: event.target.value })}
-                  >
-                    <option value="">Choose an approved context…</option>
-                    {inventory.data!.contexts.map((context) => (
-                      <option key={context}>{context}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
+              <p>
+                Created in context <code>{inventory.data?.context}</code>
+                {(inventory.data?.contexts.length ?? 0) > 1 &&
+                  '; choose another context above before creating.'}
+              </p>
             </fieldset>
             <div className="form-actions">
               <button type="submit" disabled={busy || !writable}>

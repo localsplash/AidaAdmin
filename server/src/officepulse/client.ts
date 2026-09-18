@@ -33,50 +33,64 @@ export interface OfficePulseReadiness {
   ready: boolean;
   fullyOperational: boolean;
   components: Record<string, OfficePulseComponent>;
+  /** OFFICEPULSE_INSTANCE_ID of the serving PBX instance, when it reported one. */
+  pbxInstanceId?: string;
 }
 
+/**
+ * The PBX scope a request acts in: one extension context on the serving
+ * instance, plus the carrier ingress context for managed DID operations.
+ * The customer tenant is never sent — AidaAdmin authorizes it beforehand.
+ */
+export interface PbxScope {
+  context: string;
+  didContext?: string | undefined;
+}
+export type DidScope = PbxScope & { didContext: string };
+
 export interface OfficePulseClient {
-  listExtensions(iTenantId: number, correlationId: string): Promise<pbx.ExtensionInventory>;
+  listContexts(correlationId: string): Promise<pbx.ContextInventory>;
+  listExtensions(scope: PbxScope, correlationId: string): Promise<pbx.ExtensionInventory>;
   createExtension(
-    iTenantId: number,
+    scope: PbxScope,
     input: pbx.CreateExtension,
     correlationId: string,
   ): Promise<pbx.ExtensionCreated>;
-  deleteExtension(iTenantId: number, extension: string, correlationId: string): Promise<void>;
-  listQueues(iTenantId: number, correlationId: string): Promise<pbx.QueueInventory>;
+  deleteExtension(scope: PbxScope, extension: string, correlationId: string): Promise<void>;
+  listQueues(scope: PbxScope, correlationId: string): Promise<pbx.QueueInventory>;
   createQueue(
-    iTenantId: number,
+    scope: PbxScope,
     input: pbx.CreateQueue,
     correlationId: string,
   ): Promise<pbx.QueueCreated>;
-  deleteQueue(iTenantId: number, queue: string, correlationId: string): Promise<void>;
+  deleteQueue(scope: PbxScope, queue: string, correlationId: string): Promise<void>;
   putQueueMember(
-    iTenantId: number,
+    scope: PbxScope,
     queue: string,
     extension: string,
     input: pbx.QueueMemberInput,
     correlationId: string,
   ): Promise<pbx.MemberSaved>;
   deleteQueueMember(
-    iTenantId: number,
+    scope: PbxScope,
     queue: string,
     extension: string,
     correlationId: string,
   ): Promise<void>;
   listDids(
-    iTenantId: number,
+    scope: DidScope,
     correlationId: string,
     authorizedDids?: readonly string[],
   ): Promise<pbx.DidInventory>;
   putDid(
-    iTenantId: number,
+    scope: DidScope,
     did: string,
     input: pbx.DidSettings,
     correlationId: string,
     authorizedDids?: readonly string[],
   ): Promise<pbx.ManagedDid>;
   deleteDid(
-    iTenantId: number,
+    scope: DidScope,
     did: string,
     correlationId: string,
     authorizedDids?: readonly string[],
@@ -104,6 +118,12 @@ const UNREACHABLE: OfficePulseReadiness = {
   components: {},
 };
 
+interface PbxRequest {
+  scope?: PbxScope | undefined;
+  input?: unknown;
+  authorizedDids?: readonly string[] | undefined;
+}
+
 export class HttpOfficePulseClient implements OfficePulseClient {
   constructor(private readonly baseUrl: string) {}
 
@@ -126,17 +146,18 @@ export class HttpOfficePulseClient implements OfficePulseClient {
   }
 
   private async pbxRequest<S extends z.ZodTypeAny>(
-    iTenantId: number,
     parts: string[],
     method: string,
     correlationId: string,
     schema: S,
-    input?: unknown,
-    authorizedDids: readonly string[] = [],
+    { scope, input, authorizedDids = [] }: PbxRequest = {},
   ): Promise<z.infer<S>> {
-    const query = new URLSearchParams({ iTenantId: String(iTenantId) });
+    const query = new URLSearchParams();
+    if (scope) query.set('context', scope.context);
+    if (scope?.didContext) query.set('didContext', scope.didContext);
     for (const did of authorizedDids) query.append('authorizedDid', did);
-    const path = `/v1/admin/pbx/${parts.map(encodeURIComponent).join('/')}?${query}`;
+    const search = query.size > 0 ? `?${query}` : '';
+    const path = `/v1/admin/pbx/${parts.map(encodeURIComponent).join('/')}${search}`;
     let response: Response;
     try {
       response = await fetch(new URL(path, this.baseUrl), {
@@ -161,69 +182,81 @@ export class HttpOfficePulseClient implements OfficePulseClient {
     if (response.status === 204) return schema.parse(undefined) as z.infer<S>;
     const body: unknown = await response.json().catch(() => null);
     const parsed = schema.safeParse(body);
+    // A missing pbxInstanceId fails the schema: an inventory that cannot name
+    // its instance cannot be pinned to the scope this tenant administers.
     if (!parsed.success)
       throw new OfficePulseError('OfficePulse returned an invalid PBX response', 502);
+    const data = parsed.data as Record<string, unknown> | undefined;
     if (
-      parsed.data &&
-      typeof parsed.data === 'object' &&
-      'iTenantId' in parsed.data &&
-      parsed.data.iTenantId !== iTenantId
+      scope &&
+      data &&
+      typeof data === 'object' &&
+      (('context' in data && data.context !== scope.context) ||
+        ('didContext' in data && data.didContext !== scope.didContext))
     ) {
-      throw new OfficePulseError('OfficePulse returned an invalid tenant scope', 502);
+      throw new OfficePulseError('OfficePulse returned an invalid PBX scope', 502);
     }
     return parsed.data;
   }
-  listExtensions(id: number, cid: string) {
-    return this.pbxRequest(id, ['extensions'], 'GET', cid, pbx.extensionInventory);
+  listContexts(cid: string) {
+    return this.pbxRequest(['contexts'], 'GET', cid, pbx.contextInventory);
   }
-  createExtension(id: number, input: pbx.CreateExtension, cid: string) {
-    return this.pbxRequest(id, ['extensions'], 'POST', cid, pbx.extensionCreated, input);
+  listExtensions(scope: PbxScope, cid: string) {
+    return this.pbxRequest(['extensions'], 'GET', cid, pbx.extensionInventory, { scope });
   }
-  deleteExtension(id: number, extension: string, cid: string) {
-    return this.pbxRequest(id, ['extensions', extension], 'DELETE', cid, z.void());
+  createExtension(scope: PbxScope, input: pbx.CreateExtension, cid: string) {
+    return this.pbxRequest(['extensions'], 'POST', cid, pbx.extensionCreated, { scope, input });
   }
-  listQueues(id: number, cid: string) {
-    return this.pbxRequest(id, ['queues'], 'GET', cid, pbx.queueInventory);
+  deleteExtension(scope: PbxScope, extension: string, cid: string) {
+    return this.pbxRequest(['extensions', extension], 'DELETE', cid, z.void(), { scope });
   }
-  createQueue(id: number, input: pbx.CreateQueue, cid: string) {
-    return this.pbxRequest(id, ['queues'], 'POST', cid, pbx.queueCreated, input);
+  listQueues(scope: PbxScope, cid: string) {
+    return this.pbxRequest(['queues'], 'GET', cid, pbx.queueInventory, { scope });
   }
-  deleteQueue(id: number, queue: string, cid: string) {
-    return this.pbxRequest(id, ['queues', queue], 'DELETE', cid, z.void());
+  createQueue(scope: PbxScope, input: pbx.CreateQueue, cid: string) {
+    return this.pbxRequest(['queues'], 'POST', cid, pbx.queueCreated, { scope, input });
+  }
+  deleteQueue(scope: PbxScope, queue: string, cid: string) {
+    return this.pbxRequest(['queues', queue], 'DELETE', cid, z.void(), { scope });
   }
   putQueueMember(
-    id: number,
+    scope: PbxScope,
     queue: string,
     extension: string,
     input: pbx.QueueMemberInput,
     cid: string,
   ) {
     return this.pbxRequest(
-      id,
       ['queues', queue, 'extensions', extension],
       'PUT',
       cid,
       pbx.memberSaved,
-      input,
+      { scope, input },
     );
   }
-  deleteQueueMember(id: number, queue: string, extension: string, cid: string) {
-    return this.pbxRequest(id, ['queues', queue, 'extensions', extension], 'DELETE', cid, z.void());
+  deleteQueueMember(scope: PbxScope, queue: string, extension: string, cid: string) {
+    return this.pbxRequest(['queues', queue, 'extensions', extension], 'DELETE', cid, z.void(), {
+      scope,
+    });
   }
-  listDids(id: number, cid: string, authorizedDids: readonly string[] = []) {
-    return this.pbxRequest(id, ['dids'], 'GET', cid, pbx.didInventory, undefined, authorizedDids);
+  listDids(scope: DidScope, cid: string, authorizedDids: readonly string[] = []) {
+    return this.pbxRequest(['dids'], 'GET', cid, pbx.didInventory, { scope, authorizedDids });
   }
   putDid(
-    id: number,
+    scope: DidScope,
     did: string,
     input: pbx.DidSettings,
     cid: string,
     authorizedDids: readonly string[] = [],
   ) {
-    return this.pbxRequest(id, ['dids', did], 'PUT', cid, pbx.managedDid, input, authorizedDids);
+    return this.pbxRequest(['dids', did], 'PUT', cid, pbx.managedDid, {
+      scope,
+      input,
+      authorizedDids,
+    });
   }
-  deleteDid(id: number, did: string, cid: string, authorizedDids: readonly string[] = []) {
-    return this.pbxRequest(id, ['dids', did], 'DELETE', cid, z.void(), undefined, authorizedDids);
+  deleteDid(scope: DidScope, did: string, cid: string, authorizedDids: readonly string[] = []) {
+    return this.pbxRequest(['dids', did], 'DELETE', cid, z.void(), { scope, authorizedDids });
   }
 
   async submitCallCommand(
@@ -251,11 +284,13 @@ export class HttpOfficePulseClient implements OfficePulseClient {
       // down; both carry the same snapshot, so both are data here.
       const { body } = await this.fetchJson('/readyz', 'GET');
       const components = (body.components ?? {}) as Record<string, OfficePulseComponent>;
+      const instance = pbx.instanceId.safeParse(body.pbxInstanceId);
       return {
         reachable: true,
         ready: body.ready === true,
         fullyOperational: body.fullyOperational === true,
         components,
+        ...(instance.success ? { pbxInstanceId: instance.data } : {}),
       };
     } catch {
       return UNREACHABLE;

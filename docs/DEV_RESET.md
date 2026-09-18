@@ -22,12 +22,15 @@ Use the NocoDB metadata API, so its metadata and backing SQL tables stay aligned
 Do not infer backing SQL names or drop only one side of a NocoDB table.
 
 The only canonical Aida-owned NocoDB tables are `aida_tbl_TenantProfile`,
-`aida_tbl_AssistantProfile` and `aida_tbl_Appearance`. `cfg_tbl_Setting` and other
+`aida_tbl_AssistantProfile`, `aida_tbl_ProfileAssignment` and `aida_tbl_Appearance`. `cfg_tbl_Setting` and other
 applications' tables in PlatformConfig are outside this deletion set. Identity's
 `platform_db` tenant/user/membership/shared-number tables are active authority.
 
 Delete obsolete settings `LEGACY_PBX_WRITES_ENABLED` and `HANDSET_PROVISIONING_URL`
-from applicable settings/env sources. Replace the old provisioning base URL key
+from applicable settings/env sources. OfficePulse's `PBX_INVENTORY_TENANTS_JSON`
+and `AGENT_PROFILE_IDS_JSON` are retired too: move each entry into the tenant's
+contexts/DID context in Tenants and into profile assignments before removing
+them (OfficePulse refuses to start while they are set). Replace the old provisioning base URL key
 with `OFFICEPULSE_API_BASE_URL`, then remove the old key. Native administration
 accepts the old URL key as a temporary configuration alias, with the canonical
 key taking precedence. The URL must be the separate private OfficePulse API ingress.
@@ -47,6 +50,7 @@ The local Admin deployment uses `/opt/platform-local/admin/compose.yaml`, servic
 NocoDB state are external to that application container.
 
 After cleanup, run the explicit NocoDB `upgrade` and `validate` commands. Confirm
-only the three Aida business tables exist, removed API routes return 404, Identity
+only the four Aida business tables exist, removed API routes return 404, Identity
 login and tenant/number/profile administration work, and PBX inventory either
-returns the mapped tenant's actual rows or a clear unavailable response.
+returns the tenant's assigned context's actual rows or a clear unavailable or
+`pbx_scope_missing` response.

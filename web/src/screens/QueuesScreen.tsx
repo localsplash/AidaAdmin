@@ -15,12 +15,13 @@ import {
   PbxDisabledNotice,
   PbxErrorNotice,
 } from '../components/PbxNotice';
+import { PbxScope } from '../components/PbxScope';
 import { usePbxInventory } from '../hooks/usePbxInventory';
 
-const loadInventory = async (tenant: string) => {
+const loadInventory = async (tenant: string, context?: string) => {
   const [queues, extensions] = await Promise.all([
-    adminApi.listQueues(tenant),
-    adminApi.listExtensions(tenant),
+    adminApi.listQueues(tenant, context),
+    adminApi.listExtensions(tenant, context),
   ]);
   return {
     ...queues,
@@ -59,7 +60,8 @@ export function QueuesScreen() {
   return <TenantQueues key={tenantId} tenantId={tenantId} />;
 }
 function TenantQueues({ tenantId }: { tenantId: string }) {
-  const inventory = usePbxInventory(tenantId, loadInventory);
+  const [context, setContext] = useState<string | undefined>();
+  const inventory = usePbxInventory(tenantId, loadInventory, context);
   const [form, setForm] = useState({ name: '', strategy: 'ringall' as QueueStrategy });
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<NativeQueue | null>(null);
@@ -70,12 +72,10 @@ function TenantQueues({ tenantId }: { tenantId: string }) {
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const writable = inventory.data?.provisioningEnabled === true && !inventory.error;
+  // Only endpoints OfficePulse manages in this context are selectable members.
   const extensions =
-    inventory.data?.extensions.filter(
-      (extension) =>
-        extension.extension &&
-        extension.id === `${extension.extension}-t${inventory.data?.iTenantId}`,
-    ) ?? [];
+    inventory.data?.extensions.filter((extension) => extension.extension && extension.managed) ??
+    [];
   const start = () => {
     if (lock.current || !writable) return false;
     lock.current = true;
@@ -92,7 +92,7 @@ function TenantQueues({ tenantId }: { tenantId: string }) {
     event.preventDefault();
     if (!start()) return;
     try {
-      const result = await adminApi.createQueue(tenantId, form);
+      const result = await adminApi.createQueue(tenantId, form, context);
       if (!inventory.current()) return;
       setStatus(result.applyState === 'active' ? 'Queue verified active.' : COMMITTED_NOTICE);
       setForm({ name: '', strategy: 'ringall' });
@@ -114,7 +114,7 @@ function TenantQueues({ tenantId }: { tenantId: string }) {
     )
       return;
     try {
-      await adminApi.deleteQueue(tenantId, queue.id);
+      await adminApi.deleteQueue(tenantId, queue.id, context);
       if (!inventory.current()) return;
       setStatus(
         `Queue ${queue.name} deletion committed. Effective Asterisk state has not been verified active.`,
@@ -148,12 +148,14 @@ function TenantQueues({ tenantId }: { tenantId: string }) {
           (next.selected && (next.penalty !== previous.penalty || next.paused !== previous.paused));
         if (!changed) continue;
         if (next.selected)
-          await adminApi.setQueueMember(tenantId, editing.id, extension.extension!, {
-            penalty: Number(next.penalty),
-            paused: next.paused,
-            context: extension.context,
-          });
-        else await adminApi.deleteQueueMember(tenantId, editing.id, extension.extension!);
+          await adminApi.setQueueMember(
+            tenantId,
+            editing.id,
+            extension.extension!,
+            { penalty: Number(next.penalty), paused: next.paused, context: extension.context },
+            context,
+          );
+        else await adminApi.deleteQueueMember(tenantId, editing.id, extension.extension!, context);
         if (!inventory.current()) return;
         applied++;
         setBaseline((current) => ({ ...current, [extension.id]: { ...next } }));
@@ -189,6 +191,17 @@ function TenantQueues({ tenantId }: { tenantId: string }) {
         Native OfficePulse queues and saved members. Effective Asterisk activation is verified
         separately.
       </p>
+      {inventory.data && (
+        <PbxScope
+          inventory={inventory.data}
+          context={context}
+          onSelect={(next) => {
+            setEditing(null);
+            setContext(next);
+          }}
+          disabled={busy}
+        />
+      )}
       <PbxErrorNotice error={error || inventory.error} />
       {error instanceof ApiError && error.failure.status === 409 && (
         <p>

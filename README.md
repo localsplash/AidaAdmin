@@ -6,13 +6,13 @@ Identity owns every person, business, membership and staff application session.
 
 ## Storage and ownership
 
-| Store                   | Owner                 | AidaAdmin access                                                      |
-| ----------------------- | --------------------- | --------------------------------------------------------------------- |
-| `platform_db`           | Identity              | Authenticated Identity API only                                       |
-| NocoDB `PlatformConfig` | Platform applications | Business/assistant profiles, appearance and scoped settings           |
-| `aida_admin_db` (MySQL) | AidaAdmin             | OAuth state, Identity event receipts/replay cursor, append-only audit |
-| `aidacalls_db` (MySQL)  | OfficePulse           | Read-only runtime views; commands through the private HTTP API        |
-| Asterisk tables         | PBX project           | OfficePulse adapter only; no AidaAdmin DDL or direct writes           |
+| Store                   | Owner                 | AidaAdmin access                                                       |
+| ----------------------- | --------------------- | ---------------------------------------------------------------------- |
+| `platform_db`           | Identity              | Authenticated Identity API only                                        |
+| NocoDB `PlatformConfig` | Platform applications | Tenant PBX scope, assistant profiles/assignments, appearance, settings |
+| `aida_admin_db` (MySQL) | AidaAdmin             | OAuth state, Identity event receipts/replay cursor, append-only audit  |
+| `aidacalls_db` (MySQL)  | OfficePulse           | Read-only runtime views; commands through the private HTTP API         |
+| Asterisk tables         | PBX project           | OfficePulse adapter only; no AidaAdmin DDL or direct writes            |
 
 There is no AidaAdmin PostgreSQL dependency, local user/membership directory,
 local authoritative session table, or NocoDB `AidaIdentity` access. The cookie
@@ -31,7 +31,8 @@ Users are listed with names, email addresses, roles and status. Add User is
 expandable; Edit saves the profile and role together through Identity. Linked
 sign-in emails are read-only; pending-user email addresses can be corrected.
 Extensions, native queues and managed DID routes use OfficePulse inventory and
-tenant-authorized mutations. Generated extension credentials are disclosed once.
+tenant-authorized, context-scoped mutations. Generated extension credentials are
+disclosed once.
 Identity enforces the role hierarchy on the server, including live demotion and
 last-administrator protection. Global directory search remains Super Admin-only.
 
@@ -63,11 +64,15 @@ npm run build
 npm start
 ```
 
-The CLI only creates/upgrades Aida-owned tables; the platform bootstrap owns
-`cfg_tbl_Setting`. Create businesses and memberships through Identity/AidaAdmin,
-then configure each business's voice profile. Existing organizations without a
-voice profile appear with revision 0 and can be configured using the normal
-edit form. See [.env.example](.env.example) and the
+The CLI only creates/upgrades Aida-owned tables (`aida_tbl_TenantProfile`,
+`aida_tbl_AssistantProfile`, `aida_tbl_ProfileAssignment`, `aida_tbl_Appearance`);
+the platform bootstrap owns `cfg_tbl_Setting`. Create businesses and memberships
+through Identity/AidaAdmin, then set each business's PBX scope in Tenants: its
+primary Asterisk context (`asterisk_context`), any additional extension contexts
+(`additional_contexts`) and the shared inbound DID context (`did_context`).
+Existing organizations without a voice profile appear with revision 0 and can be
+configured using the normal edit form. `upgrade` adds the context columns and the
+assignment table to an existing base additively. See [.env.example](.env.example) and the
 [cutover guide](docs/PLATFORM_MIGRATION.md) before attaching existing data.
 
 ## Native PBX and runtime
@@ -76,10 +81,18 @@ AidaAdmin calls OfficePulse's canonical private `/v1/admin/pbx` API from its
 same-origin backend. It creates/deletes extensions and native queues, edits saved
 queue members and configures DID schedules/ring budgets before LiveKit. Identity
 session, tenant/role, selected tenant and CSRF checks precede every mutation.
-Managed DIDs require an enabled Identity voice assignment and an operator-mapped
-OfficePulse ingress context. AidaAdmin sends the current Identity-owned Numbers
-with each DID request, so new assignments require no per-number OfficePulse
-environment change.
+The PBX scope sent to OfficePulse is `{pbxInstanceId, context}` — the Asterisk
+extension context assigned to the tenant in Tenants — never the customer tenant
+id, which stays the login/authorization identity. A browser may pick one of the
+tenant's own contexts with `?context=`; anything else is refused before any
+OfficePulse call. Managed DIDs require an enabled Identity voice assignment and
+the tenant's inbound DID context. AidaAdmin sends the current Identity-owned
+Numbers with each DID request, so new assignments require no per-number
+OfficePulse environment change. Which assistant answers a call is a persisted
+per-context/per-DID assignment (`aida_tbl_ProfileAssignment`) edited in Profiles
+and Numbers; nobody edits environment JSON to select a profile. Former
+`PBX_INVENTORY_TENANTS_JSON` and `AGENT_PROFILE_IDS_JSON` entries migrate as
+described in [native PBX administration](docs/NATIVE_PBX_ADMINISTRATION.md).
 
 Set server-only `OFFICEPULSE_API_BASE_URL` (the previous
 `OFFICEPULSE_PROVISIONING_BASE_URL` remains a compatibility alias). Deploy the

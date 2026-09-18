@@ -123,6 +123,13 @@ export class FakeNocoDbApi implements NocoDbApi {
     Object.assign(record, rest);
   }
 
+  async deleteRecord(tableId: string, recordId: number): Promise<void> {
+    const table = this.byId(tableId);
+    if (!table.records.some((r) => r.Id === recordId))
+      throw new Error(`Record ${recordId} not found in ${table.info.table_name}`);
+    table.records = table.records.filter((r) => r.Id !== recordId);
+  }
+
   /** Test-only helpers. */
   tableByName(name: string): FakeTable | undefined {
     return [...this.tables.values()].find((t) => t.info.table_name === name);

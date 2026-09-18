@@ -84,7 +84,10 @@ it('creates a globally unique Number / DID through Identity and refreshes PBX ro
         return new Response(
           JSON.stringify({
             source: 'asterisk',
-            iTenantId: 1,
+            pbxInstanceId: 'officepulse-test',
+            context: 'office',
+            contexts: ['office'],
+            didContext: 'from-carrier',
             provisioningEnabled: true,
             numbers,
             dids: numbers.map(() => ({
@@ -100,7 +103,9 @@ it('creates a globally unique Number / DID through Identity and refreshes PBX ro
         return new Response(
           JSON.stringify({
             source: 'asterisk',
-            iTenantId: 1,
+            pbxInstanceId: 'officepulse-test',
+            context: 'office',
+            contexts: ['office'],
             provisioningEnabled: true,
             queues: [],
           }),

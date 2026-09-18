@@ -1,24 +1,33 @@
 import type {
   CallCommandRequest,
+  DidScope,
   OfficePulseClient,
   OfficePulseReadiness,
+  PbxScope,
   UpstreamOutcome,
 } from '../../src/officepulse/client.js';
 import { OfficePulseError } from '../../src/officepulse/client.js';
 import type * as pbx from '../../src/officepulse/pbx-contract.js';
 
-/** Tenant-scoped native API fake; captured requests never include returned credentials. */
+export const FAKE_PBX_INSTANCE = 'officepulse-test';
+
+/** Context-scoped native API fake; captured requests never include returned credentials. */
 export class FakeOfficePulse implements OfficePulseClient {
   requests: Array<{
     method: string;
-    tenantId: number;
+    context?: string;
+    didContext?: string;
     object?: string;
     body?: unknown;
     correlationId: string;
   }> = [];
-  extensions = new Map<number, pbx.ExtensionInventory['extensions']>();
-  queues = new Map<number, pbx.QueueInventory['queues']>();
-  dids = new Map<number, pbx.DidInventory['dids']>();
+  pbxInstanceId = FAKE_PBX_INSTANCE;
+  /** Inventory keyed by the owning extension context. */
+  extensions = new Map<string, pbx.ExtensionInventory['extensions']>();
+  queues = new Map<string, pbx.QueueInventory['queues']>();
+  dids = new Map<string, pbx.DidInventory['dids']>();
+  /** Extra contexts present on the instance beyond those with inventory. */
+  knownContexts: string[] = [];
   commands: Array<{ callSessionId: string; body: CallCommandRequest }> = [];
   readinessProbes = 0;
   commandOutcome: UpstreamOutcome = { status: 202, body: { status: 'ringing' } };
@@ -27,6 +36,7 @@ export class FakeOfficePulse implements OfficePulseClient {
     ready: true,
     fullyOperational: true,
     components: { ari: { ready: true, criticality: 'critical' } },
+    pbxInstanceId: FAKE_PBX_INSTANCE,
   };
   failNext: boolean | number = false;
   provisioningEnabled = true;
@@ -39,7 +49,7 @@ export class FakeOfficePulse implements OfficePulseClient {
   }
   private record(
     method: string,
-    tenantId: number,
+    scope: PbxScope | undefined,
     correlationId: string,
     object?: string,
     body?: unknown,
@@ -47,42 +57,66 @@ export class FakeOfficePulse implements OfficePulseClient {
     this.check();
     this.requests.push({
       method,
-      tenantId,
       correlationId,
+      ...(scope === undefined ? {} : { context: scope.context }),
+      ...(scope?.didContext === undefined ? {} : { didContext: scope.didContext }),
       ...(object === undefined ? {} : { object }),
       ...(body === undefined ? {} : { body }),
     });
   }
-  async listExtensions(iTenantId: number, cid: string): Promise<pbx.ExtensionInventory> {
-    this.record('extension.list', iTenantId, cid);
+  private inventory(scope: PbxScope) {
+    return {
+      source: 'asterisk' as const,
+      pbxInstanceId: this.pbxInstanceId,
+      context: scope.context,
+      provisioningEnabled: this.provisioningEnabled,
+    };
+  }
+  async listContexts(cid: string): Promise<pbx.ContextInventory> {
+    this.record('context.list', undefined, cid);
+    const contexts = new Set([
+      ...this.knownContexts,
+      ...this.extensions.keys(),
+      ...this.queues.keys(),
+      ...this.dids.keys(),
+    ]);
     return {
       source: 'asterisk',
-      iTenantId,
-      provisioningEnabled: this.provisioningEnabled,
-      contexts: ['office-main'],
-      extensions: this.extensions.get(iTenantId) ?? [],
+      pbxInstanceId: this.pbxInstanceId,
+      contexts: [...contexts].sort(),
+    };
+  }
+  async listExtensions(scope: PbxScope, cid: string): Promise<pbx.ExtensionInventory> {
+    this.record('extension.list', scope, cid);
+    return {
+      ...this.inventory(scope),
+      contexts: [scope.context],
+      extensions: this.extensions.get(scope.context) ?? [],
     };
   }
   async createExtension(
-    id: number,
+    scope: PbxScope,
     body: pbx.CreateExtension,
     cid: string,
   ): Promise<pbx.ExtensionCreated> {
-    this.record('extension.create', id, cid, body.extension, body);
-    const records = this.extensions.get(id) ?? [];
+    this.record('extension.create', scope, cid, body.extension, body);
+    if (body.context !== undefined && body.context !== scope.context)
+      throw new OfficePulseError('context mismatch', 422);
+    const records = this.extensions.get(scope.context) ?? [];
     if (records.some((row) => row.extension === body.extension))
       throw new OfficePulseError('duplicate', 409);
-    const sipUsername = `${body.extension}-t${id}`;
+    const sipUsername = `${body.extension}-${scope.context}`;
     records.push({
       id: sipUsername,
       extension: body.extension,
-      context: body.context ?? 'office-main',
+      context: scope.context,
       callerId: body.displayName ?? null,
       transport: 'transport-udp',
       aors: sipUsername,
+      managed: true,
       applyState: 'unknown',
     });
-    this.extensions.set(id, records);
+    this.extensions.set(scope.context, records);
     return {
       extension: body.extension,
       sipUsername,
@@ -90,52 +124,51 @@ export class FakeOfficePulse implements OfficePulseClient {
       applyState: 'committed',
     };
   }
-  async deleteExtension(id: number, extension: string, cid: string) {
-    this.record('extension.delete', id, cid, extension);
-    const rows = this.extensions.get(id) ?? [];
+  async deleteExtension(scope: PbxScope, extension: string, cid: string) {
+    this.record('extension.delete', scope, cid, extension);
+    const rows = this.extensions.get(scope.context) ?? [];
     if (!rows.some((row) => row.extension === extension))
       throw new OfficePulseError('not found', 404);
     this.extensions.set(
-      id,
+      scope.context,
       rows.filter((row) => row.extension !== extension),
     );
   }
-  async listQueues(iTenantId: number, cid: string): Promise<pbx.QueueInventory> {
-    this.record('queue.list', iTenantId, cid);
-    return {
-      source: 'asterisk',
-      iTenantId,
-      provisioningEnabled: this.provisioningEnabled,
-      queues: this.queues.get(iTenantId) ?? [],
-    };
+  async listQueues(scope: PbxScope, cid: string): Promise<pbx.QueueInventory> {
+    this.record('queue.list', scope, cid);
+    return { ...this.inventory(scope), queues: this.queues.get(scope.context) ?? [] };
   }
-  async createQueue(id: number, body: pbx.CreateQueue, cid: string): Promise<pbx.QueueCreated> {
-    this.record('queue.create', id, cid, body.name, body);
-    const name = `t${id}.${body.name}`;
+  async createQueue(
+    scope: PbxScope,
+    body: pbx.CreateQueue,
+    cid: string,
+  ): Promise<pbx.QueueCreated> {
+    this.record('queue.create', scope, cid, body.name, body);
+    const name = `${scope.context}.${body.name}`;
     const strategy = body.strategy ?? 'ringall';
-    const rows = this.queues.get(id) ?? [];
+    const rows = this.queues.get(scope.context) ?? [];
     rows.push({ id: name, name, strategy, members: [], applyState: 'unknown' });
-    this.queues.set(id, rows);
+    this.queues.set(scope.context, rows);
     return { name, strategy, applyState: 'committed' };
   }
-  async deleteQueue(id: number, queue: string, cid: string) {
-    this.record('queue.delete', id, cid, queue);
-    if (!(this.queues.get(id) ?? []).some((row) => row.name === queue))
+  async deleteQueue(scope: PbxScope, queue: string, cid: string) {
+    this.record('queue.delete', scope, cid, queue);
+    if (!(this.queues.get(scope.context) ?? []).some((row) => row.name === queue))
       throw new OfficePulseError('not found', 404);
     this.queues.set(
-      id,
-      this.queues.get(id)!.filter((row) => row.name !== queue),
+      scope.context,
+      this.queues.get(scope.context)!.filter((row) => row.name !== queue),
     );
   }
   async putQueueMember(
-    id: number,
+    scope: PbxScope,
     queue: string,
     extension: string,
     body: pbx.QueueMemberInput,
     cid: string,
   ): Promise<pbx.MemberSaved> {
-    this.record('member.save', id, cid, `${queue}/${extension}`, body);
-    if (!(this.queues.get(id) ?? []).some((row) => row.name === queue))
+    this.record('member.save', scope, cid, `${queue}/${extension}`, body);
+    if (!(this.queues.get(scope.context) ?? []).some((row) => row.name === queue))
       throw new OfficePulseError('not found', 404);
     return {
       queue,
@@ -145,22 +178,21 @@ export class FakeOfficePulse implements OfficePulseClient {
       applyState: 'committed',
     };
   }
-  async deleteQueueMember(id: number, queue: string, extension: string, cid: string) {
-    this.record('member.delete', id, cid, `${queue}/${extension}`);
-    if (!(this.queues.get(id) ?? []).some((row) => row.name === queue))
+  async deleteQueueMember(scope: PbxScope, queue: string, extension: string, cid: string) {
+    this.record('member.delete', scope, cid, `${queue}/${extension}`);
+    if (!(this.queues.get(scope.context) ?? []).some((row) => row.name === queue))
       throw new OfficePulseError('not found', 404);
   }
   async listDids(
-    iTenantId: number,
+    scope: DidScope,
     cid: string,
     authorizedDids: readonly string[] = [],
   ): Promise<pbx.DidInventory> {
-    this.record('did.list', iTenantId, cid, undefined, { authorizedDids });
-    const stored = this.dids.get(iTenantId) ?? [];
+    this.record('did.list', scope, cid, undefined, { authorizedDids });
+    const stored = this.dids.get(scope.context) ?? [];
     return {
-      source: 'asterisk',
-      iTenantId,
-      provisioningEnabled: this.provisioningEnabled,
+      ...this.inventory(scope),
+      didContext: scope.didContext,
       dids: authorizedDids.map(
         (did) =>
           stored.find((route) => route.did === did) ?? {
@@ -173,13 +205,13 @@ export class FakeOfficePulse implements OfficePulseClient {
     };
   }
   async putDid(
-    id: number,
+    scope: DidScope,
     did: string,
     body: pbx.DidSettings,
     cid: string,
     authorizedDids: readonly string[] = [],
   ): Promise<pbx.ManagedDid> {
-    this.record('did.save', id, cid, did, { settings: body, authorizedDids });
+    this.record('did.save', scope, cid, did, { settings: body, authorizedDids });
     const result: pbx.ManagedDid = {
       ...body,
       did,
@@ -188,14 +220,22 @@ export class FakeOfficePulse implements OfficePulseClient {
       ringTimeoutSeconds: body.ringsBeforeAi * 5,
       applyState: 'committed',
     };
-    this.dids.set(id, [...(this.dids.get(id) ?? []).filter((row) => row.did !== did), result]);
+    this.dids.set(scope.context, [
+      ...(this.dids.get(scope.context) ?? []).filter((row) => row.did !== did),
+      result,
+    ]);
     return result;
   }
-  async deleteDid(id: number, did: string, cid: string, authorizedDids: readonly string[] = []) {
-    this.record('did.delete', id, cid, did, { authorizedDids });
+  async deleteDid(
+    scope: DidScope,
+    did: string,
+    cid: string,
+    authorizedDids: readonly string[] = [],
+  ) {
+    this.record('did.delete', scope, cid, did, { authorizedDids });
     this.dids.set(
-      id,
-      (this.dids.get(id) ?? []).map((row) =>
+      scope.context,
+      (this.dids.get(scope.context) ?? []).map((row) =>
         row.did === did
           ? { did, managed: false, availability: 'unconfigured', applyState: 'unknown' }
           : row,

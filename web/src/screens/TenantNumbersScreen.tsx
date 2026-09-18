@@ -3,8 +3,11 @@ import { useParams } from 'react-router-dom';
 import { adminApi, type NumberInput, type TenantNumber } from '../api/admin';
 import { NumberRouting } from '../components/NumberRouting';
 import { PbxDisabledNotice, PbxErrorNotice } from '../components/PbxNotice';
+import { PbxScope } from '../components/PbxScope';
+import { ProfileAssignmentSelect } from '../components/ProfileAssignmentSelect';
 import { usePbxInventory } from '../hooks/usePbxInventory';
 import { useNumberRouting } from '../hooks/useNumberRouting';
+import { useProfileAssignments } from '../hooks/useProfileAssignments';
 const EMPTY: NumberInput = {
   phoneNumber: '',
   label: '',
@@ -19,7 +22,11 @@ export function TenantNumbersScreen() {
 }
 function TenantNumbers({ tenantId }: { tenantId: string }) {
   const identity = usePbxInventory(tenantId, adminApi.listNumbers);
-  const routing = useNumberRouting(tenantId);
+  // DID routes and DID assignments both live in the selected extension context.
+  const [context, setContext] = useState<string | undefined>();
+  const routing = useNumberRouting(tenantId, context);
+  const assignments = useProfileAssignments(tenantId);
+  const activeContext = routing.data?.context ?? context ?? assignments.data?.contexts[0];
   const numbers = identity.data?.numbers ?? [];
   const lock = useRef(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +84,18 @@ function TenantNumbers({ tenantId }: { tenantId: string }) {
           {identity.error instanceof Error ? identity.error.message : 'Refresh and try again.'}
         </p>
       )}
+      {routing.data && (
+        <PbxScope
+          inventory={routing.data}
+          context={context}
+          onSelect={setContext}
+          disabled={busy}
+        />
+      )}
       <PbxErrorNotice error={routing.error} />
+      {!!assignments.error && (
+        <p>Assistant profile assignments are unavailable; refresh to retry.</p>
+      )}
       {!!routing.error && identity.data && !identity.error && (
         <p role="status">
           PBX routing is unavailable. Number assignments remain available; routing actions are
@@ -136,6 +154,19 @@ function TenantNumbers({ tenantId }: { tenantId: string }) {
             ) : (
               <p>PBX routing: {routing.loading ? 'Loading…' : 'Unavailable'}</p>
             )}
+            {assignments.data && activeContext ? (
+              <ProfileAssignmentSelect
+                tenantId={tenantId}
+                context={activeContext}
+                did={n.phoneNumber}
+                label="Assistant profile"
+                blankLabel="Use context default"
+                inventory={assignments}
+                disabled={busy || !n.bEnabled || !n.bVoice}
+              />
+            ) : (
+              <p>Assistant profile: {assignments.loading ? 'Loading…' : 'Unavailable'}</p>
+            )}
           </article>
         );
       })}
@@ -151,6 +182,7 @@ function TenantNumbers({ tenantId }: { tenantId: string }) {
         onClick={() => {
           void identity.refresh();
           void routing.refresh();
+          void assignments.refresh();
         }}
       >
         Refresh numbers and routing

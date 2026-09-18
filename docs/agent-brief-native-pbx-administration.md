@@ -1,3 +1,5 @@
+> Historical brief: it predates the context-scope migration (#42). OfficePulse is now called with `{pbxInstanceId, context}` rather than `iTenantId`, extension ids are `<extension>-<context>`, and assistant profiles are assigned per context/DID; see [NATIVE_PBX_ADMINISTRATION.md](NATIVE_PBX_ADMINISTRATION.md) for the current contract.
+
 # Agent implementation brief: AidaAdmin native PBX administration
 
 ## Objective

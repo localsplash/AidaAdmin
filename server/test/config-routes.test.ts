@@ -72,6 +72,8 @@ beforeEach(async () => {
     name: 'Acme',
     slug: 'acme',
     asteriskContext: 'acme',
+    additionalContexts: [],
+    didContext: null,
     enabled: true,
   });
   const profile = await repos.assistantProfiles.create(tenant.id as string, {

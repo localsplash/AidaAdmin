@@ -7,17 +7,31 @@ import { QueuesScreen } from '../src/screens/QueuesScreen';
 import { TenantNumbersScreen } from '../src/screens/TenantNumbersScreen';
 import type { DidRoute, Extension, NativeQueue } from '../src/api/admin';
 
-// Native DTO fixtures follow OfficePulse's published /v1/admin/pbx contract.
-const native = { source: 'asterisk', iTenantId: 1, provisioningEnabled: true };
+// Native DTO fixtures follow OfficePulse's published /v1/admin/pbx contract as
+// the BFF relays it: the routing scope is the PBX instance and context, plus
+// the tenant's authorized context list. No tenant id appears.
+const native = {
+  source: 'asterisk',
+  pbxInstanceId: 'officepulse-test',
+  context: 'office',
+  contexts: ['office'],
+  provisioningEnabled: true,
+};
 const extension: Extension = {
-  id: '100-t1',
+  id: '100-office',
   extension: '100',
   callerId: 'Front Desk',
   context: 'office',
+  managed: true,
   applyState: 'unknown',
 };
-const second: Extension = { ...extension, id: '101-t1', extension: '101', callerId: 'Sales' };
-const third: Extension = { ...extension, id: '102-t1', extension: '102', callerId: 'Support' };
+const second: Extension = { ...extension, id: '101-office', extension: '101', callerId: 'Sales' };
+const third: Extension = {
+  ...extension,
+  id: '102-office',
+  extension: '102',
+  callerId: 'Support',
+};
 const queue: NativeQueue = {
   id: 't1.reception',
   name: 'reception',
@@ -55,15 +69,22 @@ function mockFetch(handler: Handler = () => undefined) {
   const fetcher = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
     let result = await handler(url, init);
+    // A selected context travels as a query; the default fixtures ignore it.
+    const path = url.split('?')[0]!;
     if (!result && init.method === 'GET') {
-      if (url.endsWith('/numbers')) result = { body: { numbers: [number] } };
-      if (url.endsWith('/extensions'))
+      if (path.endsWith('/numbers')) result = { body: { numbers: [number] } };
+      if (path.endsWith('/extensions'))
+        result = { body: { ...native, extensions: [extension, second, third] } };
+      if (path.endsWith('/queues')) result = { body: { ...native, queues: [queue] } };
+      if (path.endsWith('/did-routes'))
         result = {
-          body: { ...native, extensions: [extension, second, third], contexts: ['office'] },
+          body: { ...native, didContext: 'from-carrier', dids: [unconfigured], numbers: [number] },
         };
-      if (url.endsWith('/queues')) result = { body: { ...native, queues: [queue] } };
-      if (url.endsWith('/did-routes'))
-        result = { body: { ...native, dids: [unconfigured], numbers: [number] } };
+      if (path.endsWith('/profiles')) result = { body: { profiles: [] } };
+      if (path.endsWith('/profile-assignments'))
+        result = {
+          body: { pbxInstanceId: native.pbxInstanceId, contexts: ['office'], assignments: [] },
+        };
     }
     result ??= { status: 404, body: { message: 'Missing fixture' } };
     return new Response(result.status === 204 ? null : JSON.stringify(result.body ?? {}), {
@@ -109,7 +130,7 @@ describe('native extensions', () => {
             status: 201,
             body: {
               extension: '104',
-              sipUsername: '104-t1',
+              sipUsername: '104-office',
               sipSecret: 'one-time-value',
               applyState: 'committed',
             },
@@ -122,6 +143,8 @@ describe('native extensions', () => {
     renderScreen('extensions', <ExtensionsScreen />);
     await startExtension(user);
     expect(screen.queryByLabelText('Context')).not.toBeInTheDocument();
+    expect(screen.getByText(/PBX instance/)).toHaveTextContent('officepulse-test');
+    expect(screen.getByText(/PBX instance/)).toHaveTextContent('office');
     await user.click(screen.getByRole('button', { name: 'Create extension and show credentials' }));
     const panel = await screen.findByRole('alertdialog');
     expect(panel).toHaveFocus();
@@ -152,9 +175,10 @@ describe('native extensions', () => {
       screen.queryByRole('button', { name: /rotate|enroll|edit extension/i }),
     ).not.toBeInTheDocument();
   });
-  it('keeps the form on unavailable failure with support reference and offers approved contexts only', async () => {
-    mockFetch((url, init) =>
-      init.method === 'POST'
+  it('keeps the form on unavailable failure with support reference and offers authorized contexts only', async () => {
+    const fetcher = mockFetch((url, init) => {
+      const context = new URL(url, 'http://test').searchParams.get('context') ?? 'office';
+      return init.method === 'POST'
         ? {
             status: 503,
             body: {
@@ -162,28 +186,56 @@ describe('native extensions', () => {
               correlationId: 'support-123',
             },
           }
-        : url.endsWith('/extensions')
-          ? { body: { ...native, extensions: [], contexts: ['office', 'afterhours'] } }
-          : undefined,
-    );
+        : url.includes('/extensions')
+          ? {
+              body: {
+                ...native,
+                context,
+                contexts: ['office', 'afterhours'],
+                extensions: context === 'afterhours' ? [{ ...extension, context }] : [],
+              },
+            }
+          : undefined;
+    });
     const user = userEvent.setup();
     renderScreen('extensions', <ExtensionsScreen />);
+    // Multi-context tenants pick a context; the list is the server's, not typed.
+    const selector = await screen.findByLabelText('Context');
+    expect(selector).toHaveValue('office');
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'office',
+      'afterhours',
+    ]);
+    await user.selectOptions(selector, 'afterhours');
+    expect(await screen.findByText('Front Desk')).toBeInTheDocument();
     await startExtension(user);
-    await user.selectOptions(screen.getByLabelText('Context'), 'office');
+    expect(screen.getByText(/Created in context/)).toHaveTextContent('afterhours');
     await user.click(screen.getByRole('button', { name: 'Create extension and show credentials' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('OfficePulse unavailable');
     expect(screen.getByRole('alert')).toHaveTextContent('support-123');
     expect(screen.getByLabelText('Extension number')).toHaveValue('104');
+    expect(mutations(fetcher)).toEqual([
+      {
+        url: '/admin/tenants/1/extensions?context=afterhours',
+        method: 'POST',
+        body: { extension: '104', displayName: 'New Desk' },
+      },
+    ]);
+    expect(
+      fetcher.mock.calls
+        .filter(([url, init]) => init?.method === 'GET' && String(url).includes('/extensions'))
+        .map(([url]) => String(url)),
+    ).toEqual(['/admin/tenants/1/extensions', '/admin/tenants/1/extensions?context=afterhours']);
   });
   it('disables mutations when provisioning is disabled and distinguishes unavailability from empty inventory', async () => {
     mockFetch(() => ({
-      body: { ...native, provisioningEnabled: false, extensions: [], contexts: ['office'] },
+      body: { ...native, provisioningEnabled: false, extensions: [] },
     }));
     renderScreen('extensions', <ExtensionsScreen />);
     expect(await screen.findByText(/Inventory is read-only/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create extension' })).toBeDisabled();
   });
-  it('confirms deletion, removes memberships warning, and keeps legacy native endpoints read-only', async () => {
+  it('confirms deletion, removes memberships warning, and keeps imported endpoints read-only', async () => {
     const confirm = vi
       .spyOn(window, 'confirm')
       .mockReturnValueOnce(false)
@@ -192,10 +244,10 @@ describe('native extensions', () => {
       init.method === 'DELETE'
         ? { status: 204 }
         : {
+            // OfficePulse decides `managed` from its Dial route, not the id shape.
             body: {
               ...native,
-              extensions: [extension, { ...second, id: '101' }],
-              contexts: ['office'],
+              extensions: [extension, { ...second, id: '101-t1', managed: false }],
             },
           },
     );
@@ -238,8 +290,8 @@ describe('native queues', () => {
     const populated = {
       ...queue,
       members: [
-        { interface: 'PJSIP/100-t1', memberName: 'Front Desk', penalty: 0, paused: false },
-        { interface: 'PJSIP/101-t1', memberName: 'Sales', penalty: 0, paused: false },
+        { interface: 'PJSIP/100-office', memberName: 'Front Desk', penalty: 0, paused: false },
+        { interface: 'PJSIP/101-office', memberName: 'Sales', penalty: 0, paused: false },
       ],
     };
     const fetcher = mockFetch((url, init) =>
@@ -296,6 +348,40 @@ describe('native queues', () => {
     await user.click(screen.getByRole('button', { name: 'Save members' }));
     await waitFor(() => expect(mutations(fetcher)).toHaveLength(3));
     expect(mutations(fetcher).filter((call) => call.url.endsWith('/100'))).toHaveLength(1);
+  });
+  it('scopes queue reads and writes to the selected context', async () => {
+    const fetcher = mockFetch((url, init) => {
+      const context = new URL(url, 'http://test').searchParams.get('context') ?? 'office';
+      if (init.method === 'POST')
+        return { status: 201, body: { ...queue, applyState: 'committed' } };
+      if (init.method === 'DELETE') return { status: 204 };
+      if (url.includes('/queues'))
+        return {
+          body: {
+            ...native,
+            context,
+            contexts: ['office', 'afterhours'],
+            queues: context === 'afterhours' ? [{ ...queue, name: 'afterhours.night' }] : [queue],
+          },
+        };
+      if (url.includes('/extensions'))
+        return { body: { ...native, context, contexts: ['office', 'afterhours'], extensions: [] } };
+      return undefined;
+    });
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderScreen('queues', <QueuesScreen />);
+    await user.selectOptions(await screen.findByLabelText('Context'), 'afterhours');
+    await user.click(await screen.findByRole('button', { name: 'Delete queue afterhours.night' }));
+    await waitFor(() => expect(mutations(fetcher)).toHaveLength(1));
+    expect(mutations(fetcher)[0]!.url).toBe(
+      '/admin/tenants/1/queues/t1.reception?context=afterhours',
+    );
+    await user.click(screen.getByRole('button', { name: 'Create queue' }));
+    await user.type(screen.getByLabelText('Queue name / slug'), 'night');
+    await user.click(screen.getByRole('button', { name: 'Save queue' }));
+    await waitFor(() => expect(mutations(fetcher)).toHaveLength(2));
+    expect(mutations(fetcher)[1]!.url).toBe('/admin/tenants/1/queues?context=afterhours');
   });
   it('links DID routes on delete conflict and requires confirmation', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -645,12 +731,14 @@ describe('tenant request isolation', () => {
             ? {
                 body: {
                   ...native,
-                  iTenantId: 2,
-                  extensions: [],
+                  context: 'second',
                   contexts: ['second'],
+                  extensions: [],
                   queues: [],
                   dids: [],
                   numbers: [],
+                  profiles: [],
+                  assignments: [],
                 },
               }
             : undefined,
@@ -705,7 +793,7 @@ describe('tenant request isolation', () => {
         status: 201,
         body: {
           extension: '104',
-          sipUsername: '104-t1',
+          sipUsername: '104-office',
           sipSecret: 'stale-secret',
           applyState: 'committed',
         },

@@ -4,3 +4,6 @@ coverage/
 playwright-report/
 test-results/
 package-lock.json
+# Shared OfficePulse contract fixtures are copied verbatim; keep them byte-identical.
+server/test/fixtures/officepulse-openapi.json
+server/test/fixtures/native-pbx-contract.json

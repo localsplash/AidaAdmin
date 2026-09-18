@@ -90,12 +90,16 @@ beforeEach(async () => {
     name: 'Acme',
     slug: 'acme',
     asteriskContext: 'acme',
+    additionalContexts: [],
+    didContext: null,
     enabled: true,
   });
   const other = await repos.tenants.create({
     name: 'Other',
     slug: 'other',
     asteriskContext: 'other',
+    additionalContexts: [],
+    didContext: null,
     enabled: true,
   });
   // Members: 20 administers Acme, 21 is Acme staff, 30 administers Other.

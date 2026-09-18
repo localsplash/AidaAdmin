@@ -33,8 +33,27 @@ export const LOGICAL_SCHEMA: NocoTableDef[] = [
       ...common,
       num('tenant_id'),
       text('asterisk_context'),
+      // Extra extension contexts this business owns (comma-separated) and the
+      // shared carrier ingress context that holds its managed DID routes.
+      text('additional_contexts'),
+      text('did_context'),
       text('caller_id_name'),
       text('caller_id_number'),
+    ],
+  },
+  {
+    // Which assistant answers a call in routing scope {pbx_instance_id, context},
+    // per DID or as the context default (did = ''). OfficePulse reads this table.
+    table_name: 'profile_assignment',
+    title: 'profile_assignment',
+    columns: [
+      ...common,
+      num('tenant_id'),
+      text('pbx_instance_id'),
+      text('context'),
+      text('did'),
+      text('profile_id'),
+      bool('enabled'),
     ],
   },
   {
@@ -72,6 +91,7 @@ export const TABLE_NAMES: Record<string, string> = {
   tenant_profile: 'aida_tbl_TenantProfile',
   assistant_profile: 'aida_tbl_AssistantProfile',
   appearance: 'aida_tbl_Appearance',
+  profile_assignment: 'aida_tbl_ProfileAssignment',
 };
 export const FIELD_NAMES: Record<string, string> = {
   tenant_id: 'iTenantId',
@@ -96,6 +116,7 @@ export const AIDA_SCHEMA: NocoTableDef[] = LOGICAL_SCHEMA.map((table) => ({
  */
 export const UNIQUE_RULES: Record<string, string[][]> = {
   tenant_profile: [['tenant_id'], ['asterisk_context']],
+  profile_assignment: [['pbx_instance_id', 'context', 'did']],
 };
 
 export interface DriftReport {

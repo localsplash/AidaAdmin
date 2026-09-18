@@ -4,6 +4,8 @@ import { z } from 'zod';
 export const extensionNumber = z.string().regex(/^[0-9]{2,12}$/);
 export const nativeName = z.string().regex(/^[a-zA-Z0-9_.-]{1,80}$/);
 export const contextName = z.string().regex(/^[a-zA-Z0-9_.-]{1,40}$/);
+/** OFFICEPULSE_INSTANCE_ID: with a context it is the routing scope {pbxInstanceId, context}. */
+export const instanceId = z.string().regex(/^[A-Za-z0-9_.-]{1,80}$/);
 export const e164 = z.string().regex(/^\+[1-9][0-9]{6,14}$/);
 export const queueStrategy = z.enum([
   'ringall',
@@ -113,13 +115,21 @@ export type QueueMemberInput = z.infer<typeof memberBody>;
 export type DidSettings = z.infer<typeof didBody>;
 
 const applyState = z.enum(['committed', 'active', 'unknown']);
+// Every inventory names the scope it describes: the serving PBX instance and
+// the extension context; the client refuses a response that echoes another.
 const inventory = {
   source: z.literal('asterisk'),
-  iTenantId: z.number().int().positive(),
+  pbxInstanceId: instanceId,
+  context: contextName,
   provisioningEnabled: z.boolean(),
 };
 // Response schemas strip unknown properties, so inventories cannot accidentally
 // disclose future secret-bearing fields returned by an upstream deployment.
+export const contextInventory = z.object({
+  source: z.literal('asterisk'),
+  pbxInstanceId: instanceId,
+  contexts: z.array(contextName),
+});
 export const extensionInventory = z.object({
   ...inventory,
   contexts: z.array(contextName),
@@ -131,6 +141,8 @@ export const extensionInventory = z.object({
       callerId: z.string().nullable(),
       transport: z.string().nullable(),
       aors: z.string().nullable(),
+      /** The endpoint has the managed Dial route in this context; imported ones do not. */
+      managed: z.boolean(),
       applyState,
     }),
   ),
@@ -180,6 +192,7 @@ export const managedDid = z.object({
 });
 export const didInventory = z.object({
   ...inventory,
+  didContext: contextName,
   dids: z.array(
     z.discriminatedUnion('managed', [
       managedDid,
@@ -192,6 +205,7 @@ export const didInventory = z.object({
     ]),
   ),
 });
+export type ContextInventory = z.infer<typeof contextInventory>;
 export type ExtensionInventory = z.infer<typeof extensionInventory>;
 export type ExtensionCreated = z.infer<typeof extensionCreated>;
 export type QueueInventory = z.infer<typeof queueInventory>;

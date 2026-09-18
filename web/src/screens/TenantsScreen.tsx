@@ -2,7 +2,29 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { adminApi, ApiError, type Tenant, type TenantInput } from '../api/admin';
 
-const EMPTY: TenantInput = { name: '', slug: '', asteriskContext: '', enabled: true };
+/** The form keeps the additional contexts as typed; they become a list on submit. */
+interface TenantForm extends Omit<TenantInput, 'additionalContexts' | 'didContext'> {
+  additionalContexts: string;
+  didContext: string;
+}
+const EMPTY: TenantForm = {
+  name: '',
+  slug: '',
+  asteriskContext: '',
+  additionalContexts: '',
+  didContext: '',
+  enabled: true,
+};
+function toInput(form: TenantForm): TenantInput {
+  return {
+    ...form,
+    additionalContexts: form.additionalContexts
+      .split(',')
+      .map((context) => context.trim())
+      .filter((context) => context !== ''),
+    didContext: form.didContext.trim() || null,
+  };
+}
 
 /**
  * The list is scoped by the server: every tenant for a Super Admin, the ones
@@ -14,9 +36,12 @@ export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const [form, setForm] = useState<TenantInput>(EMPTY);
+  const [form, setForm] = useState<TenantForm>(EMPTY);
   const [editing, setEditing] = useState<Tenant | null>(null);
   const [saving, setSaving] = useState(false);
+  // Contexts present on the PBX instance, offered as suggestions to Super
+  // Admins. Listing them grants nothing; the server still validates ownership.
+  const [knownContexts, setKnownContexts] = useState<string[]>([]);
 
   const load = useCallback(() => {
     adminApi
@@ -28,6 +53,21 @@ export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    if (!canCreate) return;
+    let active = true;
+    adminApi
+      .listPbxContexts()
+      .then((res) => {
+        if (active) setKnownContexts(res.contexts);
+      })
+      .catch(() => {
+        // Suggestions only: an unreachable or unconfigured OfficePulse changes nothing.
+      });
+    return () => {
+      active = false;
+    };
+  }, [canCreate]);
 
   const startEdit = (tenant: Tenant) => {
     setEditing(tenant);
@@ -37,6 +77,8 @@ export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
       name: tenant.name,
       slug: tenant.slug,
       asteriskContext: tenant.asterisk_context,
+      additionalContexts: tenant.additional_contexts.join(', '),
+      didContext: tenant.did_context ?? '',
       enabled: tenant.enabled,
     });
   };
@@ -54,10 +96,10 @@ export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
     try {
       if (editing) {
         // The revision guards against overwriting a concurrent edit.
-        await adminApi.updateTenant(editing.id, editing.revision, form);
+        await adminApi.updateTenant(editing.id, editing.revision, toInput(form));
         setStatus(`Saved ${form.name}`);
       } else {
-        await adminApi.createTenant(form);
+        await adminApi.createTenant(toInput(form));
         setStatus(`Created ${form.name}`);
       }
       cancelEdit();
@@ -85,7 +127,8 @@ export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
             <tr>
               <th scope="col">Name</th>
               <th scope="col">Slug</th>
-              <th scope="col">Context</th>
+              <th scope="col">Contexts</th>
+              <th scope="col">DID context</th>
               <th scope="col">Enabled</th>
               <th scope="col">Actions</th>
             </tr>
@@ -95,7 +138,12 @@ export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
               <tr key={tenant.id}>
                 <td>{tenant.name}</td>
                 <td>{tenant.slug}</td>
-                <td>{tenant.asterisk_context}</td>
+                <td>
+                  {[tenant.asterisk_context, ...tenant.additional_contexts]
+                    .filter(Boolean)
+                    .join(', ') || '—'}
+                </td>
+                <td>{tenant.did_context ?? '—'}</td>
                 <td>{tenant.enabled ? 'Yes' : 'No'}</td>
                 <td>
                   <button type="button" onClick={() => startEdit(tenant)}>
@@ -137,10 +185,38 @@ export function TenantsScreen({ canCreate = true }: { canCreate?: boolean }) {
               Asterisk context
               <input
                 required
+                list="pbx-contexts"
+                pattern="[a-zA-Z0-9_.\-]{1,40}"
                 value={form.asteriskContext}
                 onChange={(e) => setForm({ ...form, asteriskContext: e.target.value })}
               />
             </label>
+            <label>
+              Additional Asterisk contexts (comma-separated)
+              <input
+                value={form.additionalContexts}
+                onChange={(e) => setForm({ ...form, additionalContexts: e.target.value })}
+              />
+            </label>
+            <label>
+              Inbound DID context
+              <input
+                list="pbx-contexts"
+                pattern="[a-zA-Z0-9_.\-]{1,40}"
+                placeholder="from-carrier"
+                value={form.didContext}
+                onChange={(e) => setForm({ ...form, didContext: e.target.value })}
+              />
+            </label>
+            <small>
+              Extension contexts belong to one tenant each and are the PBX routing scope. The
+              inbound DID context is the shared carrier ingress context and must differ from them.
+            </small>
+            <datalist id="pbx-contexts">
+              {knownContexts.map((context) => (
+                <option key={context} value={context} />
+              ))}
+            </datalist>
             <label>
               <input
                 type="checkbox"

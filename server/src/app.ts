@@ -6,6 +6,7 @@ import express, { type Express } from 'express';
 import { pinoHttp } from 'pino-http';
 import { adminRoutes } from './admin/routes.js';
 import { pbxRoutes } from './admin/pbx-routes.js';
+import { profileAssignmentRoutes } from './admin/profile-assignment-routes.js';
 import { numberRoutes } from './admin/number-routes.js';
 import { configRoutes } from './admin/config-routes.js';
 import { sessionMiddleware } from './auth/middleware.js';
@@ -72,6 +73,7 @@ export function createApp(
   app.use(sessionRoutes(config, deps));
   app.use(tenantSelectionRoutes(logger, deps));
   app.use(pbxRoutes(logger, deps));
+  app.use(profileAssignmentRoutes(logger, deps));
   app.use(runtimeRoutes(logger, deps));
   app.use(adminRoutes(logger, deps));
   app.use(numberRoutes(deps));

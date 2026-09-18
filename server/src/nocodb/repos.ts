@@ -2,13 +2,22 @@ import { randomUUID } from 'node:crypto';
 import type { NocoDbApi, NocoRecord, NocoWhere } from './api.js';
 import { tableByCanonicalName } from './api.js';
 import { LOGICAL_SCHEMA, FIELD_NAMES, TABLE_NAMES, UNIQUE_RULES } from './schema.js';
-import { requireNonEmpty, ValidationError } from './validation.js';
+import {
+  requireNonEmpty,
+  splitContexts,
+  validateContext,
+  ValidationError,
+  type TenantContexts,
+} from './validation.js';
 
 export class NotFoundError extends Error {}
 export class ConflictError extends Error {}
 export class UniqueViolationError extends Error {
-  constructor(readonly fields: string[]) {
-    super(`A record with the same ${fields.join('+')} already exists`);
+  constructor(
+    readonly fields: string[],
+    message = `A record with the same ${fields.join('+')} already exists`,
+  ) {
+    super(message);
   }
 }
 
@@ -74,16 +83,16 @@ export class NocoStore {
     excludeId?: string,
   ): Promise<void> {
     for (const fields of UNIQUE_RULES[tableName] ?? []) {
-      const provided = fields.every(
-        (f) => values[f] !== undefined && values[f] !== null && values[f] !== '',
-      );
+      const provided = fields.every((f) => values[f] !== undefined && values[f] !== null);
       if (!provided) continue;
-      const where: NocoWhere[] = fields.map((f) => ({
-        field: f,
-        op: 'eq',
-        value: values[f] as string | number,
-      }));
-      const clashes = (await this.list(tableName, where)).filter((r) => r.id !== excludeId);
+      // NocoDB hands blank text back as null and cannot filter on it, so a
+      // blank key part (a context-default assignment's did) is matched here.
+      const where: NocoWhere[] = fields
+        .filter((f) => values[f] !== '')
+        .map((f) => ({ field: f, op: 'eq', value: values[f] as string | number }));
+      const clashes = (await this.list(tableName, where)).filter(
+        (r) => r.id !== excludeId && fields.every((f) => String(r[f] ?? '') === String(values[f])),
+      );
       if (clashes.length > 0) throw new UniqueViolationError(fields);
     }
   }
@@ -150,6 +159,11 @@ export class NocoStore {
     );
     return { ...merged, ...values } as NocoRecord;
   }
+
+  async delete(tableName: string, id: string, tenantId?: string): Promise<void> {
+    const existing = await this.getById(tableName, id, tenantId);
+    await this.api.deleteRecord(await this.tableId(tableName), existing.Id as number);
+  }
 }
 
 export interface AuditEntry {
@@ -165,10 +179,45 @@ export interface AuditEntry {
 export interface TenantInput {
   name: string;
   slug: string;
+  /** Primary extension context: the default PBX routing scope on this instance. */
   asteriskContext: string;
+  additionalContexts: string[];
+  /** Shared carrier ingress context holding this tenant's managed DID routes. */
+  didContext: string | null;
   callerIdName?: string | null | undefined;
   callerIdNumber?: string | null | undefined;
   enabled: boolean;
+}
+
+/** The extension contexts a stored tenant profile (or combined tenant record) owns. */
+export function tenantProfileContexts(profile: NocoRecord | undefined): string[] {
+  const primary = typeof profile?.asterisk_context === 'string' ? profile.asterisk_context : '';
+  return [...(primary ? [primary] : []), ...splitContexts(profile?.additional_contexts)].filter(
+    (context, index, all) => all.indexOf(context) === index,
+  );
+}
+
+/**
+ * No extension context may belong to two tenants: the same name on one PBX
+ * instance would make both businesses' extensions and queues one scope.
+ */
+export function assertContextsUnclaimed(
+  profiles: readonly NocoRecord[],
+  contexts: TenantContexts,
+  ownTenantId: string,
+): void {
+  for (const profile of profiles) {
+    if (String(profile.tenant_id ?? profile.id) === ownTenantId) continue;
+    const taken = tenantProfileContexts(profile).find((context) =>
+      contexts.contexts.includes(context),
+    );
+    if (taken !== undefined) {
+      throw new UniqueViolationError(
+        ['asterisk_context'],
+        `Asterisk context ${taken} already belongs to another tenant`,
+      );
+    }
+  }
 }
 export type TenantUserRole = 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'USER';
 export interface TenantRepository {
@@ -292,12 +341,92 @@ export class AppearanceRepository {
   }
 }
 
+export interface ProfileAssignmentInput {
+  pbxInstanceId: string;
+  context: string;
+  /** E.164 for a DID-specific assignment; '' is the context default. */
+  did: string;
+  profileId: string;
+  enabled: boolean;
+}
+
+/**
+ * Persisted context/DID → assistant profile assignments (contract §4). The
+ * key is (pbx_instance_id, context, did); the tenant is customer identity for
+ * authorization and consistency, never part of the routing key.
+ */
+export class ProfileAssignmentRepository {
+  constructor(private readonly store: NocoStore) {}
+
+  /** NocoDB returns blank text as null; '' is the context-default key. */
+  private normalize(row: NocoRecord): NocoRecord {
+    return { ...row, did: row.did ?? '', enabled: Boolean(row.enabled) };
+  }
+
+  private values(input: ProfileAssignmentInput): Record<string, unknown> {
+    if (!/^[A-Za-z0-9_.-]{1,80}$/.test(input.pbxInstanceId))
+      throw new ValidationError('pbxInstanceId', 'pbxInstanceId must be a PBX instance id');
+    if (input.did !== '' && !/^\+[1-9][0-9]{6,14}$/.test(input.did))
+      throw new ValidationError('did', 'did must be an E.164 number or null');
+    return {
+      pbx_instance_id: input.pbxInstanceId,
+      context: validateContext('context', input.context),
+      did: input.did,
+      profile_id: requireNonEmpty('profileId', input.profileId),
+      enabled: input.enabled,
+    };
+  }
+
+  async listForTenant(tenantId: string): Promise<NocoRecord[]> {
+    const rows = await this.store.list('profile_assignment', [
+      { field: 'tenant_id', op: 'eq', value: tenantId },
+    ]);
+    return rows.map((row) => this.normalize(row));
+  }
+
+  async upsert(tenantId: string, input: ProfileAssignmentInput): Promise<NocoRecord> {
+    const values = this.values(input);
+    const rows = await this.store.list('profile_assignment', [
+      { field: 'pbx_instance_id', op: 'eq', value: input.pbxInstanceId },
+      { field: 'context', op: 'eq', value: input.context },
+    ]);
+    const existing = rows.map((row) => this.normalize(row)).find((row) => row.did === input.did);
+    if (!existing) {
+      return this.normalize(
+        await this.store.create('profile_assignment', { tenant_id: tenantId, ...values }),
+      );
+    }
+    // The key is unique per PBX instance, so a row another tenant left behind
+    // is a conflict to resolve in Tenants, never something to take over.
+    if (String(existing.tenant_id) !== tenantId) {
+      throw new UniqueViolationError(
+        ['pbx_instance_id', 'context', 'did'],
+        'This context/DID assignment belongs to another tenant',
+      );
+    }
+    return this.normalize(
+      await this.store.update(
+        'profile_assignment',
+        existing.id as string,
+        Number(existing.revision),
+        values,
+        tenantId,
+      ),
+    );
+  }
+
+  delete(tenantId: string, id: string): Promise<void> {
+    return this.store.delete('profile_assignment', id, tenantId);
+  }
+}
+
 export interface AidaConfigRepos {
   store: NocoStore;
   tenants: Pick<TenantRepository, 'list' | 'get' | 'create' | 'update'>;
   tenantUsers: Pick<TenantUserRepository, 'listForTenant' | 'listForUser' | 'save'>;
   assistantProfiles: AssistantProfileRepository;
   appearance: AppearanceRepository;
+  profileAssignments: ProfileAssignmentRepository;
   audit: Pick<AuditLog, 'append'>;
 }
 
@@ -312,6 +441,7 @@ export function createRepos(
     tenantUsers: authority.tenantUsers,
     assistantProfiles: new AssistantProfileRepository(store),
     appearance: new AppearanceRepository(store),
+    profileAssignments: new ProfileAssignmentRepository(store),
     audit: authority.audit,
   };
 }

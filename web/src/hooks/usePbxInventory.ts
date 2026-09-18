@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-/** Screens are keyed by tenant. Late reads and mutations cannot update an unmounted tenant. */
-export function usePbxInventory<T>(tenantId: string, loader: (tenantId: string) => Promise<T>) {
+/**
+ * Screens are keyed by tenant. Late reads and mutations cannot update an
+ * unmounted tenant. The optional context selects among the tenant's own
+ * PBX contexts; changing it reloads and discards in-flight results.
+ */
+export function usePbxInventory<T>(
+  tenantId: string,
+  loader: (tenantId: string, context?: string) => Promise<T>,
+  context?: string,
+) {
   const active = useRef(false);
   const sequence = useRef(0);
   const [data, setData] = useState<T | null>(null);
@@ -12,7 +20,7 @@ export function usePbxInventory<T>(tenantId: string, loader: (tenantId: string) 
     const request = ++sequence.current;
     if (active.current) setLoading(true);
     try {
-      const result = await loader(tenantId);
+      const result = await loader(tenantId, context);
       if (active.current && request === sequence.current) {
         setData(result);
         setError(null);
@@ -24,7 +32,7 @@ export function usePbxInventory<T>(tenantId: string, loader: (tenantId: string) 
     } finally {
       if (active.current && request === sequence.current) setLoading(false);
     }
-  }, [tenantId, loader]);
+  }, [tenantId, loader, context]);
   useEffect(() => {
     const counter = sequence;
     active.current = true;
