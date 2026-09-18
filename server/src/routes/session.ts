@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { tenantContexts } from '../admin/pbx-scope.js';
 import { selectableTenants } from '../auth/tenant-selection.js';
 import type { AppConfig } from '../config.js';
 import type { SessionView, TenantContextView } from '../contracts/index.js';
@@ -16,12 +17,8 @@ export function sessionRoutes(config: AppConfig, deps: AppDeps): Router {
   // The banner names the PBX scope the operator is acting in. An absent or
   // unreadable profile is shown as none; it never blocks the session.
   async function pbxContext(tenantId: string): Promise<string | null> {
-    if (!deps.repos) return null;
     try {
-      const tenant = await deps.repos.tenants.get(tenantId);
-      return typeof tenant.asterisk_context === 'string' && tenant.asterisk_context !== ''
-        ? tenant.asterisk_context
-        : null;
+      return (await tenantContexts(deps, tenantId)).contexts[0] ?? null;
     } catch {
       return null;
     }

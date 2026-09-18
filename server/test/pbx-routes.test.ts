@@ -1,5 +1,6 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NocoDbError } from '../src/nocodb/api.js';
 import { HttpOfficePulseClient, OfficePulseError } from '../src/officepulse/client.js';
 import { DID as did, STORED_PROFILE, scopedApp } from './helpers/scoped-app.js';
 
@@ -154,6 +155,54 @@ describe('context scope resolution', () => {
     expect(ctx.api.requests).toEqual([]);
     ctx.noco.tableByName('aida_tbl_TenantProfile')!.records = [];
     expect((await send('get', `${base}/queues`)).body.error).toBe('pbx_scope_missing');
+  });
+  it('resolves scope from the stored profile alone, never the Identity directory', async () => {
+    ctx.identity.directoryRequest = async () => {
+      throw new Error('directory down');
+    };
+    expect((await send('get', `${base}/extensions`)).status).toBe(200);
+    expect((await send('get', `${base}/did-routes`)).status).toBe(200);
+    expect((await send('get', `${base}/profile-assignments`)).body.contexts).toEqual([
+      'acme',
+      'acme-branch',
+    ]);
+  });
+  it('answers 503 nocodb_unavailable, not an empty scope, when PlatformConfig cannot be read', async () => {
+    ctx.noco.listRecords = async () => {
+      throw new NocoDbError('NocoDB request one-time-sip-secret failed', 502);
+    };
+    for (const path of ['/extensions', '/queues', '/did-routes', '/profile-assignments']) {
+      const res = await send('get', base + path);
+      expect(res.status).toBe(503);
+      expect(res.body).toMatchObject({
+        error: 'nocodb_unavailable',
+        message: 'The NocoDB PlatformConfig base is unavailable; retry when service returns',
+      });
+    }
+    expect(
+      (
+        await send('put', `${base}/profile-assignments`, {
+          context: 'acme',
+          did: null,
+          profileId: 'x',
+        })
+      ).body.error,
+    ).toBe('nocodb_unavailable');
+    expect(ctx.api.requests).toEqual([]);
+    expect(ctx.state.logs).not.toContain('one-time-sip-secret');
+  });
+  it('names a missing tenant profile table instead of asking for a context assignment', async () => {
+    ctx.noco.listTables = async () => [];
+    const res = await send('get', `${base}/extensions`);
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({
+      error: 'platform_config_unavailable',
+      message: 'NocoDB table aida_tbl_TenantProfile does not exist (run upgrade)',
+    });
+    expect((await send('get', `${base}/profile-assignments`)).body.error).toBe(
+      'platform_config_unavailable',
+    );
+    expect(ctx.api.requests).toEqual([]);
   });
   it('requires the PlatformConfig base to know any scope', async () => {
     ctx.deps.repos = null;

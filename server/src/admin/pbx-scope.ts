@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import type { AppDeps } from '../deps.js';
+import type { NocoRecord } from '../nocodb/api.js';
 import { NotFoundError, tenantProfileContexts } from '../nocodb/repos.js';
 import type { DidScope } from '../officepulse/client.js';
 import { contextName } from '../officepulse/pbx-contract.js';
@@ -57,7 +58,13 @@ export interface TenantPbxScope {
   didContext: string | null;
 }
 
-/** The contexts PlatformConfig assigns to a tenant, without judging them. */
+/**
+ * The contexts PlatformConfig assigns to a tenant, without judging them. Only
+ * the stored tenant profile is read: the session already proved the tenant,
+ * so the Identity directory is not consulted again per PBX request. Scope is
+ * authorization, so an unreadable PlatformConfig is a named dependency
+ * failure — never an empty scope, which would read as "not assigned yet".
+ */
 export async function tenantContexts(
   deps: AppDeps,
   tenantId: string,
@@ -69,16 +76,27 @@ export async function tenantContexts(
       'The NocoDB PlatformConfig base is not configured',
     );
   }
-  let tenant;
+  let profile: NocoRecord | undefined;
   try {
-    tenant = await deps.repos.tenants.get(tenantId);
+    profile = (
+      await deps.repos.store.list('tenant_profile', [
+        { field: 'tenant_id', op: 'eq', value: tenantId },
+      ])
+    )[0];
   } catch (err) {
-    if (err instanceof NotFoundError) return { contexts: [], didContext: null };
-    throw err;
+    // The store's only NotFoundError is a missing table: an operator action
+    // (`nocodb upgrade`), named like the missing base is in adminRoutes.
+    if (err instanceof NotFoundError)
+      throw new PbxResponseError(503, 'platform_config_unavailable', err.message);
+    throw new PbxResponseError(
+      503,
+      'nocodb_unavailable',
+      'The NocoDB PlatformConfig base is unavailable; retry when service returns',
+    );
   }
-  const didContext = tenant.did_context;
+  const didContext = profile?.did_context;
   return {
-    contexts: tenantProfileContexts(tenant).filter((row) => contextName.safeParse(row).success),
+    contexts: tenantProfileContexts(profile).filter((row) => contextName.safeParse(row).success),
     didContext: typeof didContext === 'string' && didContext !== '' ? didContext : null,
   };
 }
