@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { adminApi, ApiError, type AssistantProfile } from '../api/admin';
+import { ProfileAssignmentSelect } from '../components/ProfileAssignmentSelect';
+import { useProfileAssignments } from '../hooks/useProfileAssignments';
 
 const EMPTY = {
   name: '',
@@ -21,6 +23,7 @@ export function ProfilesScreen() {
   const [form, setForm] = useState(EMPTY);
   const [editing, setEditing] = useState<AssistantProfile | null>(null);
   const [busy, setBusy] = useState(false);
+  const assignments = useProfileAssignments(tenantId);
 
   const load = useCallback(() => {
     adminApi
@@ -64,6 +67,7 @@ export function ProfilesScreen() {
       setEditing(null);
       setForm(EMPTY);
       load();
+      void assignments.refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not save the profile');
     } finally {
@@ -120,6 +124,38 @@ export function ProfilesScreen() {
             </li>
           ))}
         </ul>
+      )}
+
+      <h2 id="context-defaults-heading">Context defaults</h2>
+      <p>
+        Which assistant answers calls in each of this tenant’s Asterisk contexts unless a Number
+        assigns its own. Assignments are stored per PBX instance
+        {assignments.data?.pbxInstanceId ? (
+          <>
+            {' '}
+            (<code>{assignments.data.pbxInstanceId}</code>)
+          </>
+        ) : null}
+        .
+      </p>
+      {assignments.loading && !assignments.data ? (
+        <p>Loading assignments…</p>
+      ) : assignments.error ? (
+        <p>Assistant profile assignments are unavailable; refresh to retry.</p>
+      ) : assignments.data?.contexts.length === 0 ? (
+        <p>Assign this tenant’s Asterisk context in Tenants first.</p>
+      ) : (
+        assignments.data?.contexts.map((context) => (
+          <ProfileAssignmentSelect
+            key={context}
+            tenantId={tenantId}
+            context={context}
+            did={null}
+            label={`Default profile for context ${context}`}
+            blankLabel="No default — callers stay on the PBX queue"
+            inventory={assignments}
+          />
+        ))
       )}
 
       <h2 id="profile-form-heading">{editing ? `Edit ${editing.name}` : 'New profile'}</h2>

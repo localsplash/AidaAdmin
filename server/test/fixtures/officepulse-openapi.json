@@ -23,9 +23,207 @@
     }
   ],
   "paths": {
+    "/v1/agent/calls/{callSessionId}/bootstrap": {
+      "post": {
+        "tags": [
+          "Agent"
+        ],
+        "summary": "Consume one-time call bootstrap credentials",
+        "description": "Bootstrap v2. Requires native admission enabled. Verifies the intended dispatch and SIP identity/SID with LiveKit, re-derives route ownership for the pinned routing scope {pbxInstanceId, context} from Asterisk, checks the current profile assignment, and atomically consumes both credentials. The snapshot scope must equal the dispatch metadata scope. Always no-store; never retry an ambiguous response.",
+        "x-access-policy": "one-time-call-credentials",
+        "parameters": [
+          {
+            "name": "callSessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Authorization",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Bearer bootstrapToken from dispatch metadata. Not a staff credential."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "roomName",
+                  "sipParticipantIdentity",
+                  "sipParticipantSid",
+                  "routeToken"
+                ],
+                "properties": {
+                  "roomName": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "sipParticipantIdentity": {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  "sipParticipantSid": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "routeToken": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "minLength": 43,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authorized immutable profile; credentials consumed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "callSessionId",
+                    "roomName",
+                    "sipParticipantIdentity",
+                    "sipParticipantSid",
+                    "profileSnapshot"
+                  ],
+                  "properties": {
+                    "callSessionId": {
+                      "type": "string",
+                      "maxLength": 36
+                    },
+                    "roomName": {
+                      "type": "string",
+                      "maxLength": 120
+                    },
+                    "sipParticipantIdentity": {
+                      "type": "string",
+                      "maxLength": 120
+                    },
+                    "sipParticipantSid": {
+                      "type": "string",
+                      "maxLength": 80
+                    },
+                    "profileSnapshot": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "schemaVersion",
+                        "callSessionId",
+                        "pbxInstanceId",
+                        "context",
+                        "businessName",
+                        "prompt",
+                        "locale",
+                        "didE164"
+                      ],
+                      "properties": {
+                        "schemaVersion": {
+                          "type": "integer",
+                          "enum": [
+                            2
+                          ]
+                        },
+                        "callSessionId": {
+                          "type": "string",
+                          "maxLength": 36
+                        },
+                        "pbxInstanceId": {
+                          "type": "string",
+                          "maxLength": 80,
+                          "pattern": "^[A-Za-z0-9_.-]{1,80}$",
+                          "description": "Serving PBX instance; with context it is the routing scope and must equal the dispatch metadata."
+                        },
+                        "context": {
+                          "type": "string",
+                          "maxLength": 40,
+                          "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+                          "description": "Extension context owning the routed queue."
+                        },
+                        "tenantId": {
+                          "type": "string",
+                          "pattern": "^[1-9][0-9]*$",
+                          "description": "Optional customer identity for authorization/observation; never a routing key."
+                        },
+                        "businessName": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "prompt": {
+                          "type": "string",
+                          "maxLength": 12000
+                        },
+                        "locale": {
+                          "type": "string",
+                          "enum": [
+                            "en-US"
+                          ]
+                        },
+                        "didE164": {
+                          "type": "string",
+                          "maxLength": 16,
+                          "pattern": "^\\+[1-9][0-9]{6,14}$"
+                        },
+                        "tone": {
+                          "type": "string",
+                          "maxLength": 256
+                        },
+                        "objective": {
+                          "type": "string",
+                          "maxLength": 2048
+                        },
+                        "openingStatement": {
+                          "type": "string",
+                          "maxLength": 2048
+                        },
+                        "transferStatement": {
+                          "type": "string",
+                          "maxLength": 2048
+                        },
+                        "failedTransferStatement": {
+                          "type": "string",
+                          "maxLength": 2048
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_request"
+          },
+          "401": {
+            "description": "credential_rejected"
+          },
+          "503": {
+            "description": "authority_unavailable"
+          }
+        }
+      }
+    },
     "/healthz": {
       "get": {
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "summary": "Process health",
         "responses": {
           "200": {
@@ -38,6 +236,30 @@
                     "status": {
                       "type": "string",
                       "example": "ok"
+                    },
+                    "version": {
+                      "type": "string",
+                      "example": "2026.9.14.14.30",
+                      "description": "Pacific (America/Los_Angeles, PST/PDT) commit timestamp (YYYY.M.D.H.M); -dirty for uncommitted changes; unbuilt in source development mode"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "nullable": true,
+                      "description": "Full Git commit ID"
+                    },
+                    "sourceUpdatedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true,
+                      "description": "Commit time with Pacific UTC offset"
+                    },
+                    "timeZone": {
+                      "type": "string",
+                      "example": "America/Los_Angeles"
+                    },
+                    "dirty": {
+                      "type": "boolean",
+                      "nullable": true
                     }
                   }
                 }
@@ -49,9 +271,11 @@
     },
     "/readyz": {
       "get": {
-        "tags": ["Health"],
+        "tags": [
+          "Health"
+        ],
         "summary": "Dependency readiness",
-        "description": "HTTP 200 means critical dependencies are ready. Inspect components.pbx-inventory separately. fullyOperational stays false when voice/native admission is unavailable.",
+        "description": "HTTP 200 means critical dependencies are ready. Inspect components.pbx-inventory separately. fullyOperational stays false when voice/native admission is unavailable. pbxInstanceId names the serving PBX instance so clients can pin the routing scope they administer.",
         "responses": {
           "200": {
             "description": "Critical dependencies ready",
@@ -76,22 +300,77 @@
         }
       }
     },
+    "/v1/admin/pbx/contexts": {
+      "get": {
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "List the Asterisk contexts present on this PBX instance",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin). Distinct contexts from native endpoint and dialplan rows, without a context parameter. Feeds the AidaAdmin tenant form and the Operations context selector; listing a context grants nothing.",
+        "x-access-policy": "trusted-backend-network",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Distinct native contexts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextInventory"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Caller not admitted or not authorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Retired iTenantId parameter supplied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Database, schema or inventory unavailable, or more than 1000 contexts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/pbx/extensions": {
       "get": {
-        "tags": ["Backend API"],
-        "summary": "List native extensions and approved contexts",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "List native extensions of one context with managed-route detection",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           }
         ],
@@ -117,7 +396,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -127,7 +406,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -137,7 +416,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -147,7 +426,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -159,20 +438,22 @@
         }
       },
       "post": {
-        "tags": ["Backend API"],
-        "summary": "Create a tenant extension; disclose SIP secret once",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "Create an extension in this context; disclose SIP secret once",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           }
         ],
@@ -208,7 +489,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -218,7 +499,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -228,7 +509,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -238,7 +519,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -252,20 +533,22 @@
     },
     "/v1/admin/pbx/extensions/{extension}": {
       "delete": {
-        "tags": ["Backend API"],
-        "summary": "Delete an owned extension bundle and saved queue memberships",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "Delete the endpoint bundle dialed by this context's managed route, with its saved queue memberships",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           },
           {
@@ -293,7 +576,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -303,7 +586,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -313,7 +596,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -323,7 +606,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -337,20 +620,22 @@
     },
     "/v1/admin/pbx/queues": {
       "get": {
-        "tags": ["Backend API"],
-        "summary": "List explicitly owned native queues and members",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "List queues owned by this context (exact ownership markers) and their members",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           }
         ],
@@ -376,7 +661,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -386,7 +671,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -396,7 +681,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -406,7 +691,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -418,20 +703,22 @@
         }
       },
       "post": {
-        "tags": ["Backend API"],
-        "summary": "Create a queue from a friendly slug (native ID tN.slug) or approved legacy name",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "Create a queue from a friendly slug (native ID <context>.slug) or an owned legacy name",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           }
         ],
@@ -467,7 +754,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -477,7 +764,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -487,7 +774,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -497,7 +784,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -511,20 +798,22 @@
     },
     "/v1/admin/pbx/queues/{queue}": {
       "delete": {
-        "tags": ["Backend API"],
-        "summary": "Delete a queue and members; conflict while a DID references it",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "Delete an owned queue and members; conflict while a DID references it",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           },
           {
@@ -553,7 +842,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -563,7 +852,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -573,7 +862,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -583,7 +872,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -597,20 +886,22 @@
     },
     "/v1/admin/pbx/queues/{queue}/extensions/{extension}": {
       "put": {
-        "tags": ["Backend API"],
-        "summary": "Idempotently set an owned queue member",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "Idempotently set an owned queue member resolved from this context's managed route",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           },
           {
@@ -665,7 +956,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -675,7 +966,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -685,7 +976,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -695,7 +986,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -707,20 +998,22 @@
         }
       },
       "delete": {
-        "tags": ["Backend API"],
+        "tags": [
+          "Backend API"
+        ],
         "summary": "Delete one owned saved membership",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway with tenant authorization and mutation CSRF. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           },
           {
@@ -758,7 +1051,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -768,7 +1061,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -778,7 +1071,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -788,7 +1081,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -802,27 +1095,40 @@
     },
     "/v1/admin/pbx/dids": {
       "get": {
-        "tags": ["Backend API"],
-        "summary": "Read recognized managed routes and explicitly identify manual/unconfigured Identity Numbers",
-        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "Read managed routes owned by this context; identify foreign, manual and unconfigured Identity Numbers explicitly",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
+            }
+          },
+          {
+            "name": "didContext",
+            "in": "query",
+            "required": true,
+            "description": "Exactly one carrier ingress context holding the managed DID routes; it must differ from context.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           },
           {
             "name": "authorizedDid",
             "in": "query",
             "required": true,
-            "description": "Repeatable globally unique E.164 Number freshly authorized for this tenant by Identity through the trusted AidaAdmin backend.",
+            "description": "Repeatable globally unique E.164 Number freshly authorized for the requesting tenant by Identity through the trusted AidaAdmin backend.",
             "schema": {
               "type": "string",
               "pattern": "^\\+[1-9][0-9]{6,14}$",
@@ -852,7 +1158,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -862,7 +1168,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -872,7 +1178,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -882,7 +1188,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -896,27 +1202,40 @@
     },
     "/v1/admin/pbx/dids/{did}": {
       "put": {
-        "tags": ["Backend API"],
-        "summary": "Set queue hours and ring budget before LiveKit; refuse manual route adoption",
-        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "Set queue hours and ring budget before LiveKit; refuse manual or foreign route adoption",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
+            }
+          },
+          {
+            "name": "didContext",
+            "in": "query",
+            "required": true,
+            "description": "Exactly one carrier ingress context holding the managed DID routes; it must differ from context.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           },
           {
             "name": "authorizedDid",
             "in": "query",
             "required": true,
-            "description": "Repeatable globally unique E.164 Number freshly authorized for this tenant by Identity through the trusted AidaAdmin backend.",
+            "description": "Repeatable globally unique E.164 Number freshly authorized for the requesting tenant by Identity through the trusted AidaAdmin backend.",
             "schema": {
               "type": "string",
               "pattern": "^\\+[1-9][0-9]{6,14}$",
@@ -967,7 +1286,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -977,7 +1296,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -987,7 +1306,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -997,7 +1316,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -1009,27 +1328,40 @@
         }
       },
       "delete": {
-        "tags": ["Backend API"],
-        "summary": "Delete recognized managed Realtime rows only; retain Identity number assignment",
-        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
+        "tags": [
+          "Backend API"
+        ],
+        "summary": "Delete recognized managed Realtime rows owned by this context; retain Identity number assignment",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
-            "name": "iTenantId",
+            "name": "context",
             "in": "query",
             "required": true,
-            "description": "Exactly one canonical Identity tenant ID; duplicate values are rejected.",
+            "description": "Exactly one Asterisk extension context on this PBX instance; duplicate values and the retired iTenantId parameter are rejected. A context name selects the scope and is never authorization by itself.",
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
+            }
+          },
+          {
+            "name": "didContext",
+            "in": "query",
+            "required": true,
+            "description": "Exactly one carrier ingress context holding the managed DID routes; it must differ from context.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+              "maxLength": 40
             }
           },
           {
             "name": "authorizedDid",
             "in": "query",
             "required": true,
-            "description": "Repeatable globally unique E.164 Number freshly authorized for this tenant by Identity through the trusted AidaAdmin backend.",
+            "description": "Repeatable globally unique E.164 Number freshly authorized for the requesting tenant by Identity through the trusted AidaAdmin backend.",
             "schema": {
               "type": "string",
               "pattern": "^\\+[1-9][0-9]{6,14}$",
@@ -1063,7 +1395,7 @@
             }
           },
           "404": {
-            "description": "Absent/other-tenant native object, or provisioning disabled",
+            "description": "Absent/other-context native object, or provisioning disabled",
             "content": {
               "application/json": {
                 "schema": {
@@ -1073,7 +1405,7 @@
             }
           },
           "409": {
-            "description": "Duplicate object, remaining reference, manual route, or concurrent change; refresh and retry",
+            "description": "Duplicate object, remaining reference, manual or foreign route, or concurrent change; refresh and retry",
             "content": {
               "application/json": {
                 "schema": {
@@ -1083,7 +1415,7 @@
             }
           },
           "422": {
-            "description": "Invalid fields or out-of-scope input",
+            "description": "Invalid fields, missing/duplicate context, retired iTenantId, or out-of-scope input",
             "content": {
               "application/json": {
                 "schema": {
@@ -1093,7 +1425,7 @@
             }
           },
           "503": {
-            "description": "Database, schema, ownership mapping, or provisioning unavailable",
+            "description": "Database, schema, ownership derivation, or provisioning unavailable",
             "content": {
               "application/json": {
                 "schema": {
@@ -1107,7 +1439,9 @@
     },
     "/v1/admin/calls/{id}": {
       "get": {
-        "tags": ["Backend API"],
+        "tags": [
+          "Backend API"
+        ],
         "summary": "Read an observed integration call",
         "description": "Restricted to trusted application backends. A browser session, API key or bearer token does not bypass the network admission policy. AidaAdmin and the operations UI authenticate their human users separately.",
         "x-access-policy": "trusted-backend-network",
@@ -1177,7 +1511,9 @@
     },
     "/v1/admin/calls/{id}/events": {
       "get": {
-        "tags": ["Backend API"],
+        "tags": [
+          "Backend API"
+        ],
         "summary": "Read integration call events",
         "description": "Restricted to trusted application backends. A browser session, API key or bearer token does not bypass the network admission policy. AidaAdmin and the operations UI authenticate their human users separately.",
         "x-access-policy": "trusted-backend-network",
@@ -1255,7 +1591,9 @@
     },
     "/v1/admin/calls/{id}/commands": {
       "post": {
-        "tags": ["Backend API"],
+        "tags": [
+          "Backend API"
+        ],
         "summary": "Submit an integration call command",
         "description": "Restricted to trusted application backends. A browser session, API key or bearer token does not bypass the network admission policy. AidaAdmin and the operations UI authenticate their human users separately. Requires VOICE_ENABLED=true. DRAIN_ACK is supported; TAKEOVER returns 503 until native destination admission exists. Dev returns voice_unavailable before executing commands.",
         "parameters": [
@@ -1275,11 +1613,17 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["commandType", "idempotencyKey"],
+                "required": [
+                  "commandType",
+                  "idempotencyKey"
+                ],
                 "properties": {
                   "commandType": {
                     "type": "string",
-                    "enum": ["DRAIN_ACK", "TAKEOVER"]
+                    "enum": [
+                      "DRAIN_ACK",
+                      "TAKEOVER"
+                    ]
                   },
                   "idempotencyKey": {
                     "type": "string",
@@ -1290,7 +1634,10 @@
                   },
                   "destinationType": {
                     "type": "string",
-                    "enum": ["EXTENSION", "QUEUE"]
+                    "enum": [
+                      "EXTENSION",
+                      "QUEUE"
+                    ]
                   },
                   "destinationId": {
                     "type": "string"
@@ -1382,7 +1729,9 @@
     },
     "/v1/integrations/livekit/webhooks": {
       "post": {
-        "tags": ["Callbacks"],
+        "tags": [
+          "Callbacks"
+        ],
         "summary": "Receive a signed LiveKit webhook",
         "description": "Preserve the original request bytes and LiveKit Authorization header. Signature verification authenticates this callback when voice is enabled. With voice disabled, returns 503.",
         "parameters": [
@@ -1464,6 +1813,10 @@
       "Readiness": {
         "type": "object",
         "properties": {
+          "pbxInstanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,80}$"
+          },
           "ready": {
             "type": "boolean"
           },
@@ -1480,7 +1833,10 @@
                 },
                 "criticality": {
                   "type": "string",
-                  "enum": ["critical", "degraded"]
+                  "enum": [
+                    "critical",
+                    "degraded"
+                  ]
                 },
                 "detail": {
                   "type": "string"
@@ -1496,20 +1852,64 @@
       },
       "ApplyState": {
         "type": "string",
-        "enum": ["committed", "active", "unknown"],
+        "enum": [
+          "committed",
+          "active",
+          "unknown"
+        ],
         "description": "This implementation returns committed after a transaction and unknown for native inventory. It does not verify effective Asterisk state or return active."
+      },
+      "ContextInventory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "pbxInstanceId",
+          "contexts"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "asterisk"
+            ]
+          },
+          "pbxInstanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,80}$",
+            "maxLength": 80,
+            "description": "OFFICEPULSE_INSTANCE_ID of the serving PBX instance. Routing scope is {pbxInstanceId, context}."
+          },
+          "contexts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Sorted, case-sensitive distinct contexts from ps_endpoints and extensions."
+          }
+        }
       },
       "Extension": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "extension", "context", "callerId", "transport", "aors", "applyState"],
+        "required": [
+          "id",
+          "extension",
+          "context",
+          "callerId",
+          "transport",
+          "aors",
+          "managed",
+          "applyState"
+        ],
         "properties": {
           "id": {
             "type": "string"
           },
           "extension": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Dialable number from the managed Dial route in this context. Without one, the legacy <digits>-t<N> or pure-digit id yields its digits; otherwise null."
           },
           "context": {
             "type": "string"
@@ -1526,9 +1926,17 @@
             "type": "string",
             "nullable": true
           },
+          "managed": {
+            "type": "boolean",
+            "description": "True when the endpoint has the managed Dial route in this context; imported endpoints are false. Deleting through this API additionally requires the route's Hangup row to be intact (409 otherwise)."
+          },
           "applyState": {
             "type": "string",
-            "enum": ["committed", "active", "unknown"],
+            "enum": [
+              "committed",
+              "active",
+              "unknown"
+            ],
             "description": "This implementation returns committed after a transaction and unknown for native inventory. It does not verify effective Asterisk state or return active."
           }
         }
@@ -1536,14 +1944,31 @@
       "ExtensionInventory": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["source", "iTenantId", "provisioningEnabled", "contexts", "extensions"],
+        "required": [
+          "source",
+          "pbxInstanceId",
+          "context",
+          "provisioningEnabled",
+          "contexts",
+          "extensions"
+        ],
         "properties": {
           "source": {
             "type": "string",
-            "enum": ["asterisk"]
+            "enum": [
+              "asterisk"
+            ]
           },
-          "iTenantId": {
-            "type": "integer"
+          "pbxInstanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,80}$",
+            "maxLength": 80,
+            "description": "OFFICEPULSE_INSTANCE_ID of the serving PBX instance. Routing scope is {pbxInstanceId, context}."
+          },
+          "context": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+            "maxLength": 40
           },
           "provisioningEnabled": {
             "type": "boolean"
@@ -1567,7 +1992,9 @@
       "ExtensionCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["extension"],
+        "required": [
+          "extension"
+        ],
         "properties": {
           "extension": {
             "type": "string",
@@ -1577,7 +2004,7 @@
             "type": "string",
             "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
             "maxLength": 40,
-            "description": "Required when more than one approved context exists."
+            "description": "Optional; when present it must equal the context query."
           },
           "displayName": {
             "type": "string",
@@ -1595,13 +2022,19 @@
       "ExtensionCreated": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["extension", "sipUsername", "sipSecret", "applyState"],
+        "required": [
+          "extension",
+          "sipUsername",
+          "sipSecret",
+          "applyState"
+        ],
         "properties": {
           "extension": {
             "type": "string"
           },
           "sipUsername": {
-            "type": "string"
+            "type": "string",
+            "description": "Endpoint/auth/AOR id <extension>-<context>, at most 40 characters."
           },
           "sipSecret": {
             "type": "string",
@@ -1609,7 +2042,11 @@
           },
           "applyState": {
             "type": "string",
-            "enum": ["committed", "active", "unknown"],
+            "enum": [
+              "committed",
+              "active",
+              "unknown"
+            ],
             "description": "This implementation returns committed after a transaction and unknown for native inventory. It does not verify effective Asterisk state or return active."
           }
         }
@@ -1617,7 +2054,13 @@
       "Queue": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "name", "strategy", "applyState", "members"],
+        "required": [
+          "id",
+          "name",
+          "strategy",
+          "applyState",
+          "members"
+        ],
         "properties": {
           "id": {
             "type": "string"
@@ -1631,7 +2074,11 @@
           },
           "applyState": {
             "type": "string",
-            "enum": ["committed", "active", "unknown"],
+            "enum": [
+              "committed",
+              "active",
+              "unknown"
+            ],
             "description": "This implementation returns committed after a transaction and unknown for native inventory. It does not verify effective Asterisk state or return active."
           },
           "members": {
@@ -1639,7 +2086,12 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["interface", "memberName", "penalty", "paused"],
+              "required": [
+                "interface",
+                "memberName",
+                "penalty",
+                "paused"
+              ],
               "properties": {
                 "interface": {
                   "type": "string"
@@ -1662,14 +2114,30 @@
       "QueueInventory": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["source", "iTenantId", "provisioningEnabled", "queues"],
+        "required": [
+          "source",
+          "pbxInstanceId",
+          "context",
+          "provisioningEnabled",
+          "queues"
+        ],
         "properties": {
           "source": {
             "type": "string",
-            "enum": ["asterisk"]
+            "enum": [
+              "asterisk"
+            ]
           },
-          "iTenantId": {
-            "type": "integer"
+          "pbxInstanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,80}$",
+            "maxLength": 80,
+            "description": "OFFICEPULSE_INSTANCE_ID of the serving PBX instance. Routing scope is {pbxInstanceId, context}."
+          },
+          "context": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+            "maxLength": 40
           },
           "provisioningEnabled": {
             "type": "boolean"
@@ -1685,13 +2153,15 @@
       "QueueCreate": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "properties": {
           "name": {
             "type": "string",
             "pattern": "^[a-zA-Z0-9_.-]{1,80}$",
             "maxLength": 80,
-            "description": "Friendly slug up to 60 characters, or exact approved legacy name up to 80. Generated native ID is tN.slug."
+            "description": "Friendly slug up to 60 characters (native ID <context>.<slug>, at most 80 characters), or the exact name of a legacy queue this context already owns."
           },
           "strategy": {
             "type": "string",
@@ -1711,7 +2181,11 @@
       "QueueCreated": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "strategy", "applyState"],
+        "required": [
+          "name",
+          "strategy",
+          "applyState"
+        ],
         "properties": {
           "name": {
             "type": "string"
@@ -1730,7 +2204,11 @@
           },
           "applyState": {
             "type": "string",
-            "enum": ["committed", "active", "unknown"],
+            "enum": [
+              "committed",
+              "active",
+              "unknown"
+            ],
             "description": "This implementation returns committed after a transaction and unknown for native inventory. It does not verify effective Asterisk state or return active."
           }
         }
@@ -1743,7 +2221,8 @@
           "context": {
             "type": "string",
             "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
-            "maxLength": 40
+            "maxLength": 40,
+            "description": "Optional; when present it must equal the context query."
           },
           "penalty": {
             "type": "integer",
@@ -1760,7 +2239,13 @@
       "QueueMemberSaved": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["queue", "extension", "penalty", "paused", "applyState"],
+        "required": [
+          "queue",
+          "extension",
+          "penalty",
+          "paused",
+          "applyState"
+        ],
         "properties": {
           "queue": {
             "type": "string"
@@ -1776,7 +2261,11 @@
           },
           "applyState": {
             "type": "string",
-            "enum": ["committed", "active", "unknown"],
+            "enum": [
+              "committed",
+              "active",
+              "unknown"
+            ],
             "description": "This implementation returns committed after a transaction and unknown for native inventory. It does not verify effective Asterisk state or return active."
           }
         }
@@ -1784,7 +2273,11 @@
       "DidSchedule": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["timeRange", "weekdays", "timezone"],
+        "required": [
+          "timeRange",
+          "weekdays",
+          "timezone"
+        ],
         "properties": {
           "timeRange": {
             "type": "string",
@@ -1808,7 +2301,10 @@
       "DidSettings": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["queue", "ringsBeforeAi"],
+        "required": [
+          "queue",
+          "ringsBeforeAi"
+        ],
         "properties": {
           "queue": {
             "type": "string",
@@ -1853,7 +2349,9 @@
           },
           "managed": {
             "type": "boolean",
-            "enum": [true]
+            "enum": [
+              true
+            ]
           },
           "queue": {
             "type": "string",
@@ -1880,7 +2378,11 @@
           },
           "applyState": {
             "type": "string",
-            "enum": ["committed", "active", "unknown"],
+            "enum": [
+              "committed",
+              "active",
+              "unknown"
+            ],
             "description": "This implementation returns committed after a transaction and unknown for native inventory. It does not verify effective Asterisk state or return active."
           }
         }
@@ -1888,7 +2390,12 @@
       "UnmanagedDid": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["did", "managed", "availability", "applyState"],
+        "required": [
+          "did",
+          "managed",
+          "availability",
+          "applyState"
+        ],
         "properties": {
           "did": {
             "type": "string",
@@ -1897,32 +2404,62 @@
           },
           "managed": {
             "type": "boolean",
-            "enum": [false]
+            "enum": [
+              false
+            ]
           },
           "availability": {
             "type": "string",
-            "enum": ["unconfigured", "manual"]
+            "enum": [
+              "unconfigured",
+              "manual"
+            ],
+            "description": "manual: rows exist that are unrecognized or route to a queue another context owns; unconfigured: no rows."
           },
           "applyState": {
             "type": "string",
-            "enum": ["unknown"]
+            "enum": [
+              "unknown"
+            ]
           }
         }
       },
       "DidInventory": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["source", "iTenantId", "provisioningEnabled", "dids"],
+        "required": [
+          "source",
+          "pbxInstanceId",
+          "context",
+          "provisioningEnabled",
+          "didContext",
+          "dids"
+        ],
         "properties": {
           "source": {
             "type": "string",
-            "enum": ["asterisk"]
+            "enum": [
+              "asterisk"
+            ]
           },
-          "iTenantId": {
-            "type": "integer"
+          "pbxInstanceId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]{1,80}$",
+            "maxLength": 80,
+            "description": "OFFICEPULSE_INSTANCE_ID of the serving PBX instance. Routing scope is {pbxInstanceId, context}."
+          },
+          "context": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+            "maxLength": 40
           },
           "provisioningEnabled": {
             "type": "boolean"
+          },
+          "didContext": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9_.-]{1,40}$",
+            "maxLength": 40
           },
           "dids": {
             "type": "array",
@@ -1951,8 +2488,17 @@
           "officePulseInstanceId": {
             "type": "string"
           },
+          "pbxContext": {
+            "type": "string",
+            "description": "Extension context owning the routed queue; with officePulseInstanceId it is the routing scope."
+          },
+          "ingressContext": {
+            "type": "string",
+            "description": "Carrier ingress context the DID arrived in."
+          },
           "tenantId": {
-            "type": "string"
+            "type": "string",
+            "description": "Customer identity for authorization and observation, never a routing key."
           },
           "callerNumber": {
             "type": "string"

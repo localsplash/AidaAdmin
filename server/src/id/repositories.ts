@@ -2,12 +2,14 @@ import { HttpIdClient, type PlatformMembership, type PlatformTenant } from './cl
 import { identityActor } from './context.js';
 import type { NocoRecord } from '../nocodb/api.js';
 import {
+  assertContextsUnclaimed,
   NocoStore,
   NotFoundError,
+  tenantProfileContexts,
   type TenantInput,
   type TenantUserRole,
 } from '../nocodb/repos.js';
-import { ValidationError, validateContext, normalizeE164 } from '../nocodb/validation.js';
+import { ValidationError, validateTenantContexts, normalizeE164 } from '../nocodb/validation.js';
 
 export function platformTenantId(value: string): number {
   const id = Number(value);
@@ -38,6 +40,8 @@ export class PlatformTenantRepository {
       enabled: tenant.bEnabled,
       revision: profile?.revision ?? 0,
       asterisk_context: profile?.asterisk_context ?? '',
+      additional_contexts: tenantProfileContexts(profile).slice(1),
+      did_context: profile?.did_context || null,
     };
   }
   async list(): Promise<NocoRecord[]> {
@@ -48,23 +52,38 @@ export class PlatformTenantRepository {
   }
   async get(tenantId: string): Promise<NocoRecord> {
     platformTenantId(tenantId);
-    const tenant = (await this.list()).find((row) => row.id === tenantId);
+    const { tenants } = await this.client.directoryRequest<{ tenants: PlatformTenant[] }>(
+      'tenants',
+    );
+    const tenant = tenants.find((row) => String(row.iTenantId) === tenantId);
     if (!tenant) throw new NotFoundError('Platform tenant not found');
-    return tenant;
+    return this.combine(tenant);
   }
   private values(tenantId: number, input: TenantInput): NocoRecord {
+    const { contexts, didContext } = validateTenantContexts(input);
     return {
       tenant_id: tenantId,
-      asterisk_context: validateContext('asteriskContext', input.asteriskContext),
+      asterisk_context: contexts[0]!,
+      additional_contexts: contexts.slice(1).join(','),
+      did_context: didContext,
       caller_id_name: input.callerIdName ?? null,
       caller_id_number: input.callerIdNumber
         ? normalizeE164('callerIdNumber', input.callerIdNumber)
         : null,
     };
   }
+  /** Extension contexts are one tenant's scope; the primary alone is covered by UNIQUE_RULES. */
+  private async assertContextsFree(tenantId: string, input: TenantInput): Promise<void> {
+    assertContextsUnclaimed(
+      await this.store.list('tenant_profile'),
+      validateTenantContexts(input),
+      tenantId,
+    );
+  }
   async create(input: TenantInput): Promise<NocoRecord> {
     // Validate voice intent before creating a platform business.
     this.values(1, input);
+    await this.assertContextsFree('', input);
     const tenant = await this.client.directoryRequest<PlatformTenant>('tenants', 'POST', {
       name: input.name,
       slug: input.slug,
@@ -86,6 +105,7 @@ export class PlatformTenantRepository {
       await this.store.list('tenant_profile', [{ field: 'tenant_id', op: 'eq', value: id }])
     )[0];
     const values = this.values(id, input);
+    await this.assertContextsFree(tenantId, input);
     // Profile updates remain separate from directory updates. Failures are explicit
     // and retryable; neither store is claimed to be in a cross-store transaction.
     if (existing)

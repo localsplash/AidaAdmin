@@ -13,6 +13,20 @@ import { issueCsrfToken } from '../middleware/csrf.js';
 export function sessionRoutes(config: AppConfig, deps: AppDeps): Router {
   const router = Router();
 
+  // The banner names the PBX scope the operator is acting in. An absent or
+  // unreadable profile is shown as none; it never blocks the session.
+  async function pbxContext(tenantId: string): Promise<string | null> {
+    if (!deps.repos) return null;
+    try {
+      const tenant = await deps.repos.tenants.get(tenantId);
+      return typeof tenant.asterisk_context === 'string' && tenant.asterisk_context !== ''
+        ? tenant.asterisk_context
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   router.get('/api/session', async (req, res, next) => {
     issueCsrfToken(res, config.nodeEnv === 'production');
     if (req.session) {
@@ -39,6 +53,7 @@ export function sessionRoutes(config: AppConfig, deps: AppDeps): Router {
             }
           }
         }
+        if (selectedTenant) selectedTenant.pbxContext = await pbxContext(selectedTenant.tenantId);
         const session: SessionView = {
           authenticated: true,
           user: {

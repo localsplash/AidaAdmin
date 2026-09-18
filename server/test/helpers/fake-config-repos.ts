@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { NocoDbApi, NocoRecord } from '../../src/nocodb/api.js';
 import {
+  assertContextsUnclaimed,
   createRepos as businessRepos,
   ConflictError,
   NotFoundError,
@@ -12,7 +13,7 @@ import {
 import {
   requireNonEmpty,
   validateSlug,
-  validateContext,
+  validateTenantContexts,
   normalizeE164,
 } from '../../src/nocodb/validation.js';
 
@@ -30,11 +31,15 @@ export function directoryState(api: NocoDbApi): DirectoryState {
 export function createRepos(api: NocoDbApi): AidaConfigRepos {
   const state: DirectoryState = { tenants: [], memberships: [], audit: [] };
   states.set(api, state);
-  function values(input: TenantInput): NocoRecord {
+  function values(input: TenantInput, ownTenantId: string): NocoRecord {
+    const scope = validateTenantContexts(input);
+    assertContextsUnclaimed(state.tenants, scope, ownTenantId);
     return {
       name: requireNonEmpty('name', input.name),
       slug: validateSlug('slug', input.slug),
-      asterisk_context: validateContext('asteriskContext', input.asteriskContext),
+      asterisk_context: scope.contexts[0]!,
+      additional_contexts: scope.contexts.slice(1),
+      did_context: scope.didContext,
       caller_id_name: input.callerIdName ?? null,
       caller_id_number: input.callerIdNumber
         ? normalizeE164('callerIdNumber', input.callerIdNumber)
@@ -51,7 +56,7 @@ export function createRepos(api: NocoDbApi): AidaConfigRepos {
         return row;
       },
       create: async (input) => {
-        const row = values(input);
+        const row = values(input, '');
         for (const field of ['slug', 'asterisk_context'])
           if (state.tenants.some((existing) => existing[field] === row[field]))
             throw new UniqueViolationError([field]);
@@ -63,7 +68,7 @@ export function createRepos(api: NocoDbApi): AidaConfigRepos {
         const row = state.tenants.find((row) => row.id === id);
         if (!row) throw new NotFoundError('Tenant not found');
         if (row.revision !== revision) throw new ConflictError('Tenant revision changed');
-        Object.assign(row, values(input), { revision: revision + 1 });
+        Object.assign(row, values(input, id), { revision: revision + 1 });
         return row;
       },
     },

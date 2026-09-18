@@ -65,7 +65,8 @@ export function TenantContextBanner({
       <span role="status" aria-live="polite">
         {tenant ? (
           <>
-            Tenant: <strong>{tenant.name}</strong> ({tenant.slug}) — role {tenant.role}
+            Tenant: <strong>{tenant.name}</strong> ({tenant.slug}) — role {tenant.role} — PBX
+            context {tenant.pbxContext ? <code>{tenant.pbxContext}</code> : 'not assigned'}
           </>
         ) : (
           <>No tenant selected{session.user.superAdmin ? ' — acting as Super Admin' : ''}</>

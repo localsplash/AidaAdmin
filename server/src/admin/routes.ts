@@ -13,6 +13,8 @@ const tenantBody = z.object({
   name: z.string(),
   slug: z.string(),
   asteriskContext: z.string(),
+  additionalContexts: z.array(z.string()).default([]),
+  didContext: z.string().nullable().default(null),
   callerIdName: z.string().nullish(),
   callerIdNumber: z.string().nullish(),
   enabled: z.boolean(),

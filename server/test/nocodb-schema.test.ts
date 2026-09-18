@@ -120,6 +120,43 @@ describe('schema automation', () => {
     expect(api.tableByName('legacy_extra')).toBeDefined();
   });
 
+  it('adds the tenant context columns and the profile assignment table additively', async () => {
+    const api = new FakeNocoDbApi();
+    const tenantDef = AIDA_SCHEMA.find((t) => t.table_name === 'aida_tbl_TenantProfile')!;
+    // A base from before the context migration: no scope columns, no assignments.
+    await api.createTable({
+      ...tenantDef,
+      columns: tenantDef.columns.filter(
+        (c) => !['additional_contexts', 'did_context'].includes(c.column_name),
+      ),
+    });
+    const result = await upgradeSchema(api);
+    expect(result.createdTables).toContain('aida_tbl_ProfileAssignment');
+    expect(result.addedColumns).toEqual(
+      expect.arrayContaining([
+        { table: 'aida_tbl_TenantProfile', column: 'additional_contexts' },
+        { table: 'aida_tbl_TenantProfile', column: 'did_context' },
+      ]),
+    );
+    expect((await reportDrift(api)).inSync).toBe(true);
+    const assignments = await api.listColumns(
+      api.tableByName('aida_tbl_ProfileAssignment')!.info.id,
+    );
+    expect(assignments.map((c) => [c.column_name, c.uidt])).toEqual([
+      ['id', 'SingleLineText'],
+      ['created_at', 'DateTime'],
+      ['updated_at', 'DateTime'],
+      ['revision', 'Number'],
+      ['iTenantId', 'Number'],
+      ['pbx_instance_id', 'SingleLineText'],
+      ['context', 'SingleLineText'],
+      ['did', 'SingleLineText'],
+      ['profile_id', 'SingleLineText'],
+      ['enabled', 'Checkbox'],
+    ]);
+    expect((await upgradeSchema(api)).addedColumns).toEqual([]);
+  });
+
   it('stores no PBX or enrollment configuration', () => {
     for (const table of AIDA_SCHEMA) {
       for (const column of table.columns) {

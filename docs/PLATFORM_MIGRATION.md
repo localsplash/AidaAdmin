@@ -13,7 +13,13 @@ application-session token; it does not own parallel directory rows or sessions.
 
 Identity supplies safe numeric `iTenantId` values. String tenant IDs in browser
 paths are canonical decimal representations. Aida tenant profiles contain only
-application metadata and reference Identity through `iTenantId`.
+application metadata and reference Identity through `iTenantId`: the tenant's
+PBX scope (`asterisk_context`, `additional_contexts`, `did_context`) and caller
+ID. `iTenantId` authorizes; it is not the PBX routing key. OfficePulse is called
+with `{pbxInstanceId, context}` only, and assistant profiles are assigned per
+context/DID in `aida_tbl_ProfileAssignment` (owning `iTenantId` kept for
+authorization and consistency). Run `npm run nocodb -w server -- upgrade` to add
+these columns and the assignment table before deploying this version.
 
 AidaAdmin MySQL `aida_admin_db` contains OAuth state, durable Identity receipts,
 ordered replay cursor, append-only audit and the migration ledger. Fresh
@@ -24,5 +30,5 @@ The deployed environment is disposable DEV. No old UUID directory importer,
 archival copies, PBX desired-state compatibility or rollback-window retention is
 required. [DEV_RESET.md](DEV_RESET.md) names the obsolete objects to remove after
 the corresponding application readers are retired. Active Identity users,
-tenants, memberships, numbers and the three business configuration tables are
+tenants, memberships, numbers and the four business configuration tables are
 separate from that obsolete PBX graph.

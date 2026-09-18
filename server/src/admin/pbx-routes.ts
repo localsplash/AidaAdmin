@@ -3,50 +3,34 @@ import { z } from 'zod';
 import type { AppDeps } from '../deps.js';
 import type { Logger } from '../logger.js';
 import type { AuditEntry } from '../nocodb/repos.js';
-import { OfficePulseError, type OfficePulseClient } from '../officepulse/client.js';
+import { OfficePulseError, type OfficePulseClient, type PbxScope } from '../officepulse/client.js';
 import * as contract from '../officepulse/pbx-contract.js';
+import { requireSuperAdmin } from './authz.js';
+import {
+  didScope,
+  PbxResponseError,
+  resolveTenantPbxScope,
+  selectedTenant,
+  type TenantPbxScope,
+} from './pbx-scope.js';
 
-class PbxResponseError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 interface Context {
   tenantId: string;
   iTenantId: number;
   api: OfficePulseClient;
+  /** The PBX scope this request acts in; resolved from PlatformConfig, never the browser. */
+  scope: TenantPbxScope;
+  /** What non-DID OfficePulse calls receive: the context alone. */
+  pbx: PbxScope;
 }
+const scopeQuery = z.object({ context: z.string().optional() }).strict();
 
 /** Native PBX operations never read or write NocoDB desired-state records. */
 export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
   const router = Router();
   const base = '/admin/tenants/:tenantId';
 
-  function context(req: Request): Context {
-    const session = req.session;
-    if (!session) throw new PbxResponseError(401, 'unauthenticated', 'Sign in required');
-    const tenantId = String(req.params.tenantId);
-    // sessionMiddleware introspects Identity on every production request. Its
-    // enabled tenant/role projection is authoritative; browser claims are not.
-    const tenant = session.platformTenants?.find((row) => String(row.iTenantId) === tenantId);
-    if (!tenant?.bEnabled || (!session.superAdmin && tenant.role !== 'TENANT_ADMIN')) {
-      throw new PbxResponseError(403, 'forbidden', 'You do not administer that tenant');
-    }
-    if (session.selectedTenantId !== tenantId) {
-      throw new PbxResponseError(
-        403,
-        'tenant_not_selected',
-        'Select this tenant before administering its PBX',
-      );
-    }
-    if (!Number.isSafeInteger(tenant.iTenantId) || tenant.iTenantId < 1) {
-      throw new PbxResponseError(403, 'forbidden', 'A canonical Identity tenant is required');
-    }
-    z.object({}).strict().parse(req.query);
+  function officePulse(): OfficePulseClient {
     if (!deps.officePulse) {
       throw new PbxResponseError(
         503,
@@ -54,7 +38,17 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
         'OfficePulse PBX administration is not configured',
       );
     }
-    return { tenantId, iTenantId: tenant.iTenantId, api: deps.officePulse };
+    return deps.officePulse;
+  }
+
+  async function context(req: Request): Promise<Context> {
+    const tenant = selectedTenant(req);
+    // A `?context=` choice selects among the tenant's own contexts; anything
+    // else (including a made-up name) is refused before OfficePulse is called.
+    const { context: requested } = scopeQuery.parse(req.query);
+    const api = officePulse();
+    const scope = await resolveTenantPbxScope(deps, tenant.tenantId, requested || undefined);
+    return { ...tenant, api, scope, pbx: { context: scope.context } };
   }
 
   function failure(err: unknown, action: string): PbxResponseError {
@@ -83,7 +77,7 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
             : new PbxResponseError(
                 404,
                 'not_found',
-                'The PBX object is unavailable in this tenant; refresh the inventory',
+                'The PBX object is unavailable in this context; refresh the inventory',
               );
         case 409:
           return new PbxResponseError(
@@ -91,14 +85,14 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
             'conflict',
             action === 'queue.delete'
               ? 'The queue may still be referenced by a DID route. Review routing in Numbers before deleting it'
-              : 'The PBX configuration conflicts with this change. Refresh the inventory; manual DID routes cannot be adopted here',
+              : 'The PBX configuration conflicts with this change. Refresh the inventory; manual routes and routes owned by another context cannot be adopted here',
           );
         case 400:
         case 422:
           return new PbxResponseError(
             422,
             'validation',
-            'OfficePulse rejected these settings; check approved contexts, queue names, and tenant ownership',
+            'OfficePulse rejected these settings; check the context, queue names and ingress context',
           );
         case 503:
           return new PbxResponseError(
@@ -144,7 +138,7 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
     );
     const entry: AuditEntry = {
       actorIdentityUserId: req.session.iUserId,
-      tenantId: String(req.params.tenantId),
+      tenantId: req.params.tenantId === undefined ? null : String(req.params.tenantId),
       action: `pbx.${action}`,
       entityType: action.split('.')[0]!,
       entityId,
@@ -160,6 +154,30 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
     }
   }
 
+  function reply(
+    req: Request,
+    res: Response,
+    action: string,
+    status: number,
+    work: () => Promise<unknown>,
+  ) {
+    res.set('Cache-Control', 'no-store');
+    return Promise.resolve()
+      .then(work)
+      .then(async (result) => {
+        await audit(req, action, req.method === 'GET' ? 'read' : 'committed', status, result);
+        if (status === 204) res.status(204).end();
+        else res.status(status).json(result);
+      })
+      .catch(async (err: unknown) => {
+        const safe = failure(err, action);
+        await audit(req, action, safe.code, safe.status);
+        res
+          .status(safe.status)
+          .json({ error: safe.code, message: safe.message, correlationId: req.correlationId });
+      });
+  }
+
   function route(
     method: 'get' | 'post' | 'put' | 'delete',
     path: string,
@@ -167,25 +185,19 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
     status: number,
     work: (req: Request, ctx: Context) => Promise<unknown>,
   ) {
-    router[method](base + path, async (req: Request, res: Response) => {
-      res.set('Cache-Control', 'no-store');
-      try {
-        const ctx = context(req);
-        const result = await work(req, ctx);
-        await audit(req, action, method === 'get' ? 'read' : 'committed', status, result);
-        if (status === 204) res.status(204).end();
-        else res.status(status).json(result);
-      } catch (err) {
-        const safe = failure(err, action);
-        await audit(req, action, safe.code, safe.status);
-        res
-          .status(safe.status)
-          .json({ error: safe.code, message: safe.message, correlationId: req.correlationId });
-      }
-    });
+    router[method](base + path, (req: Request, res: Response) =>
+      reply(req, res, action, status, async () => work(req, await context(req))),
+    );
   }
 
-  async function didScope(req: Request, ctx: Context) {
+  /** Inventories carry the authorized context list so the UI can offer a selector. */
+  const scoped = <T extends object>(inventory: T, ctx: Context) => ({
+    ...inventory,
+    contexts: ctx.scope.contexts,
+  });
+
+  async function didInventory(req: Request, ctx: Context) {
+    const scope = didScope(ctx.scope);
     if (!deps.idClient?.listTenantNumbers) {
       throw new PbxResponseError(
         503,
@@ -204,10 +216,10 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
       );
     }
     // Identity is the canonical list, including disabled assignments. The
-    // OfficePulse response determines whether the mapped ingress context is usable.
+    // OfficePulse response determines whether the ingress context is usable.
     const numbers = directory.numbers.filter((number) => number.iTenantId === ctx.iTenantId);
     const inventory = await ctx.api.listDids(
-      ctx.iTenantId,
+      scope,
       req.correlationId,
       numbers.map((number) => number.phoneNumber),
     );
@@ -221,10 +233,10 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
           applyState: 'unknown' as const,
         },
     );
-    return { ...inventory, dids, numbers };
+    return { inventory: { ...scoped(inventory, ctx), dids, numbers }, scope };
   }
   async function allowedDid(req: Request, ctx: Context, did: string) {
-    const inventory = await didScope(req, ctx);
+    const { inventory, scope } = await didInventory(req, ctx);
     const number = inventory.numbers.find((entry) => entry.phoneNumber === did);
     const current = inventory.dids.find((entry) => entry.did === did);
     if (
@@ -245,18 +257,26 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
         'This DID has manual or unknown routing; operator adoption is outside this administration flow',
       );
     }
+    return scope;
   }
   const empty = (req: Request) =>
     z
       .object({})
       .strict()
       .parse(req.body ?? {});
-  route('get', '/extensions', 'extension.list', 200, (req, ctx) =>
-    ctx.api.listExtensions(ctx.iTenantId, req.correlationId),
+
+  // Every context on the PBX instance, for the Tenants form's datalist. Listing
+  // a context grants nothing: assignment happens in Tenants, authorization in
+  // resolveTenantPbxScope.
+  router.get('/admin/pbx/contexts', requireSuperAdmin, (req, res) =>
+    reply(req, res, 'context.list', 200, () => officePulse().listContexts(req.correlationId)),
+  );
+  route('get', '/extensions', 'extension.list', 200, async (req, ctx) =>
+    scoped(await ctx.api.listExtensions(ctx.pbx, req.correlationId), ctx),
   );
   route('post', '/extensions', 'extension.create', 201, (req, ctx) =>
     ctx.api.createExtension(
-      ctx.iTenantId,
+      ctx.pbx,
       contract.createExtensionBody.parse(req.body),
       req.correlationId,
     ),
@@ -264,28 +284,28 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
   route('delete', '/extensions/:extension', 'extension.delete', 204, (req, ctx) => {
     empty(req);
     return ctx.api.deleteExtension(
-      ctx.iTenantId,
+      ctx.pbx,
       contract.extensionNumber.parse(req.params.extension),
       req.correlationId,
     );
   });
-  route('get', '/queues', 'queue.list', 200, (req, ctx) =>
-    ctx.api.listQueues(ctx.iTenantId, req.correlationId),
+  route('get', '/queues', 'queue.list', 200, async (req, ctx) =>
+    scoped(await ctx.api.listQueues(ctx.pbx, req.correlationId), ctx),
   );
   route('post', '/queues', 'queue.create', 201, (req, ctx) =>
-    ctx.api.createQueue(ctx.iTenantId, contract.createQueueBody.parse(req.body), req.correlationId),
+    ctx.api.createQueue(ctx.pbx, contract.createQueueBody.parse(req.body), req.correlationId),
   );
   route('delete', '/queues/:queue', 'queue.delete', 204, (req, ctx) => {
     empty(req);
     return ctx.api.deleteQueue(
-      ctx.iTenantId,
+      ctx.pbx,
       contract.nativeName.parse(req.params.queue),
       req.correlationId,
     );
   });
   route('put', '/queues/:queue/members/:extension', 'queue_member.save', 200, (req, ctx) =>
     ctx.api.putQueueMember(
-      ctx.iTenantId,
+      ctx.pbx,
       contract.nativeName.parse(req.params.queue),
       contract.extensionNumber.parse(req.params.extension),
       contract.memberBody.parse(req.body),
@@ -295,24 +315,30 @@ export function pbxRoutes(logger: Logger, deps: AppDeps): Router {
   route('delete', '/queues/:queue/members/:extension', 'queue_member.delete', 204, (req, ctx) => {
     empty(req);
     return ctx.api.deleteQueueMember(
-      ctx.iTenantId,
+      ctx.pbx,
       contract.nativeName.parse(req.params.queue),
       contract.extensionNumber.parse(req.params.extension),
       req.correlationId,
     );
   });
-  route('get', '/did-routes', 'did.list', 200, didScope);
+  route(
+    'get',
+    '/did-routes',
+    'did.list',
+    200,
+    async (req, ctx) => (await didInventory(req, ctx)).inventory,
+  );
   route('put', '/did-routes/:did', 'did.save', 200, async (req, ctx) => {
     const did = contract.e164.parse(req.params.did);
     const settings = contract.didBody.parse(req.body);
-    await allowedDid(req, ctx, did);
-    return ctx.api.putDid(ctx.iTenantId, did, settings, req.correlationId, [did]);
+    const scope = await allowedDid(req, ctx, did);
+    return ctx.api.putDid(scope, did, settings, req.correlationId, [did]);
   });
   route('delete', '/did-routes/:did', 'did.delete', 204, async (req, ctx) => {
     empty(req);
     const did = contract.e164.parse(req.params.did);
-    await allowedDid(req, ctx, did);
-    return ctx.api.deleteDid(ctx.iTenantId, did, req.correlationId, [did]);
+    const scope = await allowedDid(req, ctx, did);
+    return ctx.api.deleteDid(scope, did, req.correlationId, [did]);
   });
   return router;
 }

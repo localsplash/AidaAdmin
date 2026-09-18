@@ -420,3 +420,10 @@ input[readonly] {
 .observation-availability h2 {
   margin-top: 0;
 }
+
+.pbx-scope label {
+  display: inline;
+}
+.pbx-scope select {
+  margin-left: 0.25rem;
+}

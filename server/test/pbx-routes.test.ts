@@ -1,125 +1,57 @@
-import { Writable } from 'node:stream';
 import request from 'supertest';
-import { pino } from 'pino';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createApp } from '../src/app.js';
-import { createDeps, type AppDeps } from '../src/deps.js';
-import { loadConfig } from '../src/config.js';
-import { IdentitySessionRepository } from '../src/auth/session-store.js';
-import { HttpIdClient, type PlatformNumber, type SessionIntrospection } from '../src/id/client.js';
-import { REDACT_PATHS } from '../src/logger.js';
-import type { AuditEntry } from '../src/nocodb/repos.js';
-import { OfficePulseError } from '../src/officepulse/client.js';
-import { FakeOfficePulse } from './helpers/fake-officepulse.js';
-import { createRepos as createTestRepos } from './helpers/fake-config-repos.js';
-import { FakeNocoDbApi } from './helpers/fake-nocodb.js';
+import { HttpOfficePulseClient, OfficePulseError } from '../src/officepulse/client.js';
+import { DID as did, STORED_PROFILE, scopedApp } from './helpers/scoped-app.js';
 
-const did = '+15559870001';
 const schedule = { timeRange: '09:00-17:00', weekdays: 'mon-fri', timezone: 'America/Los_Angeles' };
-let snapshot: SessionIntrospection;
-let numbers: PlatformNumber[];
-let api: FakeOfficePulse;
-let deps: AppDeps;
-let app: ReturnType<typeof createApp>;
-let audits: AuditEntry[];
-let logs: string;
-let identity: HttpIdClient;
 const base = '/admin/tenants/7';
-function send(method: 'get' | 'post' | 'put' | 'delete', path: string, body?: object) {
-  const client = request(app);
-  const call = client[method](path)
-    .set('Cookie', ['aida.sid=central-session', 'aida.csrf=csrf-proof'])
-    .set('x-csrf-token', 'csrf-proof')
-    .set('x-correlation-id', 'pbx-test-correlation');
-  return body === undefined ? call : call.send(body);
-}
-beforeEach(() => {
-  snapshot = {
-    active: true,
-    user: { iUserId: 42, email: null, displayName: 'Admin', superAdmin: false },
-    tenants: [{ iTenantId: 7, name: 'Acme', slug: 'acme', role: 'TENANT_ADMIN', bEnabled: true }],
-    selectedTenantId: 7,
-  };
-  numbers = [
-    {
-      iPhoneNumberId: 1,
-      iTenantId: 7,
-      phoneNumber: did,
-      label: 'Main',
-      bVoice: true,
-      bMessaging: true,
-      bEnabled: true,
-      accessPolicy: 'TENANT_MEMBERS',
-      iVersion: 1,
-    },
-  ];
-  identity = new HttpIdClient('https://id.invalid');
-  identity.introspectSession = vi.fn(async () => snapshot);
-  identity.listTenantNumbers = vi.fn(async () => ({ numbers }));
-  api = new FakeOfficePulse();
-  api.dids.set(7, [{ did, managed: false, availability: 'unconfigured', applyState: 'unknown' }]);
-  audits = [];
-  logs = '';
-  const logger = pino(
-    { level: 'info', redact: { paths: REDACT_PATHS, censor: '[REDACTED]' } },
-    new Writable({
-      write(chunk, _encoding, callback) {
-        logs += String(chunk);
-        callback();
-      },
-    }),
-  );
-  const config = loadConfig({ NODE_ENV: 'test' });
-  deps = {
-    ...createDeps(config),
-    sessionStore: new IdentitySessionRepository(identity),
-    idClient: identity,
-    officePulse: api,
-    audit: {
-      append: async (entry) => {
-        audits.push(entry);
-      },
-    },
-  };
-  app = createApp(config, logger, deps);
+let ctx: Awaited<ReturnType<typeof scopedApp>>;
+beforeEach(async () => {
+  ctx = await scopedApp();
 });
+const send: typeof ctx.send = (...args) => ctx.send(...args);
+const snapshot = () => {
+  if (!ctx.state.snapshot.active) throw new Error('fixture');
+  return ctx.state.snapshot;
+};
 
 describe('native PBX authorization', () => {
   it('revalidates the central session and refuses revoked access before OfficePulse', async () => {
     expect((await send('get', `${base}/extensions`)).status).toBe(200);
-    api.requests = [];
-    snapshot = { active: false };
+    ctx.api.requests = [];
+    ctx.state.snapshot = { active: false };
     expect((await send('post', `${base}/extensions`, { extension: '100' })).status).toBe(401);
-    expect(identity.introspectSession).toHaveBeenCalledTimes(2);
-    expect(api.requests).toEqual([]);
+    expect(ctx.identity.introspectSession).toHaveBeenCalledTimes(2);
+    expect(ctx.api.requests).toEqual([]);
   });
   it.each([
     'extensions/100',
-    'queues/t8.sales',
-    'queues/t8.sales/members/100',
+    'queues/other.sales',
+    'queues/other.sales/members/100',
     `did-routes/${encodeURIComponent(did)}`,
+    'profile-assignments/8d9e8b2c-0f0e-4a1b-9f7d-2f2c2c9c1a1b',
   ])('refuses another tenant for %s without an upstream request', async (path) => {
     expect((await send('delete', `/admin/tenants/8/${path}`)).status).toBe(403);
-    expect(api.requests).toEqual([]);
+    expect(ctx.api.requests).toEqual([]);
   });
   it('checks role, enabled membership and the selected tenant even for Super Admin', async () => {
-    if (!snapshot.active) throw Error('fixture');
-    snapshot.tenants[0]!.role = 'USER';
+    snapshot().tenants[0]!.role = 'USER';
     expect((await send('get', `${base}/extensions`)).status).toBe(401);
-    snapshot.user.superAdmin = true;
-    snapshot.selectedTenantId = null;
+    snapshot().user.superAdmin = true;
+    snapshot().selectedTenantId = null;
     expect((await send('get', `${base}/extensions`)).status).toBe(403);
-    snapshot.selectedTenantId = 7;
+    snapshot().selectedTenantId = 7;
     expect((await send('get', `${base}/extensions`)).status).toBe(200);
-    snapshot.tenants[0]!.bEnabled = false;
+    snapshot().tenants[0]!.bEnabled = false;
     expect((await send('get', `${base}/extensions`)).status).toBe(403);
   });
-  it('uses only the numeric tenant resolved by Identity and strips trust headers', async () => {
+  it('sends the PlatformConfig context, never a tenant id, and strips trust headers', async () => {
     const res = await send('post', `${base}/extensions`, { extension: '100' })
       .set('X-Aida-Tenant-Id', '999')
       .set('X-Aida-Role', 'SUPER_ADMIN');
     expect(res.status).toBe(201);
-    expect(api.requests[0]!.tenantId).toBe(7);
+    expect(ctx.api.requests[0]).toMatchObject({ method: 'extension.create', context: 'acme' });
+    expect(JSON.stringify(ctx.api.requests)).not.toContain('iTenantId');
     expect(
       (await send('post', `${base}/extensions`, { extension: '101', iTenantId: 999 })).status,
     ).toBe(400);
@@ -131,17 +63,163 @@ describe('native PBX authorization', () => {
       ['post', '/extensions'],
       ['delete', '/extensions/100'],
       ['post', '/queues'],
-      ['put', '/queues/t7.sales/members/100'],
+      ['put', '/queues/acme.sales/members/100'],
       ['put', `/did-routes/${did}`],
+      ['put', '/profile-assignments'],
     ] as const) {
-      const client = request(app);
+      const client = request(ctx.app);
       const response = await client[method](base + path)
         .set('Cookie', 'aida.sid=central-session')
         .send({});
       expect(response.status).toBe(403);
       expect(response.body.error).toBe('csrf_token_invalid');
     }
-    expect(api.requests).toEqual([]);
+    expect(ctx.api.requests).toEqual([]);
+  });
+});
+
+describe('context scope resolution', () => {
+  it('defaults to the primary context and lists every authorized context with the PBX instance', async () => {
+    const res = await send('get', `${base}/extensions`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      source: 'asterisk',
+      pbxInstanceId: 'officepulse-test',
+      context: 'acme',
+      contexts: ['acme', 'acme-branch'],
+      provisioningEnabled: true,
+      extensions: [],
+    });
+    expect(res.body).not.toHaveProperty('iTenantId');
+    expect(ctx.api.requests).toEqual([
+      { method: 'extension.list', context: 'acme', correlationId: 'pbx-test-correlation' },
+    ]);
+  });
+  it('lets a multi-context tenant select a non-primary context for reads and writes', async () => {
+    const queue = await send('post', `${base}/queues?context=acme-branch`, { name: 'sales' });
+    expect(queue.status).toBe(201);
+    expect(queue.body.name).toBe('acme-branch.sales');
+    const list = await send('get', `${base}/queues?context=acme-branch`);
+    expect(list.body).toMatchObject({ context: 'acme-branch', contexts: ['acme', 'acme-branch'] });
+    expect(list.body.queues.map((row: { name: string }) => row.name)).toEqual([
+      'acme-branch.sales',
+    ]);
+    expect((await send('get', `${base}/queues`)).body.queues).toEqual([]);
+    expect(ctx.api.requests.map((row) => row.context)).toEqual([
+      'acme-branch',
+      'acme-branch',
+      'acme',
+    ]);
+  });
+  it.each(['other-tenant', 'from-carrier', 'a,b', 'ACME'])(
+    'refuses a browser-supplied context %s that is not assigned to the tenant',
+    async (context) => {
+      const res = await send('get', `${base}/extensions?context=${encodeURIComponent(context)}`);
+      expect(res.status).toBe(403);
+      expect(res.body).toMatchObject({
+        error: 'context_forbidden',
+        correlationId: 'pbx-test-correlation',
+      });
+      expect(
+        (await send('post', `${base}/extensions?context=${context}`, { extension: '100' })).status,
+      ).toBe(403);
+      expect(ctx.api.requests).toEqual([]);
+      expect(ctx.state.audits.map((row) => row.details?.outcome)).toEqual([
+        'context_forbidden',
+        'context_forbidden',
+      ]);
+    },
+  );
+  it('rejects a repeated or unknown query parameter before resolving scope', async () => {
+    expect((await send('get', `${base}/extensions?context=acme&context=acme`)).status).toBe(400);
+    expect((await send('get', `${base}/extensions?ctx=acme`)).status).toBe(400);
+    expect(ctx.api.requests).toEqual([]);
+  });
+  it('answers 409 pbx_scope_missing until Tenants assigns a primary context', async () => {
+    const profile = ctx.noco.tableByName('aida_tbl_TenantProfile')!.records[0]!;
+    await ctx.noco.updateRecord(
+      ctx.noco.tableByName('aida_tbl_TenantProfile')!.info.id,
+      profile.Id!,
+      {
+        asterisk_context: '',
+        additional_contexts: '',
+      },
+    );
+    const res = await send('get', `${base}/extensions`);
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      error: 'pbx_scope_missing',
+      message: "Assign this tenant's Asterisk context in Tenants first",
+    });
+    expect(ctx.api.requests).toEqual([]);
+    ctx.noco.tableByName('aida_tbl_TenantProfile')!.records = [];
+    expect((await send('get', `${base}/queues`)).body.error).toBe('pbx_scope_missing');
+  });
+  it('requires the PlatformConfig base to know any scope', async () => {
+    ctx.deps.repos = null;
+    const res = await send('get', `${base}/extensions`);
+    expect(res.status).toBe(503);
+    expect(res.body.error).toBe('nocodb_not_configured');
+    expect(ctx.api.requests).toEqual([]);
+  });
+  it('maps a mismatched context echo or a missing PBX instance to 502', async () => {
+    const inventory = {
+      source: 'asterisk',
+      pbxInstanceId: 'officepulse-live',
+      context: 'acme',
+      provisioningEnabled: true,
+      contexts: ['acme'],
+      extensions: [],
+    };
+    const upstream = vi.fn();
+    vi.stubGlobal('fetch', upstream);
+    ctx.deps.officePulse = new HttpOfficePulseClient('https://pbx.invalid');
+    upstream.mockResolvedValueOnce(new Response(JSON.stringify(inventory)));
+    expect((await send('get', `${base}/extensions`)).body).toMatchObject({
+      pbxInstanceId: 'officepulse-live',
+      context: 'acme',
+      contexts: ['acme', 'acme-branch'],
+    });
+    upstream.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ...inventory, context: 'acme-branch' })),
+    );
+    const echoed = await send('get', `${base}/extensions`);
+    expect(echoed.status).toBe(502);
+    expect(echoed.body.error).toBe('officepulse_failed');
+    // JSON drops the undefined key, so the upstream body has no pbxInstanceId.
+    upstream.mockResolvedValueOnce(
+      new Response(JSON.stringify({ ...inventory, pbxInstanceId: undefined })),
+    );
+    expect((await send('get', `${base}/extensions`)).status).toBe(502);
+    expect(upstream.mock.calls.every(([url]) => String(url).includes('context=acme'))).toBe(true);
+    vi.unstubAllGlobals();
+  });
+  it('lists the instance contexts for Super Admins only', async () => {
+    ctx.api.knownContexts = ['from-carrier', 'other'];
+    expect((await send('get', '/admin/pbx/contexts')).status).toBe(403);
+    snapshot().user.superAdmin = true;
+    const res = await send('get', '/admin/pbx/contexts');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      source: 'asterisk',
+      pbxInstanceId: 'officepulse-test',
+      contexts: ['acme', 'from-carrier', 'other'],
+    });
+    expect(ctx.state.audits.at(-1)).toMatchObject({
+      action: 'pbx.context.list',
+      tenantId: null,
+      details: { outcome: 'read', status: 200 },
+    });
+    ctx.deps.officePulse = null;
+    expect((await send('get', '/admin/pbx/contexts')).body.error).toBe(
+      'officepulse_not_configured',
+    );
+  });
+  it('names the tenant PBX context in the session banner view', async () => {
+    const res = await request(ctx.app)
+      .get('/api/session')
+      .set('Cookie', 'aida.sid=central-session');
+    expect(res.body.selectedTenant).toMatchObject({ tenantId: '7', pbxContext: 'acme' });
   });
 });
 
@@ -154,17 +232,23 @@ describe('native PBX writes and credential safety', () => {
     expect(res.status).toBe(201);
     expect(res.body).toEqual({
       extension: '100',
-      sipUsername: '100-t7',
+      sipUsername: '100-acme',
       sipSecret: 'one-time-sip-secret',
       applyState: 'committed',
     });
     expect(res.headers['cache-control']).toBe('no-store');
     const list = await send('get', `${base}/extensions`);
-    expect(list.body.extensions[0].applyState).toBe('unknown');
-    expect(JSON.stringify({ audits, logs, requests: api.requests, list: list.body })).not.toContain(
-      'one-time-sip-secret',
-    );
-    expect(audits[0]).toMatchObject({
+    expect(list.body.extensions[0]).toMatchObject({ applyState: 'unknown', managed: true });
+    expect(
+      JSON.stringify({
+        audits: ctx.state.audits,
+        logs: ctx.state.logs,
+        requests: ctx.api.requests,
+        list: list.body,
+        nocodb: ctx.noco.tableByName('aida_tbl_TenantProfile')!.records,
+      }),
+    ).not.toContain('one-time-sip-secret');
+    expect(ctx.state.audits[0]).toMatchObject({
       actorIdentityUserId: 42,
       tenantId: '7',
       action: 'pbx.extension.create',
@@ -174,22 +258,25 @@ describe('native PBX writes and credential safety', () => {
     });
     expect((await send('delete', `${base}/extensions/100`)).status).toBe(204);
     expect((await send('get', `${base}/extensions`)).body.extensions).toEqual([]);
-    expect(deps.repos).toBeNull();
+    // No PBX desired state lands in PlatformConfig: only the tenant's scope row.
+    expect(ctx.noco.tableByName('aida_tbl_TenantProfile')!.records).toMatchObject([STORED_PROFILE]);
   });
   it('sends minimal native membership changes and bounded controls', async () => {
     const queue = await send('post', `${base}/queues`, { name: 'sales', strategy: 'ringall' });
-    expect(queue.body.name).toBe('t7.sales');
+    expect(queue.body.name).toBe('acme.sales');
     expect(
-      (await send('put', `${base}/queues/t7.sales/members/100`, { penalty: 3, paused: true })).body,
+      (await send('put', `${base}/queues/acme.sales/members/100`, { penalty: 3, paused: true }))
+        .body,
     ).toMatchObject({ penalty: 3, paused: true, applyState: 'committed' });
-    expect((await send('delete', `${base}/queues/t7.sales/members/100`)).status).toBe(204);
-    expect((await send('delete', `${base}/queues/t7.sales`)).status).toBe(204);
-    expect(api.requests.map((row) => row.method)).toEqual([
+    expect((await send('delete', `${base}/queues/acme.sales/members/100`)).status).toBe(204);
+    expect((await send('delete', `${base}/queues/acme.sales`)).status).toBe(204);
+    expect(ctx.api.requests.map((row) => row.method)).toEqual([
       'queue.create',
       'member.save',
       'member.delete',
       'queue.delete',
     ]);
+    expect(ctx.api.requests.every((row) => row.context === 'acme' && !row.didContext)).toBe(true);
   });
   it.each([
     ['/extensions', { extension: '1' }],
@@ -204,7 +291,7 @@ describe('native PBX writes and credential safety', () => {
     ['/queues', { name: 'bad/name' }],
   ])('validates %s before upstream', async (path, body) => {
     expect((await send('post', base + path, body)).status).toBe(400);
-    expect(api.requests).toEqual([]);
+    expect(ctx.api.requests).toEqual([]);
   });
   it.each([
     { penalty: -1 },
@@ -214,32 +301,32 @@ describe('native PBX writes and credential safety', () => {
     { context: 'a,b' },
     { tenantId: '8' },
   ])('rejects invalid member settings %j', async (body) => {
-    expect((await send('put', `${base}/queues/t7.sales/members/100`, body)).status).toBe(400);
-    expect(api.requests).toEqual([]);
+    expect((await send('put', `${base}/queues/acme.sales/members/100`, body)).status).toBe(400);
+    expect(ctx.api.requests).toEqual([]);
   });
   it.each([404, 409, 422, 503, 500])(
     'maps upstream %s to a safe error and audit outcome',
     async (status) => {
-      api.failNext = status;
-      const res = await send('delete', `${base}/queues/t7.sales`);
+      ctx.api.failNext = status;
+      const res = await send('delete', `${base}/queues/acme.sales`);
       expect(res.status).toBe(status === 500 ? 502 : status);
       expect(res.body.correlationId).toBe('pbx-test-correlation');
       expect(res.body.message).not.toContain('pbx down');
-      expect(audits[0]!.details!.status).toBe(res.status);
+      expect(ctx.state.audits[0]!.details!.status).toBe(res.status);
       if (status === 409) expect(res.body.message).toContain('DID route');
     },
   );
   it('preserves a committed result when audit storage fails without logging credentials', async () => {
-    deps.audit!.append = async () => {
+    ctx.deps.audit!.append = async () => {
       throw new Error('storage one-time-sip-secret');
     };
     expect((await send('post', `${base}/extensions`, { extension: '100' })).status).toBe(201);
-    expect(logs).not.toContain('one-time-sip-secret');
-    expect(logs).toContain('PBX audit persistence failed');
+    expect(ctx.state.logs).not.toContain('one-time-sip-secret');
+    expect(ctx.state.logs).toContain('PBX audit persistence failed');
   });
   it('distinguishes disabled configuration from empty inventory', async () => {
     expect((await send('get', `${base}/queues`)).body.queues).toEqual([]);
-    deps.officePulse = null;
+    ctx.deps.officePulse = null;
     const response = await send('get', `${base}/queues`);
     expect(response.status).toBe(503);
     expect(response.body.error).toBe('officepulse_not_configured');
@@ -247,9 +334,57 @@ describe('native PBX writes and credential safety', () => {
 });
 
 describe('Identity-authorized managed DID settings', () => {
+  it('passes the ingress context alongside the extension context on every DID request', async () => {
+    const list = await send('get', `${base}/did-routes`);
+    expect(list.status).toBe(200);
+    expect(list.body).toMatchObject({
+      pbxInstanceId: 'officepulse-test',
+      context: 'acme',
+      didContext: 'from-carrier',
+      contexts: ['acme', 'acme-branch'],
+    });
+    expect(list.body).not.toHaveProperty('scope');
+    expect(ctx.api.requests).toEqual([
+      {
+        method: 'did.list',
+        context: 'acme',
+        didContext: 'from-carrier',
+        correlationId: 'pbx-test-correlation',
+        body: { authorizedDids: [did] },
+      },
+    ]);
+    await send('put', `${base}/did-routes/${did}`, { queue: 'acme.sales', ringsBeforeAi: 4 });
+    await send('delete', `${base}/did-routes/${did}`);
+    expect(
+      ctx.api.requests
+        .filter((row) => row.method !== 'did.list')
+        .map((row) => [row.method, row.context, row.didContext]),
+    ).toEqual([
+      ['did.save', 'acme', 'from-carrier'],
+      ['did.delete', 'acme', 'from-carrier'],
+    ]);
+  });
+  it('answers 409 pbx_scope_missing for DID routes until an ingress context is assigned', async () => {
+    const table = ctx.noco.tableByName('aida_tbl_TenantProfile')!;
+    await ctx.noco.updateRecord(table.info.id, table.records[0]!.Id!, { did_context: null });
+    for (const [method, path, body] of [
+      ['get', '/did-routes', undefined],
+      ['put', `/did-routes/${did}`, { queue: 'acme.sales', ringsBeforeAi: 4 }],
+      ['delete', `/did-routes/${did}`, undefined],
+    ] as const) {
+      const res = await send(method, base + path, body);
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({
+        error: 'pbx_scope_missing',
+        message: "Assign this tenant's inbound DID context first",
+      });
+    }
+    expect(ctx.api.requests).toEqual([]);
+    expect((await send('get', `${base}/extensions`)).status).toBe(200);
+  });
   it('normalizes schedule, reads saved settings and deletes only PBX routing', async () => {
     const res = await send('put', `${base}/did-routes/${encodeURIComponent(did)}`, {
-      queue: 't7.sales',
+      queue: 'acme.sales',
       ringsBeforeAi: 4,
       schedule,
     });
@@ -265,15 +400,15 @@ describe('Identity-authorized managed DID settings', () => {
     expect(
       (
         await send('put', `${base}/did-routes/${did}`, {
-          queue: 't7.sales',
+          queue: 'acme.sales',
           ringsBeforeAi: 12,
           schedule: null,
         })
       ).status,
     ).toBe(200);
     expect((await send('delete', `${base}/did-routes/${did}`)).status).toBe(204);
-    expect(numbers).toHaveLength(1);
-    expect(numbers[0]!.bEnabled).toBe(true);
+    expect(ctx.state.numbers).toHaveLength(1);
+    expect(ctx.state.numbers[0]!.bEnabled).toBe(true);
   });
   it.each([
     { ringsBeforeAi: 0 },
@@ -290,47 +425,50 @@ describe('Identity-authorized managed DID settings', () => {
     expect(
       (
         await send('put', `${base}/did-routes/${did}`, {
-          queue: 't7.sales',
+          queue: 'acme.sales',
           ringsBeforeAi: 4,
           ...extra,
         })
       ).status,
     ).toBe(400);
-    expect(api.requests).toEqual([]);
+    expect(ctx.api.requests).toEqual([]);
   });
   it('requires enabled Identity voice assignment and authorizes new Numbers dynamically', async () => {
-    numbers[0]!.bEnabled = false;
+    ctx.state.numbers[0]!.bEnabled = false;
     expect(
-      (await send('put', `${base}/did-routes/${did}`, { queue: 't7.sales', ringsBeforeAi: 4 }))
+      (await send('put', `${base}/did-routes/${did}`, { queue: 'acme.sales', ringsBeforeAi: 4 }))
         .status,
     ).toBe(404);
-    expect((await send('get', `${base}/did-routes`)).body.numbers).toEqual(numbers);
-    numbers[0]!.bEnabled = true;
-    api.dids.set(7, []);
+    expect((await send('get', `${base}/did-routes`)).body.numbers).toEqual(ctx.state.numbers);
+    ctx.state.numbers[0]!.bEnabled = true;
+    ctx.api.dids.set('acme', []);
     const saved = await send('put', `${base}/did-routes/${did}`, {
-      queue: 't7.sales',
+      queue: 'acme.sales',
       ringsBeforeAi: 4,
     });
     expect(saved.status).toBe(200);
-    expect(api.requests.find((row) => row.method === 'did.save')?.body).toMatchObject({
+    expect(ctx.api.requests.find((row) => row.method === 'did.save')?.body).toMatchObject({
       authorizedDids: [did],
     });
   });
   it('refuses manual routes on save and delete', async () => {
-    api.dids.set(7, [{ did, managed: false, availability: 'manual', applyState: 'unknown' }]);
+    ctx.api.dids.set('acme', [
+      { did, managed: false, availability: 'manual', applyState: 'unknown' },
+    ]);
     expect(
-      (await send('put', `${base}/did-routes/${did}`, { queue: 't7.sales', ringsBeforeAi: 4 }))
+      (await send('put', `${base}/did-routes/${did}`, { queue: 'acme.sales', ringsBeforeAi: 4 }))
         .status,
     ).toBe(409);
     expect((await send('delete', `${base}/did-routes/${did}`)).status).toBe(409);
-    expect(api.requests.every((row) => row.method === 'did.list')).toBe(true);
+    expect(ctx.api.requests.every((row) => row.method === 'did.list')).toBe(true);
   });
   it('left joins and dynamically authorizes every tenant assignment, including disabled numbers', async () => {
+    const numbers = ctx.state.numbers;
     numbers.push(
       { ...numbers[0]!, iPhoneNumberId: 2, phoneNumber: '+15559870002' },
       { ...numbers[0]!, iPhoneNumberId: 3, phoneNumber: '+15559870003', bEnabled: false },
     );
-    api.dids.set(7, [
+    ctx.api.dids.set('acme', [
       { did, managed: false, availability: 'unconfigured', applyState: 'unknown' },
       { did, managed: false, availability: 'unconfigured', applyState: 'unknown' },
       { did: '+15559879999', managed: false, availability: 'manual', applyState: 'unknown' },
@@ -356,29 +494,27 @@ describe('Identity-authorized managed DID settings', () => {
     expect((await send('delete', `${base}/did-routes/${numbers[1]!.phoneNumber}`)).status).toBe(
       204,
     );
-    expect(api.requests.find((entry) => entry.method === 'did.delete')?.body).toMatchObject({
+    expect(ctx.api.requests.find((entry) => entry.method === 'did.delete')?.body).toMatchObject({
       authorizedDids: [numbers[1]!.phoneNumber],
     });
   });
   it('keeps the canonical Numbers endpoint available when OfficePulse fails', async () => {
-    if (!snapshot.active) throw Error('fixture');
-    snapshot.user.superAdmin = true;
-    deps.repos = createTestRepos(new FakeNocoDbApi());
-    api.failNext = 503;
+    snapshot().user.superAdmin = true;
+    ctx.api.failNext = 503;
     expect((await send('get', `${base}/did-routes`)).status).toBe(503);
     const res = await send('get', `${base}/numbers`);
     expect(res.status).toBe(200);
-    expect(res.body.numbers).toEqual(numbers);
-    deps.officePulse = null;
+    expect(res.body.numbers).toEqual(ctx.state.numbers);
+    ctx.deps.officePulse = null;
     expect((await send('get', `${base}/did-routes`)).status).toBe(503);
-    expect((await send('get', `${base}/numbers`)).body.numbers).toEqual(numbers);
+    expect((await send('get', `${base}/numbers`)).body.numbers).toEqual(ctx.state.numbers);
   });
   it('does not relay upstream error details or failed Identity bodies', async () => {
-    identity.listTenantNumbers = async () => {
+    ctx.identity.listTenantNumbers = async () => {
       throw new OfficePulseError('SQL one-time-sip-secret');
     };
     expect((await send('get', `${base}/did-routes`)).status).toBe(503);
-    expect(logs).not.toContain('one-time-sip-secret');
-    expect(api.requests).toEqual([]);
+    expect(ctx.state.logs).not.toContain('one-time-sip-secret');
+    expect(ctx.api.requests).toEqual([]);
   });
 });

@@ -1,10 +1,10 @@
 import { adminApi } from '../api/admin';
 import { usePbxInventory } from './usePbxInventory';
 
-const loadInventory = async (tenant: string) => {
+const loadInventory = async (tenant: string, context?: string) => {
   const [dids, queues] = await Promise.all([
-    adminApi.listDidRoutes(tenant),
-    adminApi.listQueues(tenant),
+    adminApi.listDidRoutes(tenant, context),
+    adminApi.listQueues(tenant, context),
   ]);
   return {
     ...dids,
@@ -13,6 +13,6 @@ const loadInventory = async (tenant: string) => {
   };
 };
 
-export function useNumberRouting(tenantId: string) {
-  return usePbxInventory(tenantId, loadInventory);
+export function useNumberRouting(tenantId: string, context?: string) {
+  return usePbxInventory(tenantId, loadInventory, context);
 }
