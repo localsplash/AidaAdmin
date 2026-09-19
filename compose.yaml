@@ -1,0 +1,44 @@
+services:
+  aida-admin:
+    build:
+      context: .
+      args:
+        BUILD_REVISION: ${BUILD_REVISION}
+        SOURCE_DATE_EPOCH: ${SOURCE_DATE_EPOCH}
+        BUILD_DIRTY: ${BUILD_DIRTY}
+    image: aida-admin:dev
+    container_name: aida-admin
+    env_file:
+      - .env
+    ports:
+      - "18086:3001"
+    volumes:
+      - admin-assets:/app/data/assets
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    networks:
+      - npm_network
+      - platform-preview
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  admin-assets:
+    name: aida-admin-preview_admin-assets
+    external: true
+
+networks:
+  npm_network:
+    external: true
+  platform-preview:
+    external: true
