@@ -168,7 +168,21 @@ Missing or malformed identity fails the build. The wrapper derives them from Git
 scripts/with-build-info.sh sh -c 'docker build \
   --build-arg BUILD_REVISION --build-arg SOURCE_DATE_EPOCH --build-arg BUILD_DIRTY \
   -t aidaadmin:local .'
+```
 
+# Hardware settings commentary
+For the live takeover button to immediately auto answer, handset may need special provisioning.
+
+## Grandstream GXV 3450
+Account (1) -> Call Settings -> Auto-Answer: "Intercom/Paging Only"
+
+Config file shows following changes when this is set-
+```<!-- Auto Answer Configuration for Account 1 -->
+<P2981>1</P2981> <!-- Enable Auto Answer -->
+<P2983>1</P2983> <!-- Enable Auto Answer Call Waiting -->
+<P2860>1</P2860> <!-- Enable Intercom Barging -->
+<P2862>3</P2862> <!-- Intercom Auto Answer Mode (Open Handset/Speakerphone) -->
+<P2863>1</P2863> <!-- Mute on Intercom Auto Answer -->
 ```
 
 External orchestrators building this Dockerfile must forward these same build args.
