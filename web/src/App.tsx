@@ -9,6 +9,7 @@ import {
 } from './components/StatusScreens';
 import { TenantPage } from './components/TenantPage';
 import { TenantContextBanner } from './components/TenantContextBanner';
+import { EnvironmentNotice } from './components/EnvironmentNotice';
 import { AppearanceScreen } from './screens/AppearanceScreen';
 import { OperationsScreen } from './screens/OperationsScreen';
 import { ExtensionsScreen } from './screens/ExtensionsScreen';
@@ -112,6 +113,7 @@ function AuthenticatedShell({
           Sign out
         </button>
       </header>
+      <EnvironmentNotice />
       <TenantContextBanner session={session} onTenantChanged={onSessionChanged} />
       {session.selectedTenant ? (
         <nav className="tenant-navigation" aria-label="Tenant management">

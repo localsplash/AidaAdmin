@@ -427,3 +427,27 @@ input[readonly] {
 .pbx-scope select {
   margin-left: 0.25rem;
 }
+
+.environment-notice {
+  padding: 0.25rem 1.5rem;
+}
+.environment-label {
+  margin: 0.25rem 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+.environment-mismatch {
+  padding: 1rem;
+  border: 2px solid #b91c1c;
+  background: #fef2f2;
+  color: #991b1b;
+  font-weight: 600;
+}
+.attached-handset dl {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+.attached-handset dd {
+  margin: 0 0 0.25rem;
+  overflow-wrap: anywhere;
+}

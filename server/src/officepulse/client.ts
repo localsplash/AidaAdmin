@@ -1,6 +1,7 @@
 /** Server-only client for the canonical native PBX and call-control API. */
 import { z } from 'zod';
 import * as pbx from './pbx-contract.js';
+import * as handsets from './handset-contract.js';
 const UPSTREAM_TIMEOUT_MS = 10_000;
 
 /** The one staff command OfficePulse acts on; DRAIN_ACK is the agent's. */
@@ -35,6 +36,7 @@ export interface OfficePulseReadiness {
   components: Record<string, OfficePulseComponent>;
   /** OFFICEPULSE_INSTANCE_ID of the serving PBX instance, when it reported one. */
   pbxInstanceId?: string;
+  environmentName?: string;
 }
 
 /**
@@ -49,6 +51,8 @@ export interface PbxScope {
 export type DidScope = PbxScope & { didContext: string };
 
 export interface OfficePulseClient {
+  listHandsets(scope: PbxScope, correlationId: string): Promise<handsets.HandsetInventory>;
+  revokeHandset(scope: PbxScope, deviceId: string, correlationId: string): Promise<void>;
   listContexts(correlationId: string): Promise<pbx.ContextInventory>;
   listExtensions(scope: PbxScope, correlationId: string): Promise<pbx.ExtensionInventory>;
   createExtension(
@@ -119,6 +123,7 @@ const UNREACHABLE: OfficePulseReadiness = {
 };
 
 interface PbxRequest {
+  root?: string;
   scope?: PbxScope | undefined;
   input?: unknown;
   authorizedDids?: readonly string[] | undefined;
@@ -150,14 +155,14 @@ export class HttpOfficePulseClient implements OfficePulseClient {
     method: string,
     correlationId: string,
     schema: S,
-    { scope, input, authorizedDids = [] }: PbxRequest = {},
+    { scope, input, authorizedDids = [], root = '/v1/admin/pbx' }: PbxRequest = {},
   ): Promise<z.infer<S>> {
     const query = new URLSearchParams();
     if (scope) query.set('context', scope.context);
     if (scope?.didContext) query.set('didContext', scope.didContext);
     for (const did of authorizedDids) query.append('authorizedDid', did);
     const search = query.size > 0 ? `?${query}` : '';
-    const path = `/v1/admin/pbx/${parts.map(encodeURIComponent).join('/')}${search}`;
+    const path = `${root}/${parts.map(encodeURIComponent).join('/')}${search}`;
     let response: Response;
     try {
       response = await fetch(new URL(path, this.baseUrl), {
@@ -200,6 +205,21 @@ export class HttpOfficePulseClient implements OfficePulseClient {
   }
   listContexts(cid: string) {
     return this.pbxRequest(['contexts'], 'GET', cid, pbx.contextInventory);
+  }
+  async listHandsets(scope: PbxScope, cid: string) {
+    const inventory = await this.pbxRequest(['handsets'], 'GET', cid, handsets.handsetInventory, {
+      scope,
+      root: '/v1/admin',
+    });
+    if (inventory.handsets.some((device) => device.context !== scope.context))
+      throw new OfficePulseError('OfficePulse returned an invalid handset scope', 502);
+    return inventory;
+  }
+  async revokeHandset(scope: PbxScope, deviceId: string, cid: string) {
+    await this.pbxRequest(['handsets', deviceId], 'DELETE', cid, handsets.handsetRevoked, {
+      scope,
+      root: '/v1/admin',
+    });
   }
   listExtensions(scope: PbxScope, cid: string) {
     return this.pbxRequest(['extensions'], 'GET', cid, pbx.extensionInventory, { scope });
@@ -291,6 +311,9 @@ export class HttpOfficePulseClient implements OfficePulseClient {
         fullyOperational: body.fullyOperational === true,
         components,
         ...(instance.success ? { pbxInstanceId: instance.data } : {}),
+        ...(typeof body.environmentName === 'string' && body.environmentName.trim()
+          ? { environmentName: body.environmentName.trim() }
+          : {}),
       };
     } catch {
       return UNREACHABLE;

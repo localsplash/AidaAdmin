@@ -2,6 +2,7 @@ import type { IdClient, PlatformTenant } from '../id/client.js';
 import { randomBytes } from 'node:crypto';
 
 export const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+export class AdminAccessDenied extends Error {}
 
 /** Request-local projection of the authoritative Identity application session. */
 export interface AdminSession {
@@ -117,7 +118,11 @@ export class IdentitySessionRepository implements SessionRepository {
     const tenants = result.tenants.filter(
       (tenant) => tenant.bEnabled && (result.user.superAdmin || tenant.role === 'TENANT_ADMIN'),
     );
-    if (!result.user.superAdmin && tenants.length === 0) return null;
+    if (!result.user.superAdmin && tenants.length === 0) {
+      if (result.tenants.some((tenant) => tenant.bEnabled && tenant.role === 'USER'))
+        throw new AdminAccessDenied('Administrator access required');
+      return null;
+    }
     return {
       ...result.user,
       provider: null,

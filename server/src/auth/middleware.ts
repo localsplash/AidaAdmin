@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import type { AdminSession, SessionRepository } from './session-store.js';
+import { AdminAccessDenied } from './session-store.js';
 import { readCookie, SESSION_COOKIE } from './routes.js';
 
 declare module 'express-serve-static-core' {
@@ -18,7 +19,7 @@ declare module 'express-serve-static-core' {
 }
 
 export function sessionMiddleware(store: SessionRepository) {
-  return (req: Request, _res: Response, next: NextFunction): void => {
+  return (req: Request, res: Response, next: NextFunction): void => {
     const sid = readCookie(req, SESSION_COOKIE);
     req.session = null;
     req.sessionSid = null;
@@ -37,6 +38,20 @@ export function sessionMiddleware(store: SessionRepository) {
         }
         next();
       })
-      .catch(next);
+      .catch((err: unknown) => {
+        if (!(err instanceof AdminAccessDenied)) {
+          next(err);
+          return;
+        }
+        // Deny data APIs while still allowing a demoted user to load the
+        // sign-in screen, sign out, or authenticate with another account.
+        if (/^\/(api|admin|runtime)(\/|$)/.test(req.path) && !req.path.startsWith('/api/auth/')) {
+          res.status(403).json({
+            error: 'forbidden',
+            message: 'Administrator access required',
+            correlationId: req.correlationId,
+          });
+        } else next();
+      });
   };
 }

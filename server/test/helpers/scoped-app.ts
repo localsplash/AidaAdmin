@@ -38,7 +38,7 @@ export const STORED_PROFILE = { ...storedScope, iTenantId: storedTenantId };
  * The BFF with a central Identity session, the real PlatformConfig tenant
  * repository over an in-memory NocoDB, and a context-scoped OfficePulse fake.
  */
-export async function scopedApp() {
+export async function scopedApp(env: NodeJS.ProcessEnv = {}) {
   const state = {
     snapshot: {
       active: true,
@@ -87,7 +87,7 @@ export async function scopedApp() {
       },
     }),
   );
-  const config = loadConfig({ NODE_ENV: 'test' });
+  const config = loadConfig({ NODE_ENV: 'test', ...env });
   const deps: AppDeps = {
     ...createDeps(config),
     sessionStore: new IdentitySessionRepository(identity),

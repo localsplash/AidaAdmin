@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { adminApi, type Extension } from '../api/admin';
+import { adminApi, type Extension, type Handset } from '../api/admin';
+import { AttachedHandset, REVOKE_EXPLANATION } from '../components/AttachedHandset';
 import { OneTimeSecret } from '../components/OneTimeSecret';
 import { PbxScope } from '../components/PbxScope';
 import {
@@ -20,6 +21,12 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
   // The selected context is one of the tenant's own; undefined means its primary.
   const [context, setContext] = useState<string | undefined>();
   const inventory = usePbxInventory(tenantId, adminApi.listExtensions, context);
+  const handsets = usePbxInventory(tenantId, adminApi.listHandsets, context);
+  const refreshHandsets = handsets.refresh;
+  useEffect(() => {
+    const timer = setInterval(() => void refreshHandsets(), 10000);
+    return () => clearInterval(timer);
+  }, [refreshHandsets]);
   const [form, setForm] = useState(EMPTY);
   const [open, setOpen] = useState(false);
   const [secret, setSecret] = useState<{ username: string; secret: string } | null>(null);
@@ -33,6 +40,32 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
   const writable = inventory.data?.provisioningEnabled === true && !inventory.error;
   const callerIdLength = (form.callerIdNumber || form.extension).length;
   const displayNameMax = Math.min(33, Math.max(1, 40 - callerIdLength - 5));
+  const revoke = async (handset: Handset) => {
+    if (
+      lock.current ||
+      handsets.error ||
+      handsets.loading ||
+      !window.confirm(
+        `Revoke handset for extension ${handset.extension ?? handset.endpointId}? ${REVOKE_EXPLANATION}`,
+      )
+    )
+      return;
+    lock.current = true;
+    setBusy(true);
+    setError(null);
+    setStatus('');
+    try {
+      await adminApi.revokeHandset(tenantId, handset.id, handset.context);
+      if (!handsets.current()) return;
+      setStatus('Handset revoked. A registered phone may attach again automatically.');
+      await handsets.refresh();
+    } catch (err) {
+      if (handsets.current()) setError(err);
+    } finally {
+      lock.current = false;
+      if (handsets.current()) setBusy(false);
+    }
+  };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (lock.current || !writable || secret) return;
@@ -110,7 +143,8 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
           disabled={busy || !!secret}
         />
       )}
-      <PbxErrorNotice error={error || inventory.error} />
+      <PbxErrorNotice error={error || inventory.error || handsets.error} />
+      <p className="transcript-note">{REVOKE_EXPLANATION}</p>
       {status && <p role="status">{status}</p>}
       {inventory.data && !inventory.data.provisioningEnabled && <PbxDisabledNotice />}
       {secret && (
@@ -125,6 +159,7 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
       )}
       {inventory.loading && <p role="status">Loading extensions…</p>}
       {inventory.data &&
+        !inventory.loading &&
         (inventory.data.extensions.length === 0 ? (
           <p>No native extensions yet.</p>
         ) : (
@@ -137,6 +172,7 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
                   <th scope="col">Display / caller ID</th>
                   <th scope="col">Context</th>
                   <th scope="col">Apply state</th>
+                  <th scope="col">Attached handset</th>
                   <th scope="col">Actions</th>
                 </tr>
               </thead>
@@ -147,6 +183,24 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
                     <td>{ext.callerId ?? '—'}</td>
                     <td>{ext.context}</td>
                     <td>{applyStateLabel(ext.applyState)}</td>
+                    <td>
+                      {(handsets.data?.handsets ?? [])
+                        .filter(
+                          (device) =>
+                            !device.revokedAt &&
+                            device.endpointId === ext.id &&
+                            device.context === ext.context &&
+                            device.pbxInstanceId === inventory.data!.pbxInstanceId,
+                        )
+                        .map((device) => (
+                          <AttachedHandset
+                            key={device.id}
+                            handset={device}
+                            disabled={busy || handsets.loading || !!handsets.error}
+                            onRevoke={(handset) => void revoke(handset)}
+                          />
+                        ))}
+                    </td>
                     <td>
                       {managed(ext) ? (
                         <button
@@ -170,7 +224,10 @@ function TenantExtensions({ tenantId }: { tenantId: string }) {
       <button
         type="button"
         disabled={busy || inventory.loading}
-        onClick={() => void inventory.refresh()}
+        onClick={() => {
+          void inventory.refresh();
+          void handsets.refresh();
+        }}
       >
         Refresh inventory
       </button>{' '}

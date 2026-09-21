@@ -203,7 +203,7 @@ describe('CallDetailScreen', () => {
                 {
                   idempotencyKey: 'k1',
                   commandType: 'TAKEOVER',
-                  payload: null,
+                  payload: { deviceId: 'handset-1', endpointId: '411' },
                   status: 'completed',
                   result: { status: 'answered' },
                   createdAt: 't',
@@ -239,6 +239,7 @@ describe('CallDetailScreen', () => {
     expect(within(timeline).getByText('profile profile-1 rev 2')).toBeInTheDocument();
     const commands = screen.getByRole('table', { name: /control commands/i });
     expect(within(commands).getByText('completed')).toBeInTheDocument();
+    expect(screen.getByText('Taken over by ext 411')).toBeInTheDocument();
     const participants = screen.getByRole('table', { name: /livekit participants/i });
     expect(within(participants).getByText('agent-aida')).toBeInTheDocument();
   });

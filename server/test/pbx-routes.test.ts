@@ -37,7 +37,7 @@ describe('native PBX authorization', () => {
   });
   it('checks role, enabled membership and the selected tenant even for Super Admin', async () => {
     snapshot().tenants[0]!.role = 'USER';
-    expect((await send('get', `${base}/extensions`)).status).toBe(401);
+    expect((await send('get', `${base}/extensions`)).status).toBe(403);
     snapshot().user.superAdmin = true;
     snapshot().selectedTenantId = null;
     expect((await send('get', `${base}/extensions`)).status).toBe(403);
