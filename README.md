@@ -33,6 +33,12 @@ sign-in emails are read-only; pending-user email addresses can be corrected.
 Extensions, native queues and managed DID routes use OfficePulse inventory and
 tenant-authorized, context-scoped mutations. Generated extension credentials are
 disclosed once.
+Extensions also show attached AidaHandset devices, including model, registration MAC,
+local/public addresses and last seen. Tenant Admins can revoke a session after
+confirmation; the list refreshes every ten seconds. A registered phone attaches
+again automatically, so revocation is for a phone that has left, not a lock.
+Call details identify successful handset takeovers by their extension.
+
 Identity enforces the role hierarchy on the server, including live demotion and
 last-administrator protection. Global directory search remains Super Admin-only.
 
@@ -50,6 +56,12 @@ Use Node 22 or the supplied Dockerfile. Set `NOCODB_BASE_URL` and
 Fields are `app`, `settingKey`, `settingValue`, `description`, `bSecret`,
 `dtCreated`, `dtUpdated`. Blank rows are unset and duplicate applicable keys are
 errors. `PARENT_DOMAIN` supplies `ID_PARENT_DOMAIN` when that key is absent.
+Set `ENVIRONMENT_NAME` (`dev`, `staging`, or `prod`) in global scope `app=*`.
+The persistent environment label compares this resolved setting with OfficePulse
+`/readyz` every thirty seconds. A mismatch prominently names both environments and
+the serving PBX instance. Missing values appear as `unknown` and never count as a
+mismatch; an unreachable OfficePulse is an availability problem, not a mismatch.
+
 Connection/settings changes require a process restart in this first release.
 Runtime reads do not create a missing base or schema.
 
@@ -102,8 +114,9 @@ Asterisk state is active. Read [native PBX administration](docs/NATIVE_PBX_ADMIN
 for schemas, one-time credentials, deployment order, static-route shadowing and
 reviewed legacy-data cleanup/rollback.
 
-Legacy provisioning, ring-group, update/rotation, handset enrollment and retry
-controls are retired. No native PBX desired state is saved in NocoDB. Staff call
+Legacy provisioning, ring-group, update/rotation, handset enrollment codes and retry
+controls are retired. Handsets attach through live SIP registration; AidaAdmin
+proxies the private context-scoped handset list/revoke API. No native PBX desired state is saved in NocoDB. Staff call
 commands still use `/v1/admin/calls/:id/commands`; call/event/dependency views use
 OfficePulse's read-only runtime SQL account. No AidaControl service is required.
 
@@ -171,12 +184,15 @@ scripts/with-build-info.sh sh -c 'docker build \
 ```
 
 # Hardware settings commentary
+
 For the live takeover button to immediately auto answer, handset may need special provisioning.
 
 ## Grandstream GXV 3450
+
 Account (1) -> Call Settings -> Auto-Answer: "Intercom/Paging Only"
 
 Config file shows following changes when this is set-
+
 ```<!-- Auto Answer Configuration for Account 1 -->
 <P2981>1</P2981> <!-- Enable Auto Answer -->
 <P2983>1</P2983> <!-- Enable Auto Answer Call Waiting -->

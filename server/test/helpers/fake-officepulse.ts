@@ -8,6 +8,7 @@ import type {
 } from '../../src/officepulse/client.js';
 import { OfficePulseError } from '../../src/officepulse/client.js';
 import type * as pbx from '../../src/officepulse/pbx-contract.js';
+import type { Handset } from '../../src/officepulse/handset-contract.js';
 
 export const FAKE_PBX_INSTANCE = 'officepulse-test';
 
@@ -24,6 +25,7 @@ export class FakeOfficePulse implements OfficePulseClient {
   pbxInstanceId = FAKE_PBX_INSTANCE;
   /** Inventory keyed by the owning extension context. */
   extensions = new Map<string, pbx.ExtensionInventory['extensions']>();
+  handsets = new Map<string, Handset[]>();
   queues = new Map<string, pbx.QueueInventory['queues']>();
   dids = new Map<string, pbx.DidInventory['dids']>();
   /** Extra contexts present on the instance beyond those with inventory. */
@@ -85,6 +87,16 @@ export class FakeOfficePulse implements OfficePulseClient {
       pbxInstanceId: this.pbxInstanceId,
       contexts: [...contexts].sort(),
     };
+  }
+  async listHandsets(scope: PbxScope, cid: string) {
+    this.record('handset.list', scope, cid);
+    return { handsets: this.handsets.get(scope.context) ?? [] };
+  }
+  async revokeHandset(scope: PbxScope, id: string, cid: string) {
+    this.record('handset.revoke', scope, cid, id);
+    const device = this.handsets.get(scope.context)?.find((row) => row.id === id);
+    if (!device) throw new OfficePulseError('not found', 404);
+    device.revokedAt = new Date().toISOString();
   }
   async listExtensions(scope: PbxScope, cid: string): Promise<pbx.ExtensionInventory> {
     this.record('extension.list', scope, cid);

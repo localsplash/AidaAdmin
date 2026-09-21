@@ -72,6 +72,7 @@ function mockFetch(handler: Handler = () => undefined) {
     // A selected context travels as a query; the default fixtures ignore it.
     const path = url.split('?')[0]!;
     if (!result && init.method === 'GET') {
+      if (path.endsWith('/handsets')) result = { body: { handsets: [] } };
       if (path.endsWith('/numbers')) result = { body: { numbers: [number] } };
       if (path.endsWith('/extensions'))
         result = { body: { ...native, extensions: [extension, second, third] } };
@@ -801,5 +802,106 @@ describe('tenant request isolation', () => {
     );
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.queryByText('stale-secret')).not.toBeInTheDocument();
+  });
+});
+
+describe('attached handsets', () => {
+  const handset = {
+    id: 'ed35265b-2199-46dd-9e46-99e3f9600111',
+    pbxInstanceId: native.pbxInstanceId,
+    context: 'office',
+    endpointId: extension.id,
+    extension: extension.extension,
+    label: 'Front Desk',
+    deviceModel: 'GXV3450',
+    mac: 'ec74d7c92718',
+    localIp: '192.168.6.97',
+    publicIp: '203.0.113.1',
+    attachedAt: '2026-09-20T10:00:00Z',
+    lastSeenAt: '2026-09-20T10:01:00Z',
+    appVersion: '1',
+    revokedAt: null,
+  };
+  it('shows addresses and model on the matching endpoint, confirms revoke, then shows a reattached device', async () => {
+    let handsets = [handset];
+    const fetcher = mockFetch((url, init) => {
+      if (url.includes('/handsets') && init.method === 'GET') return { body: { handsets } };
+      if (url.includes('/handsets/') && init.method === 'DELETE') {
+        handsets = [];
+        return { status: 204 };
+      }
+      return undefined;
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    document.cookie = 'aida.csrf=handset-proof';
+    const user = userEvent.setup();
+    renderScreen('extensions', <ExtensionsScreen />);
+    const row = await screen.findByRole('row', { name: /100 Front Desk/ });
+    expect(within(row).getByText('GXV3450')).toBeInTheDocument();
+    expect(row).toHaveTextContent('ec74d7c92718');
+    expect(row).toHaveTextContent('192.168.6.97');
+    expect(row).toHaveTextContent('203.0.113.1');
+    expect(row).toHaveTextContent('2026-09-20T10:01:00Z');
+    expect(
+      within(screen.getByRole('row', { name: /101 Sales/ })).queryByRole('button', {
+        name: /Revoke/,
+      }),
+    ).not.toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: /Revoke handset/ }));
+    expect(mutations(fetcher)).toEqual([]);
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('not a lock'));
+    confirm.mockReturnValue(true);
+    await user.click(within(row).getByRole('button', { name: /Revoke handset/ }));
+    await screen.findByText(/Handset revoked\./);
+    expect(mutations(fetcher)).toEqual([
+      {
+        url: `/admin/tenants/1/handsets/${handset.id}?context=office`,
+        method: 'DELETE',
+        body: undefined,
+      },
+    ]);
+    expect(
+      fetcher.mock.calls.find(([, init]) => init?.method === 'DELETE')![1]!.headers,
+    ).toMatchObject({ 'x-csrf-token': 'handset-proof' });
+    expect(screen.queryByText('GXV3450')).not.toBeInTheDocument();
+    handsets = [{ ...handset, id: 'new-session' }];
+    await user.click(screen.getByRole('button', { name: 'Refresh inventory' }));
+    expect(await screen.findByText('GXV3450')).toBeInTheDocument();
+  });
+  it('does not show revoked sessions, other contexts, or other PBX instances', async () => {
+    mockFetch((url) =>
+      url.includes('/handsets')
+        ? {
+            body: {
+              handsets: [
+                { ...handset, revokedAt: '2026-09-20T10:02:00Z' },
+                { ...handset, id: 'other-context', context: 'branch' },
+                { ...handset, id: 'other-pbx', pbxInstanceId: 'other-pbx' },
+              ],
+            },
+          }
+        : undefined,
+    );
+    renderScreen('extensions', <ExtensionsScreen />);
+    await screen.findByRole('row', { name: /100 Front Desk/ });
+    expect(screen.queryByText('GXV3450')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Revoke/ })).not.toBeInTheDocument();
+  });
+  it('keeps extension inventory usable when the handset API fails', async () => {
+    mockFetch((url) =>
+      url.includes('/handsets')
+        ? {
+            status: 502,
+            body: {
+              error: 'officepulse_unavailable',
+              message: 'OfficePulse could not complete the handset request',
+            },
+          }
+        : undefined,
+    );
+    renderScreen('extensions', <ExtensionsScreen />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('OfficePulse could not complete');
+    expect(screen.getByRole('button', { name: 'Create extension' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /Revoke/ })).not.toBeInTheDocument();
   });
 });

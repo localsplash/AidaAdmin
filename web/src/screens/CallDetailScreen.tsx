@@ -4,6 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { runtimeApi, type CallDetail } from '../api/runtime';
 import { RuntimeErrorNotice } from '../components/RuntimeError';
 import { emptyCallView, PHASE_LABEL, reduceEvents } from '../runtime/callState';
+import { handsetTakeoverExtension } from '../runtime/handsetTakeover';
 
 /**
  * One call, end to end: what it was configured with, what happened, who
@@ -55,6 +56,7 @@ export function CallDetailScreen() {
 function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => void }) {
   const { call, events, commands, participants } = detail;
   const view = reduceEvents(emptyCallView(call.id), events);
+  const takenOverBy = handsetTakeoverExtension(commands, events);
 
   return (
     <>
@@ -63,6 +65,7 @@ function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => vo
         disposition <code>{call.disposition}</code>, version {call.version}
       </p>
       {view.failureReason ? <p role="alert">Failure: {view.failureReason}</p> : null}
+      {takenOverBy && <p>Taken over by ext {takenOverBy}</p>}
       {view.sequenceGap ? <p role="alert">The durable event record has a gap.</p> : null}
       <button type="button" onClick={onRefresh}>
         Refresh
@@ -168,7 +171,14 @@ function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => vo
               <tr key={c.idempotencyKey}>
                 <td>{c.commandType}</td>
                 <td>{c.status}</td>
-                <td>{c.result ? JSON.stringify(c.result) : ''}</td>
+                <td>
+                  {c.commandType === 'TAKEOVER' &&
+                    typeof c.payload?.deviceId === 'string' &&
+                    typeof c.payload.endpointId === 'string' && (
+                      <p>Takeover requested by ext {c.payload.endpointId}</p>
+                    )}
+                  {c.result ? JSON.stringify(c.result) : ''}
+                </td>
                 <td>
                   <code>{c.idempotencyKey}</code>
                 </td>

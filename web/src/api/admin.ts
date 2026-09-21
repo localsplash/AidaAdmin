@@ -127,6 +127,22 @@ export interface NativeInventory {
 export interface ExtensionInventory extends NativeInventory {
   extensions: Extension[];
 }
+export interface Handset {
+  id: string;
+  pbxInstanceId: string;
+  context: string;
+  endpointId: string;
+  extension: string | null;
+  label: string | null;
+  deviceModel?: string;
+  mac: string | null;
+  localIp: string;
+  publicIp: string;
+  attachedAt: string;
+  lastSeenAt: string;
+  appVersion: string;
+  revokedAt: string | null;
+}
 export interface QueueInventory extends NativeInventory {
   queues: NativeQueue[];
 }
@@ -326,6 +342,10 @@ export const adminApi = {
     }),
 
   listPbxContexts: () => call<ContextInventory>('/admin/pbx/contexts', 'GET'),
+  listHandsets: (tenantId: string, context?: string) =>
+    call<{ handsets: Handset[] }>(pbxPath(tenantId, 'handsets', context), 'GET'),
+  revokeHandset: (tenantId: string, deviceId: string, context: string) =>
+    call<void>(pbxPath(tenantId, `handsets/${encodeURIComponent(deviceId)}`, context), 'DELETE'),
   listExtensions: (tenantId: string, context?: string) =>
     call<ExtensionInventory>(pbxPath(tenantId, 'extensions', context), 'GET'),
   createExtension: (tenantId: string, input: ExtensionInput, context?: string) =>

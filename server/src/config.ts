@@ -26,6 +26,10 @@ const envSchema = z.object({
   ID_REGISTER_WEBHOOK: envBool,
   /** Where validated appearance assets (logos) are stored and served from. */
   ASSET_STORAGE_DIR: z.string().default('data/assets'),
+  ENVIRONMENT_NAME: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim() || undefined : value),
+    z.enum(['dev', 'staging', 'prod']).optional(),
+  ),
 });
 
 /**
@@ -86,6 +90,7 @@ export interface AppConfig {
   e2eFakeSession: boolean;
   idRegisterWebhook: boolean;
   assetStorageDir: string;
+  environmentName: string | null;
   /** Service variables present in the environment; values stay out of this object except where a later phase needs them. */
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
   /** Names (never values) of service variables absent from the environment. */
@@ -156,6 +161,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     e2eFakeSession: E2E_FAKE_SESSION,
     idRegisterWebhook: ID_REGISTER_WEBHOOK,
     assetStorageDir: ASSET_STORAGE_DIR,
+    environmentName: parsed.data.ENVIRONMENT_NAME ?? null,
     serviceConfig,
     missingServiceConfig,
   };
