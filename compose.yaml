@@ -39,8 +39,10 @@ services:
         max-file: '3'
 
 volumes:
+  # Uploaded assets. External so `down -v` can't delete them; each
+  # environment names its own in .env.
   admin-assets:
-    name: aida-admin-preview_admin-assets
+    name: ${ADMIN_ASSETS_VOLUME:-aida-admin-assets}
     external: true
 
 networks:

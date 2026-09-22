@@ -65,6 +65,30 @@ mismatch; an unreachable OfficePulse is an availability problem, not a mismatch.
 Connection/settings changes require a process restart in this first release.
 Runtime reads do not create a missing base or schema.
 
+### Database account
+
+`AIDA_ADMIN_DATABASE_URL` names the account AidaAdmin uses for `aida_admin_db`
+(by convention `aida_admin_app`). On a shared MySQL, create it with
+`scripts/db-users.sh`, which reads that same URL, decodes it the way the server
+does, and needs only the server's admin password:
+
+```sh
+docker run --rm --network <network> -v "$PWD/scripts:/scripts:ro" \
+  -e AIDA_ADMIN_DATABASE_URL=… -e MYSQL_ADMIN_PASSWORD=… \
+  mysql:8.4 bash /scripts/db-users.sh
+```
+
+It creates the database if missing, and the account (`'%'`) with `ALL
+PRIVILEGES` on it and nothing else. It is idempotent: grants converge on every
+run, and a new password in the URL rotates it. `DB_HOST` overrides the URL's host
+when you reach MySQL by another name. The read-only `aidaadmin_ro` account for
+`OFFICEPULSE_RUNTIME_DATABASE_URL` is created by OfficePulse, which owns
+`aidacalls_db`.
+
+The Compose file's external networks and volumes are named per environment in
+`.env`: `PLATFORM_NETWORK` (default `platform-local`) and `ADMIN_ASSETS_VOLUME`
+(default `aida-admin-assets`, created once with `docker volume create`).
+
 ```sh
 npm ci
 npm run nocodb -w server -- create  # explicit first bootstrap
