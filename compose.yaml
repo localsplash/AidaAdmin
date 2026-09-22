@@ -18,7 +18,7 @@ services:
       - /etc/timezone:/etc/timezone:ro
     networks:
       - npm_network
-      - platform-preview
+      - platform
     restart: unless-stopped
     healthcheck:
       test:
@@ -46,5 +46,7 @@ volumes:
 networks:
   npm_network:
     external: true
-  platform-preview:
+  # Shared MySQL/Identity network. Each environment names its own in .env.
+  platform:
+    name: ${PLATFORM_NETWORK:-platform-local}
     external: true
