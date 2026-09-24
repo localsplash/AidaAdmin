@@ -223,11 +223,11 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
       fix: 'Set OFFICEPULSE_API_BASE_URL to the private OfficePulseAidaIntegration API (port 8085)',
     });
   }
-  if (parseCidrList(config.serviceConfig.ID_EVENT_SOURCE_CIDRS).length === 0) {
+  if (parseCidrList(config.serviceConfig.trustedCIDR).length === 0) {
     findings.push({
       level: 'warning',
-      summary: 'ID_EVENT_SOURCE_CIDRS is empty, so POST /id/events rejects every delivery',
-      fix: "Set ID_EVENT_SOURCE_CIDRS to id's egress IPv4 CIDRs",
+      summary: 'trustedCIDR is empty, so POST /id/events rejects every delivery',
+      fix: "Set the PlatformConfig trustedCIDR row (app=*) to the platform's server networks",
     });
   }
 

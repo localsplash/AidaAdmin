@@ -56,6 +56,20 @@ Use Node 22 or the supplied Dockerfile. Set `NOCODB_BASE_URL` and
 Fields are `app`, `settingKey`, `settingValue`, `description`, `bSecret`,
 `dtCreated`, `dtUpdated`. Blank rows are unset and duplicate applicable keys are
 errors. `PARENT_DOMAIN` supplies `ID_PARENT_DOMAIN` when that key is absent.
+
+The rows this app reads, by the scope they belong in:
+
+| Scope | Keys |
+| --- | --- |
+| `aida-admin` | `PUBLIC_BASE_URL`, `SESSION_SECRET`, `AIDA_ADMIN_DATABASE_URL`, `OFFICEPULSE_RUNTIME_DATABASE_URL`, `ID_BASE_URL` (and optionally `ID_PUBLIC_BASE_URL`), `ID_CLIENT_SECRET` (only while Identity runs in `secret`/`dual` mode), `ID_TRUSTED_PROXY_CIDRS` |
+| `aida` | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse |
+| `*` | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME` |
+
+`ID_BASE_URL` stays in the `aida-admin` scope on purpose: OfficePulse refuses
+that key in any scope it reads. Inbound `/id/events` deliveries are admitted by
+`trustedCIDR`, the platform-wide network policy every application reads;
+`ID_TRUSTED_PROXY_CIDRS` is separate deployment policy naming the reverse
+proxies whose `X-Forwarded-For` is believed when resolving that client.
 Set `ENVIRONMENT_NAME` (`dev`, `staging`, or `prod`) in global scope `app=*`.
 The persistent environment label compares this resolved setting with OfficePulse
 `/readyz` every thirty seconds. A mismatch prominently names both environments and

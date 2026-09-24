@@ -53,8 +53,9 @@ export const SERVICE_ENV_VARS = [
   'ID_BASE_URL',
   'ID_PUBLIC_BASE_URL',
   'ID_CLIENT_SECRET',
-  'ID_TRUSTED_APP_CIDRS',
-  'ID_EVENT_SOURCE_CIDRS',
+  // The platform-wide `trustedCIDR` row (app=*): the networks the platform's
+  // own servers sit on, which is who may deliver /id/events.
+  'trustedCIDR',
   'ID_TRUSTED_PROXY_CIDRS',
   'ID_PARENT_DOMAIN',
   'NOCODB_BASE_URL',
@@ -66,12 +67,12 @@ export const SERVICE_ENV_VARS = [
 
 export type ServiceEnvVar = (typeof SERVICE_ENV_VARS)[number];
 
-/** CIDR allowlists that must be present and non-empty in production. */
-export const REQUIRED_CIDR_VARS = [
-  'ID_TRUSTED_APP_CIDRS',
-  'ID_EVENT_SOURCE_CIDRS',
-  'ID_TRUSTED_PROXY_CIDRS',
-] as const;
+/**
+ * CIDR allowlists that must be present and non-empty in production: the
+ * platform's trusted network, and the reverse proxies whose X-Forwarded-For
+ * is believed when resolving a client against it.
+ */
+export const REQUIRED_CIDR_VARS = ['trustedCIDR', 'ID_TRUSTED_PROXY_CIDRS'] as const;
 
 const CIDR_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
 

@@ -39,7 +39,7 @@ describe('loadConfig', () => {
   it('fails production startup naming missing variables without values', () => {
     const env = fullProductionEnv();
     delete env.NOCODB_API_TOKEN;
-    delete env.ID_TRUSTED_APP_CIDRS;
+    delete env.trustedCIDR;
     let message = '';
     try {
       loadConfig(env);
@@ -48,7 +48,7 @@ describe('loadConfig', () => {
       message = (err as Error).message;
     }
     expect(message).toContain('NOCODB_API_TOKEN');
-    expect(message).toContain('ID_TRUSTED_APP_CIDRS');
+    expect(message).toContain('trustedCIDR');
     // Names only: no configured value may leak into the error.
     expect(message).not.toContain('value-for-');
   });
@@ -84,8 +84,8 @@ describe('loadConfig', () => {
 
   it('rejects production CIDR allowlists that are malformed', () => {
     const env = fullProductionEnv();
-    env.ID_EVENT_SOURCE_CIDRS = 'not-a-cidr';
-    expect(() => loadConfig(env)).toThrowError(/ID_EVENT_SOURCE_CIDRS/);
+    env.trustedCIDR = 'not-a-cidr';
+    expect(() => loadConfig(env)).toThrowError(/trustedCIDR/);
   });
 
   it('rejects production CIDR allowlists that are effectively empty', () => {

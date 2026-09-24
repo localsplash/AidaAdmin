@@ -53,7 +53,7 @@ const revokeEvent = (id: number, iUserId: number, scope: 'one' | 'all' = 'all'):
 describe('POST /id/events CIDR policy', () => {
   it('accepts events from an allowed source and applies them before the 2xx', async () => {
     // Supertest connects from loopback.
-    const s = setup({ ID_EVENT_SOURCE_CIDRS: '127.0.0.1/32' });
+    const s = setup({ trustedCIDR: '127.0.0.1/32' });
     const app = createApp(s.config, logger, s.deps);
     await s.sessions.create(user(42));
     const res = await request(app).post('/id/events').send(revokeEvent(1, 42));
@@ -62,7 +62,7 @@ describe('POST /id/events CIDR policy', () => {
   });
 
   it('rejects events from a denied source', async () => {
-    const s = setup({ ID_EVENT_SOURCE_CIDRS: '10.0.0.0/8' });
+    const s = setup({ trustedCIDR: '10.0.0.0/8' });
     const app = createApp(s.config, logger, s.deps);
     await s.sessions.create(user(42));
     const res = await request(app).post('/id/events').send(revokeEvent(1, 42));
@@ -72,7 +72,7 @@ describe('POST /id/events CIDR policy', () => {
 
   it('honors forwarding only from a trusted proxy peer', async () => {
     const s = setup({
-      ID_EVENT_SOURCE_CIDRS: '203.0.113.0/24',
+      trustedCIDR: '203.0.113.0/24',
       ID_TRUSTED_PROXY_CIDRS: '127.0.0.1/32',
     });
     const app = createApp(s.config, logger, s.deps);
@@ -85,7 +85,7 @@ describe('POST /id/events CIDR policy', () => {
 
   it('ignores spoofed X-Forwarded-For from an untrusted peer', async () => {
     const s = setup({
-      ID_EVENT_SOURCE_CIDRS: '203.0.113.0/24',
+      trustedCIDR: '203.0.113.0/24',
       // Loopback is NOT a trusted proxy here, so the forwarded value is spoofing.
     });
     const app = createApp(s.config, logger, s.deps);
@@ -97,7 +97,7 @@ describe('POST /id/events CIDR policy', () => {
   });
 
   it('rejects malformed event bodies', async () => {
-    const s = setup({ ID_EVENT_SOURCE_CIDRS: '127.0.0.1/32' });
+    const s = setup({ trustedCIDR: '127.0.0.1/32' });
     const app = createApp(s.config, logger, s.deps);
     const res = await request(app).post('/id/events').send({ type: 'session.revoked' });
     expect(res.status).toBe(400);
