@@ -33,7 +33,8 @@ export function resolveSettings(env: NodeJS.ProcessEnv, rows: NocoRecord[]): Nod
       }
     }
   }
-  // The public platform domain is deliberately shared; trust contexts are not.
+  // The platform's own keys are read under their platform names: trustedCIDR
+  // as itself (it is in SERVICE_ENV_VARS), PARENT_DOMAIN as ID_PARENT_DOMAIN.
   if (!resolved.ID_PARENT_DOMAIN?.trim()) {
     for (const scope of SCOPES) {
       const value = indexed.get(`${scope}:PARENT_DOMAIN`);
