@@ -78,6 +78,17 @@ export function createApp(
   app.use(pbxRoutes(logger, deps));
   app.use(handsetRoutes(logger, deps));
   app.use(profileAssignmentRoutes(logger, deps));
+  // UI and legacy JSON routes share /runtime. Document navigations must reach
+  // React before the API router; fetch requests continue to receive JSON.
+  const webDist = path.resolve(moduleDir, '../../web/dist');
+  app.get(['/runtime', '/runtime/calls', '/runtime/calls/:callSessionId'], (req, res, next) => {
+    res.vary('Accept');
+    if (req.headers.accept?.includes('text/html') && existsSync(path.join(webDist, 'index.html'))) {
+      res.sendFile(path.join(webDist, 'index.html'));
+      return;
+    }
+    next();
+  });
   app.use(runtimeRoutes(logger, deps));
   app.use(adminRoutes(logger, deps));
   app.use(numberRoutes(deps));
@@ -96,7 +107,6 @@ export function createApp(
 
   // Serve the built web application when present (production container and
   // the e2e smoke test); unknown non-API GETs fall through to the SPA shell.
-  const webDist = path.resolve(moduleDir, '../../web/dist');
   if (existsSync(webDist)) {
     app.use(express.static(webDist));
     app.use((req, res, next) => {

@@ -297,7 +297,7 @@ describe('OperationsScreen', () => {
     );
     expect(await screen.findByRole('heading', { name: /live transcription/i })).toBeInTheDocument();
     expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Earlier speech is not replayed/)).toBeInTheDocument();
+    expect(screen.getByText(/loads the active agent’s conversation history/)).toBeInTheDocument();
   });
 });
 

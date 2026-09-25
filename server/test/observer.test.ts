@@ -14,10 +14,11 @@ it('issues short-lived room-only grants without media or control permissions', a
     roomJoin: true,
     canSubscribe: false,
     canPublish: false,
-    canPublishData: false,
+    canPublishData: true,
     canUpdateOwnMetadata: false,
-    hidden: true,
+    hidden: false,
   });
+  expect(claims.attributes).toEqual({ 'aida.transcriptObserver': 'room-one' });
   expect(claims.sip).toBeUndefined();
   expect(observerIssuer({})).toBeNull();
 });

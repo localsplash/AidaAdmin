@@ -1,4 +1,3 @@
-import { LiveTranscript } from '../components/LiveTranscript';
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { runtimeApi, type CallDetail } from '../api/runtime';
@@ -40,7 +39,7 @@ export function CallDetailScreen() {
   } else if (!detail) {
     body = <p role="status">Loading…</p>;
   } else {
-    body = <Loaded detail={detail} onRefresh={load} />;
+    body = <Loaded detail={detail} />;
   }
   return (
     <section aria-labelledby="call-heading">
@@ -53,7 +52,7 @@ export function CallDetailScreen() {
   );
 }
 
-function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => void }) {
+function Loaded({ detail }: { detail: CallDetail }) {
   const { call, events, commands, participants } = detail;
   const view = reduceEvents(emptyCallView(call.id), events);
   const takenOverBy = handsetTakeoverExtension(commands, events);
@@ -67,15 +66,6 @@ function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => vo
       {view.failureReason ? <p role="alert">Failure: {view.failureReason}</p> : null}
       {takenOverBy && <p>Taken over by ext {takenOverBy}</p>}
       {view.sequenceGap ? <p role="alert">The durable event record has a gap.</p> : null}
-      <button type="button" onClick={onRefresh}>
-        Refresh
-      </button>
-
-      <LiveTranscript
-        key={call.id}
-        callId={call.id}
-        ended={Boolean(call.endedAt) || view.phase === 'ended'}
-      />
       <h2>Call</h2>
       <dl>
         <dt>Tenant</dt>

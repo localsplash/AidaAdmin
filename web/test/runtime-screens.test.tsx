@@ -236,6 +236,8 @@ describe('CallDetailScreen', () => {
     await waitFor(() => expect(screen.getAllByRole('status')[0]).toHaveTextContent(/ended/i));
     expect(screen.getByText(/profile-1 \(rev 2\)/)).toBeInTheDocument();
     expect(screen.getByText(/route-1 \(rev 3\)/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Refresh|Observe live transcript/ })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Live transcript' })).toBeNull();
     const timeline = screen.getByRole('table', { name: /durable call events/i });
     expect(within(timeline).getAllByRole('row')).toHaveLength(4);
     expect(within(timeline).getByText('profile profile-1 rev 2')).toBeInTheDocument();

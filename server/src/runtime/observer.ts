@@ -10,15 +10,16 @@ export function observerIssuer(env: NodeJS.ProcessEnv): ObserverIssuer | null {
     const token = new AccessToken(key, secret, {
       identity: `admin-observer-${randomUUID()}`,
       ttl: 60,
+      attributes: { 'aida.transcriptObserver': room },
     });
     token.addGrant({
       room,
       roomJoin: true,
       canSubscribe: false,
       canPublish: false,
-      canPublishData: false,
+      canPublishData: true,
       canUpdateOwnMetadata: false,
-      hidden: true,
+      hidden: false,
     });
     return { url, token: await token.toJwt(), expiresIn: 60 };
   };
