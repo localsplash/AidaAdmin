@@ -61,9 +61,6 @@ function CallsSection({ superAdmin }: { superAdmin: boolean }) {
             <input value={tenant} onChange={(e) => setTenant(e.target.value)} />
           </label>
         ) : null}
-        <button type="button" onClick={calls.refresh}>
-          Refresh
-        </button>
       </form>
       {calls.error ? <RuntimeErrorNotice error={calls.error} /> : null}
       {calls.data === null ? (

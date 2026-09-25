@@ -184,6 +184,7 @@ function AuthenticatedShell({
           />
           <Route path="/operations" element={<OperationsScreen />} />
           <Route path="/runtime" element={<RuntimeScreen session={session} />} />
+          <Route path="/runtime/calls" element={<RuntimeScreen session={session} />} />
           <Route path="/runtime/calls/:callSessionId" element={<CallDetailScreen />} />
           <Route path="/forbidden" element={<ForbiddenScreen />} />
           <Route path="*" element={<NotFoundScreen />} />

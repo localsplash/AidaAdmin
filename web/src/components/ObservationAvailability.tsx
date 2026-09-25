@@ -67,8 +67,8 @@ export function ObservationAvailability() {
       </div>
       <p>
         When a call reaches Aida, its live transcript connects automatically. Select a call tab to
-        follow it. If there are no active calls, there is no live text to display. Earlier speech is
-        not replayed.
+        follow it. If there are no active calls, there is no live text to display. Joining or
+        reconnecting loads the active agent’s conversation history.
       </p>
     </section>
   );

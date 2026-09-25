@@ -39,7 +39,9 @@ function CallPanel({
   const terminal = Boolean(command && ['completed', 'failed'].includes(command.status));
   const busy = Boolean(attempt?.submitting) || Boolean(attempt?.submitted && !terminal);
   const ended = view.phase === 'ended' || call.endedAt !== null;
-  const present = participants.filter((p) => p.leftAt === null);
+  const present = participants.filter(
+    (p) => p.leftAt === null && !p.identity?.startsWith('admin-observer-'),
+  );
 
   return (
     <div>

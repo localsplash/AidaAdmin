@@ -191,11 +191,14 @@ Deploy Identity migration `0005_shared_phone_numbers` and import reviewed existi
 **LIVE** shows only current calls for the selected tenant, refreshed automatically.
 Every call gets a tab with a pulsing green indicator (static with reduced motion),
 and its text observer connects automatically, including calls in background tabs.
-Observers retry while the agent starts or the connection recovers; switching tabs
-keeps received text, while leaving LIVE disconnects all observers. Ended calls
+Observers hydrate the active agent’s conversation history on every join/reconnect,
+then merge `lk.transcription` updates by segment ID. Switching tabs keeps received
+text; leaving LIVE disconnects all observers. The agent’s `get_transcript` RPC
+must be deployed with this Admin version. Ended calls
 leave LIVE and appear in **Call History**, alongside call details and operational
 errors. Super Admin diagnostics remain available in Call History. Existing
-`/operations`, `/runtime` and call-detail links continue to work.
+`/operations`, `/runtime`, `/runtime/calls` and call-detail links support direct
+navigation and reload. Call History details have no live observation controls.
 
 Live text observation and ordinary-telephone acceptance: [runbook](docs/LIVE_TRANSCRIPT_TESTING.md).
 

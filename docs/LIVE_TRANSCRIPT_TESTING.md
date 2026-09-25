@@ -42,9 +42,10 @@ AidaAdmin #37 remains open until its real-call acceptance is recorded.
    only the caller can confirm audible playback.
 5. Interrupt a long response with another question. Verify audible barge-in and
    the new Caller/Assistant turns; text alone cannot prove playback interruption.
-6. Open call details, disconnect/reconnect the observer network, and join from a
-   second authorized browser. Expect explicit connection status and only newly
-   delivered speech. Missing speech during gaps is not replayed. Hang up; expect
+6. Disconnect/reconnect LIVE and join from a second authorized browser mid-call.
+   Expect history catch-up followed by new live speech, with one row per segment
+   even if a partial finishes during catch-up. Call History details have no
+   observation controls. Hang up; expect
    ended status on refreshed details and the call in Call History.
 7. Verify the other tenant cannot obtain credentials for this call (404), staff
    cannot observe (403), and anonymous/invalid-CSRF requests are rejected.
@@ -59,10 +60,13 @@ AidaAdmin #37 remains open until its real-call acceptance is recorded.
 ## Connection and privacy contract
 
 The BFF issues 60-second, room-scoped JWTs after fresh Identity membership checks.
-Grants prohibit track subscription, media/data publication and metadata changes;
-no room administration, SIP or call-control grant is issued. The browser also
-connects with autoSubscribe=false and only accepts the `transcript` topic from
-the call's bound agent SID with a matching call ID.
+Grants prohibit track subscription, media publication and metadata changes. RPC
+requires a visible participant with data publication permission; no room-admin,
+SIP or call-control grant is issued. A signed `aida.transcriptObserver` attribute
+binds the observer to the room. The agent checks that attribute and the minted
+observer identity on every `get_transcript` request. The browser connects with
+`autoSubscribe=false` and accepts `lk.transcription` only from the bound agent SID
+with the same call ID. Agent call-control still accepts only server-origin packets.
 
 LiveKit token expiry gates initial joins, not a hard session lifetime. The UI
 reconnects through BFF authorization each minute. A hostile modified client may
@@ -70,11 +74,15 @@ retain an established LiveKit session; immediate infrastructure revocation needs
 server-side participant removal/token revocation, not JWT expiry alone. See
 [LiveKit token lifecycle](https://docs.livekit.io/frontends/reference/tokens-grants/).
 
-The transcript is browser memory only (200 segments, bounded packet/text sizes).
-Partials update by stream/speaker/segment, duplicate and stale revisions are
-ignored, and finals cannot regress. Leaving/stopping clears text. Reconnecting
-retains only this page's received segments; neither late join nor reconnect
-provides historical replay. No transcript database or content logging is added.
+Committed transcript text comes from the active `session.history`; a pending caller
+utterance is included with its existing segment ID. Instructions, tools, audio and
+metrics are excluded. The agent returns a frozen, paginated `get_transcript`
+snapshot (up to 2 MiB, with each RPC response below 15 KiB). While it loads, the
+browser buffers native `lk.transcription` updates, then merges them by
+`lk.segment_id` and revision without regressing finals. Every reconnect rehydrates.
+Transcripts and temporary snapshots remain in memory; no content logging or database
+is added. Leaving/stopping clears browser text. History is unavailable once the
+agent session ends. The legacy handset `transcript` data feed remains supported.
 
 ## Diagnosing by call ID
 
