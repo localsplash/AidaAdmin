@@ -1,6 +1,6 @@
 # Handset-free agent testing
 
-An administrator observes text in Live operations while a caller uses an ordinary
+An administrator observes text in LIVE while a caller uses an ordinary
 telephone. No AidaHandset installation or device enrollment is involved.
 
 Missing native admission/bootstrap implementation is tracked in
@@ -28,14 +28,14 @@ AidaAdmin #37 remains open until its real-call acceptance is recorded.
 
 ## Ordinary telephone acceptance
 
-1. Sign in to Admin and select the correct business. Open Live operations.
+1. Sign in to Admin and select the correct business. Open LIVE.
 2. From an ordinary telephone, dial the configured development number. Follow
    the configured queue timing/disclosure. Record the call ID from Admin details;
    correlate it with PBX linkedid through authorized operations diagnostics.
 3. Expect arrival only when a call record exists. A bootstrapped event means
    bootstrap progress, not agent speech. Room assignment is not independently
    confirmed admission; a bound participant alone is not confirmed conversation.
-4. Select **Observe live transcript**. Expect Connected, without microphone,
+4. Expect the live transcript to connect automatically, without microphone,
    camera or audio permissions. Say a short test question. Expect Caller partials
    updating in place, then final text, and Assistant final text. Hear a relevant
    spoken response on the telephone. Assistant text represents committed text;
@@ -45,7 +45,7 @@ AidaAdmin #37 remains open until its real-call acceptance is recorded.
 6. Open call details, disconnect/reconnect the observer network, and join from a
    second authorized browser. Expect explicit connection status and only newly
    delivered speech. Missing speech during gaps is not replayed. Hang up; expect
-   ended status on refreshed details and the call in Recent calls.
+   ended status on refreshed details and the call in Call History.
 7. Verify the other tenant cannot obtain credentials for this call (404), staff
    cannot observe (403), and anonymous/invalid-CSRF requests are rejected.
    Super Admin without selected tenant must be rejected; select the other
@@ -79,7 +79,7 @@ provides historical replay. No transcript database or content logging is added.
 ## Diagnosing by call ID
 
 Use call details for durable events, room/participant binding and completion.
-Use Runtime dependency diagnostics for unavailable OfficePulse/LiveKit/Agent
+Use Call History dependency diagnostics for unavailable OfficePulse/LiveKit/Agent
 integration; an unavailable query must not be read as zero calls or zero errors.
 If a real call never creates a record, use OfficePulse/PBX linkedid diagnostics:
 Admin cannot invent call arrival before the owning service records it.

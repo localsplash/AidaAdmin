@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('Live operations exposes transcription prerequisites without an active call', async ({
+test('LIVE exposes transcription prerequisites without an active call', async ({
   page,
   context,
 }) => {

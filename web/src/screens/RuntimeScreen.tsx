@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   runtimeApi,
-  type CallListState,
   type DependencyRecord,
   type LiveReadiness,
   type RuntimeCall,
@@ -12,13 +11,14 @@ import {
 import type { SessionView } from '../api/session';
 import { RuntimeErrorNotice } from '../components/RuntimeError';
 
-type Section = 'calls' | 'dependencies' | 'webhooks' | 'orphans';
+type Section = 'calls' | 'issues' | 'dependencies' | 'webhooks' | 'orphans';
 
 /** Sections a tenant administrator can use; the rest are Super Admin. */
-const TENANT_SECTIONS: Section[] = ['calls'];
+const TENANT_SECTIONS: Section[] = ['calls', 'issues'];
 
 const SECTION_LABEL: Record<Section, string> = {
   calls: 'Calls',
+  issues: 'Operational errors',
   dependencies: 'Dependencies',
   webhooks: 'Webhook deliveries',
   orphans: 'Orphaned calls',
@@ -47,24 +47,14 @@ function useSection<T>(load: () => Promise<T>, deps: unknown[]) {
 }
 
 function CallsSection({ superAdmin }: { superAdmin: boolean }) {
-  const [state, setState] = useState<CallListState>('active');
   const [tenant, setTenant] = useState<string>(superAdmin ? 'all' : '');
   const calls = useSection(
-    () => runtimeApi.listCalls(state, superAdmin ? tenant || undefined : undefined),
-    [state, tenant, superAdmin],
+    () => runtimeApi.listCalls('recent', superAdmin ? tenant || undefined : undefined),
+    [tenant, superAdmin],
   );
   return (
     <>
       <form onSubmit={(e) => e.preventDefault()}>
-        <label>
-          Show
-          <select value={state} onChange={(e) => setState(e.target.value as CallListState)}>
-            <option value="active">Active</option>
-            <option value="recent">Recent (ended)</option>
-            {superAdmin ? <option value="orphaned">Orphaned</option> : null}
-            {superAdmin ? <option value="all">All</option> : null}
-          </select>
-        </label>
         {superAdmin ? (
           <label>
             Tenant id (or all)
@@ -121,6 +111,49 @@ function CallsTable({ calls }: { calls: RuntimeCall[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function IssuesSection() {
+  const issues = useSection(() => runtimeApi.issues(), []);
+  return (
+    <>
+      <button type="button" onClick={issues.refresh}>
+        Refresh
+      </button>
+      {issues.error ? <RuntimeErrorNotice error={issues.error} /> : null}
+      {!issues.data ? (
+        <p role="status">{issues.loading ? 'Loading…' : ''}</p>
+      ) : (
+        <>
+          <p>Operational errors in the last {issues.data.windowHours} hours.</p>
+          {issues.data.failedCommands.length === 0 && issues.data.events.length === 0 ? (
+            <p>No operational errors.</p>
+          ) : (
+            <ul>
+              {issues.data.failedCommands.map((command) => (
+                <li key={`command-${command.callSessionId}-${command.idempotencyKey}`}>
+                  {command.createdAt} — takeover failed on{' '}
+                  <Link to={`/runtime/calls/${encodeURIComponent(command.callSessionId)}`}>
+                    {command.callSessionId}
+                  </Link>
+                  {typeof command.result?.error === 'string' ? `: ${command.result.error}` : ''}
+                </li>
+              ))}
+              {issues.data.events.map((event) => (
+                <li key={`event-${event.callSessionId}-${event.sequenceNumber}`}>
+                  {event.createdAt} — {event.eventType} on{' '}
+                  <Link to={`/runtime/calls/${encodeURIComponent(event.callSessionId)}`}>
+                    {event.callSessionId}
+                  </Link>
+                  {typeof event.payload?.reason === 'string' ? `: ${event.payload.reason}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </>
   );
 }
 
@@ -309,18 +342,18 @@ function OrphansSection() {
 export function RuntimeScreen({ session }: { session: SessionView }) {
   const superAdmin = session.user.superAdmin;
   const sections: Section[] = superAdmin
-    ? ['calls', 'dependencies', 'webhooks', 'orphans']
+    ? ['calls', 'issues', 'dependencies', 'webhooks', 'orphans']
     : TENANT_SECTIONS;
   const [section, setSection] = useState<Section>('calls');
 
   return (
     <section aria-labelledby="runtime-heading">
-      <h1 id="runtime-heading">Runtime</h1>
+      <h1 id="runtime-heading">Call History</h1>
       <p>
-        OfficePulse's runtime record, read through a read-only account. Commands go to OfficePulse's
-        API and are audited.
+        Review ended calls, their timelines and outcomes.{' '}
+        <Link to="/operations">View live calls</Link>.
       </p>
-      <div role="tablist" aria-label="Runtime sections" className="call-tabs">
+      <div role="tablist" aria-label="Call History sections" className="call-tabs">
         {sections.map((s) => (
           <button
             key={s}
@@ -337,6 +370,7 @@ export function RuntimeScreen({ session }: { session: SessionView }) {
       <div role="tabpanel" id="runtime-panel" aria-labelledby={`runtime-tab-${section}`}>
         <h2>{SECTION_LABEL[section]}</h2>
         {section === 'calls' ? <CallsSection superAdmin={superAdmin} /> : null}
+        {section === 'issues' ? <IssuesSection /> : null}
         {section === 'dependencies' ? <DependenciesSection /> : null}
         {section === 'webhooks' ? <WebhooksSection /> : null}
         {section === 'orphans' ? <OrphansSection /> : null}
