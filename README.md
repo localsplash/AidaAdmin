@@ -59,11 +59,11 @@ errors. `PARENT_DOMAIN` supplies `ID_PARENT_DOMAIN` when that key is absent.
 
 The rows this app reads, by the scope they belong in:
 
-| Scope | Keys |
-| --- | --- |
+| Scope        | Keys                                                                                                                                                                                                                                                     |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `aida-admin` | `PUBLIC_BASE_URL`, `SESSION_SECRET`, `AIDA_ADMIN_DATABASE_URL`, `OFFICEPULSE_RUNTIME_DATABASE_URL`, `ID_BASE_URL` (and optionally `ID_PUBLIC_BASE_URL`), `ID_CLIENT_SECRET` (only while Identity runs in `secret`/`dual` mode), `ID_TRUSTED_PROXY_CIDRS` |
-| `aida` | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse |
-| `*` | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME` |
+| `aida`       | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse                                                                                                                               |
+| `*`          | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME`                                                                                                                                                                                                       |
 
 `ID_BASE_URL` stays in the `aida-admin` scope on purpose: OfficePulse refuses
 that key in any scope it reads. Inbound `/id/events` deliveries are admitted by
@@ -187,6 +187,15 @@ Manage each tenant’s **Numbers** in AidaAdmin. The Add Number / DID form creat
 Each Number shows its PBX routing state and an inline routing editor; single-number tenants open it by default. Identity assignments remain visible when PBX scope is missing or OfficePulse is unavailable, with routing actions disabled as appropriate. The immutable E.164 value is their reference; managed routing settings are read from and committed to OfficePulse/Asterisk. Number assignment does not provision carrier service. Disable an existing DID route separately when stopping PBX routing; disabling the shared number removes Echo access and prevents PBX mutations for it until its enabled voice assignment is restored. Tenant/number reassignment is deliberately unsupported to protect historical messages and media.
 
 Deploy Identity migration `0005_shared_phone_numbers` and import reviewed existing assignments before this Admin version. Runtime call history now uses `aidacalls_db`; `aida_admin_db` still stores this application’s local state. See the infrastructure repository’s shared-number rollout guide for a data-preserving existing-database migration.
+
+**LIVE** shows only current calls for the selected tenant, refreshed automatically.
+Every call gets a tab with a pulsing green indicator (static with reduced motion),
+and its text observer connects automatically, including calls in background tabs.
+Observers retry while the agent starts or the connection recovers; switching tabs
+keeps received text, while leaving LIVE disconnects all observers. Ended calls
+leave LIVE and appear in **Call History**, alongside call details and operational
+errors. Super Admin diagnostics remain available in Call History. Existing
+`/operations`, `/runtime` and call-detail links continue to work.
 
 Live text observation and ordinary-telephone acceptance: [runbook](docs/LIVE_TRANSCRIPT_TESTING.md).
 

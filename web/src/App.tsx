@@ -103,9 +103,9 @@ function AuthenticatedShell({
             Dashboard
           </NavLink>
           {session.user.superAdmin ? <NavLink to="/tenants">Tenants</NavLink> : null}
-          {session.selectedTenant ? <NavLink to="/operations">Live operations</NavLink> : null}
+          {session.selectedTenant ? <NavLink to="/operations">LIVE</NavLink> : null}
           {session.user.superAdmin || session.selectedTenant?.role === 'TENANT_ADMIN' ? (
-            <NavLink to="/runtime">Runtime</NavLink>
+            <NavLink to="/runtime">Call History</NavLink>
           ) : null}
         </nav>
         <span className="app-user">{session.user.displayName ?? session.user.email ?? 'User'}</span>

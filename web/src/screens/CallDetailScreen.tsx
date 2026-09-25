@@ -45,7 +45,7 @@ export function CallDetailScreen() {
   return (
     <section aria-labelledby="call-heading">
       <p>
-        <Link to="/operations">← Live operations</Link> · <Link to="/runtime">Runtime</Link>
+        <Link to="/operations">← LIVE</Link> · <Link to="/runtime">Call History</Link>
       </p>
       <h1 id="call-heading">Call {callSessionId}</h1>
       {body}

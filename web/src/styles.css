@@ -451,3 +451,27 @@ input[readonly] {
   margin: 0 0 0.25rem;
   overflow-wrap: anywhere;
 }
+
+.live-call-indicator {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  margin-right: 0.65rem;
+  border-radius: 50%;
+  background: #15803d;
+  animation: live-call-pulse 1.6s ease-out infinite;
+}
+@keyframes live-call-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(21 128 61 / 0%);
+  }
+  45% {
+    box-shadow: 0 0 0 5px rgb(21 128 61 / 25%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-call-indicator {
+    animation: none;
+  }
+}

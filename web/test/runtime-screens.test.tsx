@@ -44,10 +44,12 @@ describe('RuntimeScreen', () => {
         <RuntimeScreen session={tenantAdmin} />
       </MemoryRouter>,
     );
-    const tabs = within(await screen.findByRole('tablist', { name: /runtime sections/i }))
+    const tabs = within(await screen.findByRole('tablist', { name: /call history sections/i }))
       .getAllByRole('tab')
       .map((t) => t.textContent);
-    expect(tabs).toEqual(['Calls']);
+    expect(tabs).toEqual(['Calls', 'Operational errors']);
+    expect(fetch).toHaveBeenCalledWith('/runtime/calls?state=recent', expect.any(Object));
+    expect(screen.queryByRole('option', { name: 'Active' })).toBeNull();
     expect(screen.queryByRole('tab', { name: /dependencies/i })).not.toBeInTheDocument();
     expect(await screen.findByText(/no calls match/i)).toBeInTheDocument();
   });
@@ -231,7 +233,7 @@ describe('CallDetailScreen', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByRole('heading', { name: /call call-1/i })).toBeInTheDocument();
-    expect(screen.getAllByRole('status')[0]).toHaveTextContent(/ended/i);
+    await waitFor(() => expect(screen.getAllByRole('status')[0]).toHaveTextContent(/ended/i));
     expect(screen.getByText(/profile-1 \(rev 2\)/)).toBeInTheDocument();
     expect(screen.getByText(/route-1 \(rev 3\)/)).toBeInTheDocument();
     const timeline = screen.getByRole('table', { name: /durable call events/i });
@@ -255,4 +257,39 @@ describe('CallDetailScreen', () => {
     );
     expect(await screen.findByRole('alert')).toHaveTextContent(/call_not_found/);
   });
+});
+
+it('keeps operational errors in Call History', async () => {
+  mockFetch((url) =>
+    url.startsWith('/runtime/issues')
+      ? {
+          status: 200,
+          body: {
+            windowHours: 24,
+            failedCommands: [],
+            dependenciesDown: [],
+            events: [
+              {
+                callSessionId: 'call-1',
+                sequenceNumber: 1,
+                eventType: 'takeover-failed',
+                createdAt: 't',
+                payload: { reason: 'no-answer' },
+              },
+            ],
+          },
+        }
+      : emptyCalls,
+  );
+  render(
+    <MemoryRouter>
+      <RuntimeScreen session={tenantAdmin} />
+    </MemoryRouter>,
+  );
+  await userEvent.setup().click(screen.getByRole('tab', { name: 'Operational errors' }));
+  expect(await screen.findByText(/no-answer/)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'call-1' })).toHaveAttribute(
+    'href',
+    '/runtime/calls/call-1',
+  );
 });

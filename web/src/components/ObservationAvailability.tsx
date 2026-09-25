@@ -66,9 +66,9 @@ export function ObservationAvailability() {
         )}
       </div>
       <p>
-        When a call reaches Aida, select it under Active calls and choose{' '}
-        <strong>Observe live transcript</strong>. If there are no active calls, there is no live
-        text to display. Earlier speech is not replayed.
+        When a call reaches Aida, its live transcript connects automatically. Select a call tab to
+        follow it. If there are no active calls, there is no live text to display. Earlier speech is
+        not replayed.
       </p>
     </section>
   );
