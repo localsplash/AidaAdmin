@@ -74,13 +74,14 @@ export async function processIdEvent(
 /**
  * POST /id/events — inbound identity events. Trust is source-IPv4 only: the
  * resolved client (socket peer, or the proxy-appended forwarded address when
- * the peer is a trusted proxy) must fall inside ID_EVENT_SOURCE_CIDRS.
+ * the peer is a trusted proxy) must fall inside `trustedCIDR`, the one
+ * platform-wide network policy every application reads from PlatformConfig.
  * Responds 2xx only after the event and its effects committed; id retries on
  * anything else.
  */
 export function idEventRoutes(config: AppConfig, logger: Logger, deps: IdEventDeps): Router {
   const router = Router();
-  const sourceCidrs = parseCidrs(parseCidrList(config.serviceConfig.ID_EVENT_SOURCE_CIDRS));
+  const sourceCidrs = parseCidrs(parseCidrList(config.serviceConfig.trustedCIDR));
   const proxyCidrs = parseCidrs(parseCidrList(config.serviceConfig.ID_TRUSTED_PROXY_CIDRS));
 
   router.post('/id/events', async (req, res, next) => {

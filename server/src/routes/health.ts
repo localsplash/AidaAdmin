@@ -1,3 +1,4 @@
+import { buildInfo } from '../buildInfo.js';
 import { Router } from 'express';
 import type { AppConfig } from '../config.js';
 import type { AppDeps } from '../deps.js';
@@ -6,7 +7,7 @@ export function healthRoutes(config: AppConfig, deps: AppDeps): Router {
   const router = Router();
 
   router.get('/healthz', (_req, res) => {
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', ...buildInfo });
   });
 
   router.get('/readyz', async (_req, res) => {

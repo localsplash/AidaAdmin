@@ -58,9 +58,16 @@ function mockRuntime(upstream: Upstream) {
       const respond = (status: number, body: unknown) =>
         new Response(JSON.stringify(body), { status });
       if (upstream.failWith) return respond(upstream.failWith.status, upstream.failWith.body);
+      if (url === '/runtime/observation-status')
+        return respond(200, {
+          observerConfigured: false,
+          admissionReady: false,
+          livekitReady: false,
+        });
       if (url.includes('/runtime/calls?state=active')) {
         return respond(200, { calls: upstream.active.map((d) => d.call) });
       }
+      if (url.endsWith('/observer')) return respond(409, { error: 'agent_not_ready' });
       if (url.includes('/runtime/calls?state=recent')) return respond(200, { calls: [] });
       if (url.includes('/runtime/issues')) {
         return respond(200, {
@@ -102,6 +109,19 @@ const detail = (
 });
 
 describe('OperationsScreen', () => {
+  it('shows live transcription and unavailable setup even without call cards', async () => {
+    mockRuntime({ active: [], commands: [] });
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText('No active calls.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Live transcription' })).toBeInTheDocument();
+    expect(
+      await screen.findByText(/LiveKit observation has not been configured/),
+    ).toBeInTheDocument();
+  });
   it('keeps simultaneous calls isolated in their own tabs', async () => {
     mockRuntime({
       active: [
@@ -117,13 +137,13 @@ describe('OperationsScreen', () => {
         <OperationsScreen />
       </MemoryRouter>,
     );
-    const panelA = await screen.findByRole('tabpanel', { name: '+15105550001' });
+    const panelA = await screen.findByRole('tabpanel', { name: 'Live call: +15105550001' });
     expect(within(panelA).getByText(/takeover — ringing/i)).toBeInTheDocument();
     expect(within(panelA).queryByText(/nocodb-unavailable/)).not.toBeInTheDocument();
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('tab', { name: '+15105550002' }));
-    const panelB = screen.getByRole('tabpanel', { name: '+15105550002' });
+    await user.click(screen.getByRole('tab', { name: 'Live call: +15105550002' }));
+    const panelB = screen.getByRole('tabpanel', { name: 'Live call: +15105550002' });
     expect(within(panelB).getByRole('alert')).toHaveTextContent(/nocodb-unavailable/);
     expect(within(panelB).queryByText(/takeover — ringing/i)).not.toBeInTheDocument();
   });
@@ -167,6 +187,24 @@ describe('OperationsScreen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/OFFICEPULSE_RUNTIME_DATABASE_URL/);
   });
 
+  it('keeps the canonical POC diagnostic-only while native queue routing is unavailable', async () => {
+    const upstream: Upstream = {
+      active: [detail(call('call-a', '+15105550001'), [ev(1, 'bootstrapped')])],
+      commands: [],
+    };
+    mockRuntime(upstream);
+    render(
+      <MemoryRouter>
+        <OperationsScreen />
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByText(/native PBX queue routing is not configured/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /take over this call/i })).not.toBeInTheDocument();
+    expect(upstream.commands).toHaveLength(0);
+  });
+
   it('submits a takeover once, with an idempotency key and no destination', async () => {
     const upstream: Upstream = {
       active: [detail(call('call-a', '+15105550001'), [ev(1, 'bootstrapped')])],
@@ -176,7 +214,7 @@ describe('OperationsScreen', () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
     render(
       <MemoryRouter>
-        <OperationsScreen />
+        <OperationsScreen takeoverUnavailableReason={null} />
       </MemoryRouter>,
     );
     const user = userEvent.setup();
@@ -205,7 +243,7 @@ describe('OperationsScreen', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(
       <MemoryRouter>
-        <OperationsScreen />
+        <OperationsScreen takeoverUnavailableReason={null} />
       </MemoryRouter>,
     );
     const user = userEvent.setup();
@@ -219,7 +257,7 @@ describe('OperationsScreen', () => {
         detail(
           call('call-a', '+15105550001'),
           [
-            ev(1, 'bootstrapped'),
+            ev(1, 'aida-connected'),
             // Sequence 2 is missing: the gap must be surfaced.
             ev(3, 'takeover-failed', { reason: 'destination did not answer' }),
           ],
@@ -250,16 +288,93 @@ describe('OperationsScreen', () => {
     expect(screen.getByText(/takeover failed — no-answer/i)).toBeInTheDocument();
   });
 
-  it('marks historical conversations as coming soon and says where transcripts live', async () => {
+  it('explains live-only observation without a misleading coming-soon placeholder', async () => {
     mockRuntime({ active: [], commands: [] });
     render(
       <MemoryRouter>
         <OperationsScreen />
       </MemoryRouter>,
     );
-    expect(
-      await screen.findByRole('heading', { name: /historical conversations/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/coming soon/i)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /live transcription/i })).toBeInTheDocument();
+    expect(screen.queryByText(/coming soon/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/loads the active agent’s conversation history/)).toBeInTheDocument();
   });
+});
+
+it('automatically observes all concurrent calls and keeps them connected across tab switches', async () => {
+  mockRuntime({
+    active: ['a', 'b'].map((id) => detail(call(id, id), [ev(1, 'aida-connected')])),
+    commands: [],
+  });
+  render(
+    <MemoryRouter>
+      <OperationsScreen />
+    </MemoryRouter>,
+  );
+  await screen.findByRole('tab', { name: 'Live call: a' });
+  await waitFor(() => {
+    const urls = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+    expect(urls.filter((url) => url.endsWith('/observer'))).toEqual([
+      '/runtime/calls/a/observer',
+      '/runtime/calls/b/observer',
+    ]);
+    expect(urls.some((url) => /state=recent|runtime\/issues/.test(url))).toBe(false);
+  });
+  expect(screen.queryByRole('heading', { name: /recent calls|operational errors/i })).toBeNull();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('tab', { name: 'Live call: b' }));
+  await user.keyboard('{ArrowLeft}');
+  expect(screen.getByRole('tab', { name: 'Live call: a' })).toHaveFocus();
+  expect(screen.getByRole('tab', { name: 'Live call: a' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  expect(
+    vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/observer')),
+  ).toHaveLength(2);
+});
+
+it('removes ended calls, preserves selection on refresh and selects the remaining live call', async () => {
+  const upstream: Upstream = {
+    active: ['a', 'b'].map((id) => detail(call(id, id), [ev(1, 'aida-connected')])),
+    commands: [],
+  };
+  mockRuntime(upstream);
+  render(
+    <MemoryRouter>
+      <OperationsScreen />
+    </MemoryRouter>,
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('tab', { name: 'Live call: b' }));
+  await user.click(screen.getByRole('button', { name: 'Refresh now' }));
+  expect(screen.getByRole('tab', { name: 'Live call: b' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  upstream.active[1]!.events.push(ev(2, 'hangup'));
+  await user.click(screen.getByRole('button', { name: 'Refresh now' }));
+  await waitFor(() => expect(screen.queryByRole('tab', { name: 'Live call: b' })).toBeNull());
+  expect(screen.getByRole('tab', { name: 'Live call: a' })).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  upstream.active[0]!.call.endedAt = '2026-09-02T10:01:00Z';
+  await user.click(screen.getByRole('button', { name: 'Refresh now' }));
+  expect(await screen.findByText('No active calls.')).toBeInTheDocument();
+});
+
+it('removes live indicators when the active call status becomes unavailable', async () => {
+  const upstream: Upstream = { active: [detail(call('a', 'a'), [])], commands: [] };
+  mockRuntime(upstream);
+  render(
+    <MemoryRouter>
+      <OperationsScreen />
+    </MemoryRouter>,
+  );
+  await screen.findByRole('tab', { name: 'Live call: a' });
+  upstream.failWith = { status: 503, body: { error: 'unavailable' } };
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh now' }));
+  await screen.findByText('Active call diagnostics unavailable.');
+  expect(screen.queryByRole('tab')).toBeNull();
 });

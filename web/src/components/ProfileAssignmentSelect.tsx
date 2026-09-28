@@ -1,0 +1,101 @@
+import { useRef, useState } from 'react';
+import { adminApi } from '../api/admin';
+import type { useProfileAssignments } from '../hooks/useProfileAssignments';
+import { PbxErrorNotice } from './PbxNotice';
+
+/**
+ * One persisted assignment: which assistant answers calls in routing scope
+ * {PBX instance, context} for a DID, or for the whole context when `did` is
+ * null. Choosing the blank option removes the stored row, so a DID falls back
+ * to the context default and a context to "not admitted" (callers stay on the
+ * PBX queue). Nobody edits environment JSON to pick a profile.
+ */
+export function ProfileAssignmentSelect({
+  tenantId,
+  context,
+  did,
+  label,
+  blankLabel,
+  inventory,
+  disabled = false,
+}: {
+  tenantId: string;
+  context: string;
+  did: string | null;
+  label: string;
+  blankLabel: string;
+  inventory: ReturnType<typeof useProfileAssignments>;
+  disabled?: boolean;
+}) {
+  const key = did ?? '';
+  const current = inventory.data?.assignments.find(
+    (row) => row.context === context && row.did === key,
+  );
+  const snapshot = JSON.stringify([context, current?.id ?? '', current?.profileId ?? '']);
+  const [baseline, setBaseline] = useState(snapshot);
+  const [value, setValue] = useState(current?.profileId ?? '');
+  // A refresh that changed the stored row replaces the draft.
+  if (baseline !== snapshot) {
+    setBaseline(snapshot);
+    setValue(current?.profileId ?? '');
+  }
+  const [error, setError] = useState<unknown>(null);
+  const [status, setStatus] = useState('');
+  const [busy, setBusy] = useState(false);
+  const lock = useRef(false);
+  const pinned = inventory.data?.pbxInstanceId ?? null;
+  const writable = !!inventory.data && !inventory.error && !inventory.loading && !disabled;
+  const subject = did ?? `context ${context}`;
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (lock.current || !writable) return;
+    lock.current = true;
+    setBusy(true);
+    setError(null);
+    setStatus('');
+    try {
+      if (value === '') {
+        if (current) await adminApi.deleteProfileAssignment(tenantId, current.id);
+      } else await adminApi.saveProfileAssignment(tenantId, { context, did, profileId: value });
+      if (!inventory.current()) return;
+      setStatus(
+        value === ''
+          ? `Assignment removed for ${subject}.`
+          : `Assistant profile saved for ${subject} on PBX instance ${pinned ?? 'unknown'}.`,
+      );
+      await inventory.refresh();
+    } catch (err) {
+      if (inventory.current()) setError(err);
+    } finally {
+      lock.current = false;
+      if (inventory.current()) setBusy(false);
+    }
+  };
+  const id = `assignment-${context}-${key || 'default'}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return (
+    <form aria-label={`${label} for ${subject}`} onSubmit={(event) => void save(event)}>
+      <label htmlFor={id}>{label}</label>
+      <select
+        id={id}
+        disabled={busy || !writable}
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+      >
+        <option value="">{blankLabel}</option>
+        {inventory.data?.profiles.map((profile) => (
+          <option key={profile.id} value={profile.id}>
+            {profile.name}
+          </option>
+        ))}
+      </select>{' '}
+      <button type="submit" disabled={busy || !writable || value === (current?.profileId ?? '')}>
+        {busy ? 'Saving…' : 'Save assistant profile'}
+      </button>
+      {inventory.data && pinned === null && (
+        <p>OfficePulse has not reported its PBX instance; assignments cannot be saved yet.</p>
+      )}
+      <PbxErrorNotice error={error} />
+      {status && <p role="status">{status}</p>}
+    </form>
+  );
+}

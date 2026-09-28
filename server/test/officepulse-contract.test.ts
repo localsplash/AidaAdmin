@@ -1,114 +1,221 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
-import {
-  didPayload,
-  extensionCreatePayload,
-  extensionUpdatePayload,
-  ringGroupPayload,
-} from '../src/officepulse/payloads.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { HttpOfficePulseClient, OfficePulseError } from '../src/officepulse/client.js';
+import * as pbx from '../src/officepulse/pbx-contract.js';
 
-/**
- * Cross-repository contract (OfficePulse issue #9), seen from this side.
- *
- * `fixtures/officepulse-payloads.json` is a verbatim copy of
- * OfficePulseAidaIntegration's `test/fixtures/aidaadmin-payloads.json` — the
- * bodies its contract test proves it accepts. This test proves our payload
- * builders produce those exact bodies from NocoDB records. When either repo
- * changes a field, one of the two tests fails before a live call does.
- */
-const PAYLOADS = JSON.parse(
-  readFileSync(new URL('./fixtures/officepulse-payloads.json', import.meta.url), 'utf8'),
-) as Record<string, { method: string; path: string; body: Record<string, unknown> }>;
-
-const TENANT = '11111111-1111-4111-8111-111111111111';
-const EXT_ID = '22222222-2222-4222-8222-222222222222';
-
-describe('OfficePulse provisioning contract', () => {
-  it('builds the extension create body OfficePulse accepts', () => {
-    const body = extensionCreatePayload(
-      {
-        id: EXT_ID,
-        tenant_id: TENANT,
-        extension_number: '100',
-        asterisk_context: 'office-main',
-        display_name: 'Front Desk',
-        caller_id_name: 'Acme Dental',
-        caller_id_number: '+15559870001',
-        provisioning_profile: 'grandstream-grp2615',
-      },
-      TENANT,
-    );
-    // requestId is the extension id (idempotent create), not a fixture value.
-    expect({ ...body, requestId: PAYLOADS.provisionExtension!.body.requestId }).toEqual(
-      PAYLOADS.provisionExtension!.body,
-    );
+// These files are verbatim OfficePulse fixtures. Its HTTP suite proves it accepts
+// every request and emits these responses; this suite proves the BFF agrees.
+const cases = JSON.parse(
+  readFileSync(new URL('./fixtures/native-pbx-contract.json', import.meta.url), 'utf8'),
+) as {
+  name: string;
+  method: string;
+  path: string;
+  status: number;
+  body?: unknown;
+  response?: unknown;
+}[];
+const spec = JSON.parse(
+  readFileSync(new URL('./fixtures/officepulse-openapi.json', import.meta.url), 'utf8'),
+);
+const client = new HttpOfficePulseClient('https://private.officepulse.invalid');
+const cid = 'contract-correlation';
+// The fixture's scope: one extension context and the shared carrier ingress
+// context. The customer tenant is never part of any request.
+const scope = { context: 'tenant-seven' };
+const didScope = { context: 'tenant-seven', didContext: 'from-carrier' };
+const queue = 'tenant-seven.sales';
+const actions: Record<string, (body: unknown) => Promise<unknown>> = {
+  listContexts: () => client.listContexts(cid),
+  listExtensions: () => client.listExtensions(scope, cid),
+  createExtension: (body) =>
+    client.createExtension(scope, pbx.createExtensionBody.parse(body), cid),
+  deleteExtension: () => client.deleteExtension(scope, '100', cid),
+  listQueues: () => client.listQueues(scope, cid),
+  createQueue: (body) => client.createQueue(scope, pbx.createQueueBody.parse(body), cid),
+  deleteQueue: () => client.deleteQueue(scope, queue, cid),
+  putQueueMember: (body) =>
+    client.putQueueMember(scope, queue, '100', pbx.memberBody.parse(body), cid),
+  deleteQueueMember: () => client.deleteQueueMember(scope, queue, '100', cid),
+  listDids: () => client.listDids(didScope, cid, ['+19496501147']),
+  putDid: (body) =>
+    client.putDid(didScope, '+19496501147', pbx.didBody.parse(body), cid, ['+19496501147']),
+  deleteDid: () => client.deleteDid(didScope, '+19496501147', cid, ['+19496501147']),
+};
+const parameters = (operation: { parameters?: Array<{ name: string; in: string }> }) =>
+  (operation.parameters ?? []).filter((p) => p.in === 'query').map((p) => p.name);
+afterEach(() => vi.unstubAllGlobals());
+describe('canonical native OfficePulse contract', () => {
+  it('covers every client action with a fixture entry', () => {
+    expect(cases.map((entry) => entry.name).sort()).toEqual(Object.keys(actions).sort());
   });
-
-  it('sends nullable fields as null, which OfficePulse accepts', () => {
-    const body = extensionCreatePayload(
-      {
-        id: '22222222-2222-4222-8222-222222222223',
-        extension_number: '101',
-        asterisk_context: 'office-main',
-        display_name: 'Back Office',
-        caller_id_name: null,
-        caller_id_number: '',
-      },
-      TENANT,
+  it.each(cases)(
+    '$name matches the published method, encoded path, body and response',
+    async (entry) => {
+      const upstream = vi.fn(async (url: URL, init: RequestInit) => {
+        expect(url.origin).toBe('https://private.officepulse.invalid');
+        expect(url.pathname + url.search).toBe(entry.path);
+        expect(init.method).toBe(entry.method);
+        expect(init.body ? JSON.parse(String(init.body)) : undefined).toEqual(entry.body);
+        expect(init.redirect).toBe('error');
+        expect(init.signal).toBeInstanceOf(AbortSignal);
+        expect(new Headers(init.headers).get('x-aida-correlation-id')).toBe(cid);
+        return new Response(entry.status === 204 ? null : JSON.stringify(entry.response), {
+          status: entry.status,
+        });
+      });
+      vi.stubGlobal('fetch', upstream);
+      expect(await actions[entry.name]!(entry.body)).toEqual(entry.response);
+      expect(upstream).toHaveBeenCalledOnce();
+      // The retired tenant scope appears nowhere on the wire.
+      expect(entry.path).not.toContain('iTenantId');
+      expect(JSON.stringify(entry.response ?? {})).not.toContain('iTenantId');
+      const url = new URL(entry.path, 'http://fixture');
+      const matching = Object.keys(spec.paths).find((pattern) =>
+        new RegExp(`^${pattern.replace(/\{[^}]+\}/g, '[^/]+')}$`).test(url.pathname),
+      );
+      expect(matching).toBeDefined();
+      const operation = spec.paths[matching!][entry.method.toLowerCase()];
+      expect(operation.responses[entry.status]).toBeDefined();
+      const query = parameters(operation);
+      if (entry.name === 'listContexts') {
+        expect(query).toEqual([]);
+        expect(url.search).toBe('');
+      } else {
+        expect(query[0]).toBe('context');
+        expect(url.searchParams.getAll('context')).toEqual([didScope.context]);
+        expect(query.includes('didContext')).toBe(url.pathname.includes('/dids'));
+        if (query.includes('didContext'))
+          expect(url.searchParams.getAll('didContext')).toEqual([didScope.didContext]);
+        else expect(url.searchParams.has('didContext')).toBe(false);
+      }
+      if (entry.response && typeof entry.response === 'object' && 'source' in entry.response) {
+        expect(entry.response).toMatchObject({
+          source: 'asterisk',
+          pbxInstanceId: 'officepulse-fixture',
+        });
+        if (entry.name !== 'listContexts')
+          expect(entry.response).toMatchObject({
+            context: 'tenant-seven',
+            provisioningEnabled: true,
+          });
+        if (entry.name === 'listDids')
+          expect(entry.response).toMatchObject({ didContext: 'from-carrier' });
+      }
+      if (entry.body) {
+        const key = operation.requestBody.content['application/json'].schema.$ref.split('/').at(-1);
+        expect(Object.keys(entry.body)).toEqual(
+          expect.arrayContaining(spec.components.schemas[key].required),
+        );
+        expect(
+          Object.keys(entry.body).every(
+            (field) => field in spec.components.schemas[key].properties,
+          ),
+        ).toBe(true);
+      }
+    },
+  );
+  it('retains no legacy routes, tenant parameters or provider fields in the shared PBX schema', () => {
+    expect(Object.keys(spec.paths).some((path) => path.includes('/v1/provisioning/'))).toBe(false);
+    for (const [path, operations] of Object.entries(spec.paths) as [string, object][]) {
+      if (!path.startsWith('/v1/admin/pbx/')) continue;
+      for (const operation of Object.values(operations))
+        expect(parameters(operation as { parameters?: [] })).not.toContain('iTenantId');
+    }
+    expect(Object.keys(spec.components.schemas.DidSettings.properties)).toEqual([
+      'queue',
+      'ringsBeforeAi',
+      'schedule',
+      'livekitDestination',
+    ]);
+    expect(pbx.queueStrategy.options).toEqual(
+      spec.components.schemas.QueueCreate.properties.strategy.enum,
     );
-    expect({ ...body, requestId: PAYLOADS.provisionExtensionMinimal!.body.requestId }).toEqual(
-      PAYLOADS.provisionExtensionMinimal!.body,
-    );
+    expect(spec.components.schemas.Extension.properties.managed.type).toBe('boolean');
+    expect(spec.components.schemas.ContextInventory.required).toEqual([
+      'source',
+      'pbxInstanceId',
+      'contexts',
+    ]);
+    expect(spec.components.schemas.DidInventory.required).toContain('didContext');
+    expect(spec.components.schemas.Readiness.properties.pbxInstanceId).toBeDefined();
+    for (const name of ['ExtensionInventory', 'QueueInventory', 'DidInventory'])
+      expect(spec.components.schemas[name].required).toEqual(
+        expect.arrayContaining(['source', 'pbxInstanceId', 'context', 'provisioningEnabled']),
+      );
   });
-
-  it('never sends identityUserId to OfficePulse', () => {
-    const record = {
-      id: EXT_ID,
-      identity_user_id: 42,
-      extension_number: '100',
-      asterisk_context: 'office-main',
-      display_name: 'Front Desk',
-      enabled: true,
-    };
-    expect('identityUserId' in extensionCreatePayload(record, TENANT)).toBe(false);
-    expect('identityUserId' in extensionUpdatePayload(record)).toBe(false);
-    expect(extensionUpdatePayload(record)).toEqual(PAYLOADS.updateExtension!.body);
+  it.each([404, 409, 422, 503, 500])(
+    'maps status %s without retaining an upstream body',
+    async (status) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response('SQL secret=must-never-escape', { status })),
+      );
+      try {
+        await client.deleteQueue(scope, queue, cid);
+        throw new Error('Expected rejection');
+      } catch (error) {
+        expect(error).toBeInstanceOf(OfficePulseError);
+        expect((error as OfficePulseError).status).toBe(status);
+        expect(JSON.stringify(error) + String(error)).not.toContain('must-never-escape');
+      }
+    },
+  );
+  it('rejects a mismatched context echo, a missing instance, and strips unexpected secret fields', async () => {
+    const response = cases.find((entry) => entry.name === 'listExtensions')!.response as Record<
+      string,
+      unknown
+    >;
+    const serve = (body: unknown) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => new Response(JSON.stringify(body))),
+      );
+    serve({ ...response, context: 'tenant-eight' });
+    await expect(client.listExtensions(scope, cid)).rejects.toMatchObject({ status: 502 });
+    serve({ ...response, pbxInstanceId: undefined });
+    await expect(client.listExtensions(scope, cid)).rejects.toMatchObject({ status: 502 });
+    serve({ ...response, iTenantId: 7 });
+    expect(await client.listExtensions(scope, cid)).not.toHaveProperty('iTenantId');
+    serve({ ...response, sipSecret: 'not-for-inventory' });
+    expect(JSON.stringify(await client.listExtensions(scope, cid))).not.toContain(
+      'not-for-inventory',
+    );
+    const dids = cases.find((entry) => entry.name === 'listDids')!.response as Record<
+      string,
+      unknown
+    >;
+    serve({ ...dids, didContext: 'tenant-seven' });
+    await expect(client.listDids(didScope, cid, ['+19496501147'])).rejects.toMatchObject({
+      status: 502,
+    });
   });
-
-  it('applies both ring-group caller ID name and number', () => {
-    const body = ringGroupPayload(
-      TENANT,
-      {
-        virtual_extension: '600',
-        asterisk_context: 'office-main',
-        ring_timeout_seconds: 25,
-        music_on_hold_class: 'aida-default-tune',
-        caller_id_name: 'Acme Reception',
-        caller_id_number: '+15559870001',
-        enabled: true,
-      },
-      ['100', '101'],
+  it('reads the PBX instance from readiness and tolerates its absence', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ pbxInstanceId: 'officepulse-fixture', ready: true, components: {} }),
+          ),
+      ),
     );
-    expect(body).toEqual(PAYLOADS.provisionRingGroup!.body);
-  });
-
-  it('sends the DID with its fail-safe destination, the extended shape', () => {
-    const body = didPayload(
-      TENANT,
-      {
-        did_e164: '+15559870002',
-        destination_type: 'EXTENSION',
-        destination_extension_id: EXT_ID,
-        destination_ring_group_id: null,
-        enabled: true,
-      },
-      'aida-inbound',
+    expect(await client.readiness()).toMatchObject({
+      reachable: true,
+      ready: true,
+      pbxInstanceId: 'officepulse-fixture',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ ready: false, pbxInstanceId: 'bad id!' }))),
     );
-    expect(body).toEqual(PAYLOADS.provisionDidWithFallback!.body);
-    // The pre-#9 shape (no fallback) is what OfficePulse tolerates, not what
-    // we send: a DID without its destination has no local fail-safe.
-    expect(Object.keys(body)).toEqual(
-      expect.arrayContaining(['tenantId', 'destinationType', 'destinationId']),
+    expect(await client.readiness()).not.toHaveProperty('pbxInstanceId');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('down');
+      }),
     );
+    expect(await client.readiness()).toMatchObject({ reachable: false });
   });
 });

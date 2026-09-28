@@ -255,7 +255,7 @@ describe('central admin admission', () => {
         expect(session.body.selectedTenant.tenantId).toBe('1');
         client.tenants[0]!.role = 'USER';
         expect((await request(app).get('/api/session').set('Cookie', sessionCookies)).status).toBe(
-          401,
+          403,
         );
       }
     },

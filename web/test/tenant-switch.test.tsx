@@ -7,7 +7,13 @@ import type { SessionView } from '../src/api/session';
 const session: SessionView = {
   authenticated: true,
   user: { iUserId: 1, email: null, displayName: null, superAdmin: true },
-  selectedTenant: { tenantId: '1', name: 'First', slug: 'first', role: 'SUPER_ADMIN' },
+  selectedTenant: {
+    tenantId: '1',
+    name: 'First',
+    slug: 'first',
+    role: 'SUPER_ADMIN',
+    pbxContext: 'first-office',
+  },
 };
 function Location() {
   return <output aria-label="Current path">{useLocation().pathname}</output>;
@@ -42,6 +48,8 @@ it.each([200, 403])(
       </MemoryRouter>,
     );
     await screen.findByRole('option', { name: 'Second' });
+    // The banner names the PBX scope the operator acts in, not the tenant id.
+    expect(screen.getByText(/^Tenant:/)).toHaveTextContent('PBX context first-office');
     await userEvent.setup().selectOptions(screen.getByLabelText('Switch tenant'), '2');
     if (status === 200) {
       await waitFor(() => expect(changed).toHaveBeenCalledOnce());
@@ -53,3 +61,19 @@ it.each([200, 403])(
     }
   },
 );
+
+it('says when the selected tenant has no PBX context yet', () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(JSON.stringify({ tenants: [] }))),
+  );
+  render(
+    <MemoryRouter>
+      <TenantContextBanner
+        session={{ ...session, selectedTenant: { ...session.selectedTenant!, pbxContext: null } }}
+        onTenantChanged={vi.fn()}
+      />
+    </MemoryRouter>,
+  );
+  expect(screen.getByText(/^Tenant:/)).toHaveTextContent('PBX context not assigned');
+});

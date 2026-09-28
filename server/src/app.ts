@@ -5,6 +5,10 @@ import cookieParser from 'cookie-parser';
 import express, { type Express } from 'express';
 import { pinoHttp } from 'pino-http';
 import { adminRoutes } from './admin/routes.js';
+import { pbxRoutes } from './admin/pbx-routes.js';
+import { handsetRoutes } from './admin/handset-routes.js';
+import { environmentRoutes } from './routes/environment.js';
+import { profileAssignmentRoutes } from './admin/profile-assignment-routes.js';
 import { numberRoutes } from './admin/number-routes.js';
 import { configRoutes } from './admin/config-routes.js';
 import { sessionMiddleware } from './auth/middleware.js';
@@ -69,7 +73,22 @@ export function createApp(
 
   app.use(authRoutes(config, logger, deps));
   app.use(sessionRoutes(config, deps));
+  app.use(environmentRoutes(config, deps));
   app.use(tenantSelectionRoutes(logger, deps));
+  app.use(pbxRoutes(logger, deps));
+  app.use(handsetRoutes(logger, deps));
+  app.use(profileAssignmentRoutes(logger, deps));
+  // UI and legacy JSON routes share /runtime. Document navigations must reach
+  // React before the API router; fetch requests continue to receive JSON.
+  const webDist = path.resolve(moduleDir, '../../web/dist');
+  app.get(['/runtime', '/runtime/calls', '/runtime/calls/:callSessionId'], (req, res, next) => {
+    res.vary('Accept');
+    if (req.headers.accept?.includes('text/html') && existsSync(path.join(webDist, 'index.html'))) {
+      res.sendFile(path.join(webDist, 'index.html'));
+      return;
+    }
+    next();
+  });
   app.use(runtimeRoutes(logger, deps));
   app.use(adminRoutes(logger, deps));
   app.use(numberRoutes(deps));
@@ -78,7 +97,7 @@ export function createApp(
   // Validated appearance assets (uploaded logos).
   app.use('/assets', express.static(path.resolve(config.assetStorageDir)));
 
-  app.use('/api', (req, res) => {
+  app.use(['/api', '/admin'], (req, res) => {
     res.status(404).json({
       error: 'not_found',
       message: 'Unknown API route',
@@ -88,7 +107,6 @@ export function createApp(
 
   // Serve the built web application when present (production container and
   // the e2e smoke test); unknown non-API GETs fall through to the SPA shell.
-  const webDist = path.resolve(moduleDir, '../../web/dist');
   if (existsSync(webDist)) {
     app.use(express.static(webDist));
     app.use((req, res, next) => {

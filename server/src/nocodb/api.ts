@@ -74,6 +74,7 @@ export interface NocoDbApi extends NocoMetaApi {
    * `Id` that NocoDB-owned tables carry — so the key travels in the body.
    */
   patchRecord(tableId: string, values: Record<string, unknown>): Promise<void>;
+  deleteRecord(tableId: string, recordId: number): Promise<void>;
 }
 
 export class NocoDbError extends Error {
@@ -192,6 +193,13 @@ export class HttpNocoDbApi implements NocoDbApi {
     await this.request(`/api/v2/tables/${tableId}/records`, {
       method: 'PATCH',
       body: JSON.stringify(values),
+    });
+  }
+
+  async deleteRecord(tableId: string, recordId: number): Promise<void> {
+    await this.request(`/api/v2/tables/${tableId}/records`, {
+      method: 'DELETE',
+      body: JSON.stringify({ Id: recordId }),
     });
   }
 }

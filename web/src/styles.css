@@ -391,3 +391,87 @@ input[readonly] {
     flex-wrap: wrap;
   }
 }
+
+.number-card {
+  margin: 1rem 0;
+  padding: 1.25rem;
+  background: var(--color-surface);
+  border: 1px solid #c8d4e6;
+  border-radius: 10px;
+}
+.number-card h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+}
+.number-card button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.number-card .record-editor {
+  margin: 1rem 0;
+}
+
+.observation-availability {
+  margin-block: 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+}
+.observation-availability h2 {
+  margin-top: 0;
+}
+
+.pbx-scope label {
+  display: inline;
+}
+.pbx-scope select {
+  margin-left: 0.25rem;
+}
+
+.environment-notice {
+  padding: 0.25rem 1.5rem;
+}
+.environment-label {
+  margin: 0.25rem 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+.environment-mismatch {
+  padding: 1rem;
+  border: 2px solid #b91c1c;
+  background: #fef2f2;
+  color: #991b1b;
+  font-weight: 600;
+}
+.attached-handset dl {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+}
+.attached-handset dd {
+  margin: 0 0 0.25rem;
+  overflow-wrap: anywhere;
+}
+
+.live-call-indicator {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  margin-right: 0.65rem;
+  border-radius: 50%;
+  background: #15803d;
+  animation: live-call-pulse 1.6s ease-out infinite;
+}
+@keyframes live-call-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(21 128 61 / 0%);
+  }
+  45% {
+    box-shadow: 0 0 0 5px rgb(21 128 61 / 25%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-call-indicator {
+    animation: none;
+  }
+}

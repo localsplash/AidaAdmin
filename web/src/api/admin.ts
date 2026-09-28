@@ -4,6 +4,7 @@ export interface ApiFailure {
   status: number;
   error?: string;
   message?: string;
+  correlationId?: string;
 }
 
 export class ApiError extends Error {
@@ -32,6 +33,10 @@ async function call<T>(path: string, method: string, body?: unknown): Promise<T>
       status: res.status,
       error: typeof parsed.error === 'string' ? parsed.error : undefined,
       message: typeof parsed.message === 'string' ? parsed.message : undefined,
+      correlationId:
+        typeof parsed.correlationId === 'string'
+          ? parsed.correlationId
+          : (res.headers.get('x-correlation-id') ?? undefined),
     });
   }
   return parsed as T;
@@ -41,7 +46,11 @@ export interface Tenant {
   id: string;
   name: string;
   slug: string;
+  /** Primary extension context: the default PBX routing scope on this instance. */
   asterisk_context: string;
+  additional_contexts: string[];
+  /** Shared carrier ingress context holding this tenant's managed DID routes. */
+  did_context: string | null;
   caller_id_name: string | null;
   caller_id_number: string | null;
   enabled: boolean;
@@ -68,38 +77,111 @@ export interface DirectoryUser {
   lastLoginAt?: string | null;
 }
 
+export type ApplyState = 'committed' | 'active' | 'unknown';
 export interface Extension {
   id: string;
-  extension_number: string;
-  display_name: string;
-  identity_user_id: number | null;
-  caller_id_name: string | null;
-  caller_id_number: string | null;
-  provisioning_profile?: string | null;
-  provisioning_mac: string | null;
-  device_credential_version: number;
-  enabled: boolean;
-  revision: number;
+  extension: string | null;
+  context: string;
+  callerId: string | null;
+  transport?: string | null;
+  aors?: string | null;
+  /** The endpoint has the managed Dial route in this context; imported endpoints do not. */
+  managed: boolean;
+  applyState: ApplyState;
 }
-
-export interface RingGroup {
+export interface QueueMember {
+  interface: string;
+  memberName: string | null;
+  penalty: number;
+  paused: boolean;
+}
+export const QUEUE_STRATEGIES = [
+  'ringall',
+  'leastrecent',
+  'fewestcalls',
+  'random',
+  'rrmemory',
+  'linear',
+  'wrandom',
+] as const;
+export type QueueStrategy = (typeof QUEUE_STRATEGIES)[number];
+export interface NativeQueue {
   id: string;
   name: string;
-  virtual_extension: string;
-  ring_timeout_seconds: number;
-  music_on_hold_class?: string | null;
-  caller_id_name?: string | null;
-  caller_id_number?: string | null;
-  enabled: boolean;
-  revision: number;
-  members: Array<{ extension_id: string }>;
+  strategy: string | null;
+  members: QueueMember[];
+  applyState: ApplyState;
+}
+/**
+ * Every inventory names its routing scope: the serving PBX instance and the
+ * extension context it describes, plus every context this tenant may select.
+ * The customer tenant is authorization only and never appears here.
+ */
+export interface NativeInventory {
+  source: 'asterisk';
+  pbxInstanceId: string;
+  context: string;
+  contexts: string[];
+  provisioningEnabled: boolean;
+}
+export interface ExtensionInventory extends NativeInventory {
+  extensions: Extension[];
+}
+export interface Handset {
+  id: string;
+  pbxInstanceId: string;
+  context: string;
+  endpointId: string;
+  extension: string | null;
+  label: string | null;
+  deviceModel?: string;
+  mac: string | null;
+  localIp: string;
+  publicIp: string;
+  attachedAt: string;
+  lastSeenAt: string;
+  appVersion: string;
+  revokedAt: string | null;
+}
+export interface QueueInventory extends NativeInventory {
+  queues: NativeQueue[];
+}
+export interface ContextInventory {
+  source: 'asterisk';
+  pbxInstanceId: string;
+  contexts: string[];
 }
 
 export interface TenantInput {
   name: string;
   slug: string;
   asteriskContext: string;
+  additionalContexts: string[];
+  didContext: string | null;
   enabled: boolean;
+}
+
+/** A persisted context/DID → assistant profile assignment; '' DID = context default. */
+export interface ProfileAssignment {
+  id: string;
+  pbxInstanceId: string;
+  context: string;
+  did: string;
+  profileId: string;
+  enabled: boolean;
+  revision: number;
+}
+export interface ProfileAssignmentInventory {
+  /** Null while OfficePulse cannot report the serving instance; saves are refused then. */
+  pbxInstanceId: string | null;
+  contexts: string[];
+  assignments: ProfileAssignment[];
+}
+export interface ProfileAssignmentInput {
+  context: string;
+  did: string | null;
+  profileId: string;
+  enabled?: boolean;
 }
 
 export interface AssistantProfile {
@@ -116,17 +198,38 @@ export interface AssistantProfile {
   revision: number;
 }
 
-export interface DidRoute {
-  id: string;
-  did_e164: string;
-  assistant_profile_id: string;
-  destination_type: 'EXTENSION' | 'RING_GROUP';
-  destination_extension_id: string | null;
-  destination_ring_group_id: string | null;
-  screening_enabled: boolean;
-  enabled: boolean;
-  revision: number;
-  fallbackPreview: string;
+export interface DidSchedule {
+  timeRange: string;
+  weekdays: string;
+  timezone: string;
+}
+export interface DidSettings {
+  queue: string;
+  ringsBeforeAi: number;
+  schedule?: DidSchedule;
+  livekitDestination?: string;
+}
+export type DidRoute =
+  | {
+      did: string;
+      managed: true;
+      queue: string;
+      ringsBeforeAi: number;
+      schedule?: DidSchedule;
+      livekitDestination: string;
+      ringTimeoutSeconds: number;
+      applyState: ApplyState;
+    }
+  | {
+      did: string;
+      managed: false;
+      availability: 'unconfigured' | 'manual' | 'unknown' | 'scope_missing';
+      applyState: 'unknown';
+    };
+export interface DidInventory extends NativeInventory {
+  didContext: string;
+  dids: DidRoute[];
+  numbers: TenantNumber[];
 }
 
 export interface Appearance {
@@ -138,37 +241,15 @@ export interface Appearance {
 }
 
 export interface ExtensionInput {
-  tenantId: string;
-  /** The one platform user who answers this extension, if any. */
-  identityUserId?: number | null;
-  extensionNumber: string;
+  extension: string;
   displayName: string;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  provisioningProfile?: string | null;
-  enabled: boolean;
+  callerIdNumber?: string;
+  context?: string;
 }
-
-export interface RingGroupInput {
-  tenantId: string;
-  name: string;
-  virtualExtension: string;
-  ringTimeoutSeconds: number;
-  memberExtensionIds: string[];
-  musicOnHoldClass?: string | null;
-  callerIdName?: string | null;
-  callerIdNumber?: string | null;
-  enabled: boolean;
-}
-
-export interface DidRouteInput {
-  tenantId: string;
-  didE164: string;
-  assistantProfileId: string;
-  destinationType: 'EXTENSION' | 'RING_GROUP';
-  destinationId: string;
-  screeningEnabled: boolean;
-  enabled: boolean;
+export interface MemberInput {
+  penalty: number;
+  paused: boolean;
+  context?: string;
 }
 
 export interface ProfileInput {
@@ -196,6 +277,14 @@ export interface TenantNumber {
   iVersion: number;
 }
 export type NumberInput = Omit<TenantNumber, 'iPhoneNumberId' | 'iTenantId' | 'iVersion'>;
+/**
+ * PBX paths under the tenant. A selected context travels as `?context=`; the
+ * server only honours one the tenant owns, so the default (none) is its
+ * primary context.
+ */
+function pbxPath(tenantId: string, path: string, context?: string) {
+  return `/admin/tenants/${encodeURIComponent(tenantId)}/${path}${context ? `?context=${encodeURIComponent(context)}` : ''}`;
+}
 export const adminApi = {
   listNumbers: (tenantId: string) =>
     call<{ numbers: TenantNumber[] }>(
@@ -252,42 +341,60 @@ export const adminApi = {
       enabled,
     }),
 
-  listExtensions: (tenantId: string) =>
-    call<{ extensions: Extension[] }>(`/admin/tenants/${tenantId}/extensions`, 'GET'),
-  createExtension: (input: ExtensionInput) =>
-    call<{
-      extension: Extension;
-      sipUsername?: string;
-      sipSecret?: string;
-      provisioning?: string;
-      message?: string;
-    }>('/admin/extensions', 'POST', input),
-  updateExtension: (extensionId: string, expectedRevision: number, input: ExtensionInput) =>
-    call<{ extension: Extension }>(`/admin/extensions/${extensionId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
-  rotateSecret: (extensionId: string, tenantId: string, reprovisionDevice: boolean) =>
-    call<{ sipSecret: string }>(`/admin/extensions/${extensionId}/rotate-secret`, 'POST', {
-      tenantId,
-      reprovisionDevice,
-    }),
-  issueEnrollment: (extensionId: string, tenantId: string) =>
-    call<{ enrollmentToken: string; expiresAt: string }>(
-      `/admin/extensions/${extensionId}/handset-enrollment`,
+  listPbxContexts: () => call<ContextInventory>('/admin/pbx/contexts', 'GET'),
+  listHandsets: (tenantId: string, context?: string) =>
+    call<{ handsets: Handset[] }>(pbxPath(tenantId, 'handsets', context), 'GET'),
+  revokeHandset: (tenantId: string, deviceId: string, context: string) =>
+    call<void>(pbxPath(tenantId, `handsets/${encodeURIComponent(deviceId)}`, context), 'DELETE'),
+  listExtensions: (tenantId: string, context?: string) =>
+    call<ExtensionInventory>(pbxPath(tenantId, 'extensions', context), 'GET'),
+  createExtension: (tenantId: string, input: ExtensionInput, context?: string) =>
+    call<{ extension: string; sipUsername: string; sipSecret: string; applyState: ApplyState }>(
+      pbxPath(tenantId, 'extensions', context),
       'POST',
-      { tenantId },
+      input,
     ),
-
-  listRingGroups: (tenantId: string) =>
-    call<{ ringGroups: RingGroup[] }>(`/admin/tenants/${tenantId}/ring-groups`, 'GET'),
-  createRingGroup: (input: RingGroupInput) =>
-    call<{ ringGroup: RingGroup }>('/admin/ring-groups', 'POST', input),
-  updateRingGroup: (ringGroupId: string, expectedRevision: number, input: RingGroupInput) =>
-    call<{ ringGroup: RingGroup }>(`/admin/ring-groups/${ringGroupId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
+  deleteExtension: (tenantId: string, extension: string, context?: string) =>
+    call<void>(pbxPath(tenantId, `extensions/${encodeURIComponent(extension)}`, context), 'DELETE'),
+  listQueues: (tenantId: string, context?: string) =>
+    call<QueueInventory>(pbxPath(tenantId, 'queues', context), 'GET'),
+  createQueue: (
+    tenantId: string,
+    input: { name: string; strategy: QueueStrategy },
+    context?: string,
+  ) =>
+    call<{ name: string; strategy: QueueStrategy; applyState: ApplyState }>(
+      pbxPath(tenantId, 'queues', context),
+      'POST',
+      input,
+    ),
+  deleteQueue: (tenantId: string, queue: string, context?: string) =>
+    call<void>(pbxPath(tenantId, `queues/${encodeURIComponent(queue)}`, context), 'DELETE'),
+  setQueueMember: (
+    tenantId: string,
+    queue: string,
+    extension: string,
+    input: MemberInput,
+    context?: string,
+  ) =>
+    call<{ applyState: ApplyState }>(
+      pbxPath(
+        tenantId,
+        `queues/${encodeURIComponent(queue)}/members/${encodeURIComponent(extension)}`,
+        context,
+      ),
+      'PUT',
+      input,
+    ),
+  deleteQueueMember: (tenantId: string, queue: string, extension: string, context?: string) =>
+    call<void>(
+      pbxPath(
+        tenantId,
+        `queues/${encodeURIComponent(queue)}/members/${encodeURIComponent(extension)}`,
+        context,
+      ),
+      'DELETE',
+    ),
 
   listProfiles: (tenantId: string) =>
     call<{ profiles: AssistantProfile[] }>(`/admin/tenants/${tenantId}/profiles`, 'GET'),
@@ -299,15 +406,27 @@ export const adminApi = {
       expectedRevision,
     }),
 
-  listDidRoutes: (tenantId: string) =>
-    call<{ didRoutes: DidRoute[] }>(`/admin/tenants/${tenantId}/did-routes`, 'GET'),
-  createDidRoute: (input: DidRouteInput) =>
-    call<{ didRoute: DidRoute }>('/admin/did-routes', 'POST', input),
-  updateDidRoute: (didRouteId: string, expectedRevision: number, input: DidRouteInput) =>
-    call<{ didRoute: DidRoute }>(`/admin/did-routes/${didRouteId}`, 'PUT', {
-      ...input,
-      expectedRevision,
-    }),
+  listDidRoutes: (tenantId: string, context?: string) =>
+    call<DidInventory>(pbxPath(tenantId, 'did-routes', context), 'GET'),
+  saveDidRoute: (tenantId: string, did: string, input: DidSettings, context?: string) =>
+    call<{ did: string; ringTimeoutSeconds: number; applyState: ApplyState }>(
+      pbxPath(tenantId, `did-routes/${encodeURIComponent(did)}`, context),
+      'PUT',
+      input,
+    ),
+  deleteDidRoute: (tenantId: string, did: string, context?: string) =>
+    call<void>(pbxPath(tenantId, `did-routes/${encodeURIComponent(did)}`, context), 'DELETE'),
+
+  listProfileAssignments: (tenantId: string) =>
+    call<ProfileAssignmentInventory>(pbxPath(tenantId, 'profile-assignments'), 'GET'),
+  saveProfileAssignment: (tenantId: string, input: ProfileAssignmentInput) =>
+    call<{ pbxInstanceId: string; assignment: ProfileAssignment }>(
+      pbxPath(tenantId, 'profile-assignments'),
+      'PUT',
+      input,
+    ),
+  deleteProfileAssignment: (tenantId: string, id: string) =>
+    call<void>(pbxPath(tenantId, `profile-assignments/${encodeURIComponent(id)}`), 'DELETE'),
 
   getAppearance: (tenantId: string) =>
     call<{ appearance: Appearance | null }>(`/admin/tenants/${tenantId}/appearance`, 'GET'),

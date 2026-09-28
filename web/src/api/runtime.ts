@@ -64,7 +64,7 @@ export interface RuntimeCall {
   };
   roomName: string | null;
   agentParticipantSid: string | null;
-  destinationType: 'EXTENSION' | 'RING_GROUP' | null;
+  destinationType: string | null;
   destinationId: string | null;
   disposition: string;
   state: string;
@@ -122,31 +122,12 @@ export interface LiveReadiness {
   >;
 }
 
-export interface ProvisioningOperation {
-  requestId: string;
-  kind: string;
-  externalId: string;
-  action: string;
-  status: string;
-  createdAt: string;
-}
-
 export interface WebhookDelivery {
   source: string;
   deliveryId: string;
   eventType: string;
   callSessionId: string | null;
   receivedAt: string;
-}
-
-export interface DidFallback {
-  didRouteId: string;
-  tenantId: string;
-  didE164: string;
-  destinationType: 'EXTENSION' | 'RING_GROUP';
-  destinationId: string;
-  enabled: boolean;
-  updatedAt: string;
 }
 
 export interface Issues {
@@ -167,7 +148,20 @@ export type CallListState = 'active' | 'recent' | 'orphaned' | 'all';
 
 const tenantQuery = (tenant?: string) => (tenant ? `&tenant=${encodeURIComponent(tenant)}` : '');
 
+export interface ObservationStatus {
+  observerConfigured: boolean;
+  admissionReady: boolean | null;
+  livekitReady: boolean | null;
+}
+
 export const runtimeApi = {
+  observationStatus: () => call<ObservationStatus>('/runtime/observation-status', 'GET'),
+  observe: (id: string) =>
+    call<{ url: string; token: string; expiresIn: number; agentParticipantSid: string }>(
+      `/runtime/calls/${encodeURIComponent(id)}/observer`,
+      'POST',
+      {},
+    ),
   listCalls: (state: CallListState, tenant?: string) =>
     call<{ calls: RuntimeCall[] }>(`/runtime/calls?state=${state}${tenantQuery(tenant)}`, 'GET'),
   getCall: (callSessionId: string, tenant?: string) =>
@@ -199,20 +193,7 @@ export const runtimeApi = {
       'GET',
     ),
   testDependencies: () => call<{ live: LiveReadiness }>('/runtime/dependencies/test', 'POST', {}),
-  provisioning: (tenant?: string) =>
-    call<{ operations: ProvisioningOperation[] }>(
-      `/runtime/provisioning?x=1${tenantQuery(tenant)}`,
-      'GET',
-    ),
-  retryProvisioning: (kind: 'EXTENSION' | 'RING_GROUP' | 'DID', externalId: string) =>
-    call<{ retried: { kind: string; externalId: string; tenantId: string } }>(
-      '/runtime/provisioning/retry',
-      'POST',
-      { kind, externalId },
-    ),
   webhooks: () => call<{ deliveries: WebhookDelivery[] }>('/runtime/webhooks', 'GET'),
-  fallbacks: (tenant?: string) =>
-    call<{ fallbacks: DidFallback[] }>(`/runtime/fallbacks?x=1${tenantQuery(tenant)}`, 'GET'),
   orphans: () =>
     call<{ orphans: Array<{ call: RuntimeCall; participantsPresent: RuntimeParticipant[] }> }>(
       '/runtime/orphans',

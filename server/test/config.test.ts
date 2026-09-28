@@ -23,7 +23,10 @@ describe('loadConfig', () => {
     expect(config.missingServiceConfig).toEqual(
       SERVICE_ENV_VARS.filter(
         (name) =>
-          !['ID_CLIENT_SECRET', 'ID_PUBLIC_BASE_URL', 'HANDSET_PROVISIONING_URL'].includes(name),
+          !name.startsWith('LIVEKIT_') &&
+          !['ID_CLIENT_SECRET', 'ID_PUBLIC_BASE_URL', 'OFFICEPULSE_PROVISIONING_BASE_URL'].includes(
+            name,
+          ),
       ),
     );
   });
@@ -36,7 +39,7 @@ describe('loadConfig', () => {
   it('fails production startup naming missing variables without values', () => {
     const env = fullProductionEnv();
     delete env.NOCODB_API_TOKEN;
-    delete env.ID_TRUSTED_APP_CIDRS;
+    delete env.trustedCIDR;
     let message = '';
     try {
       loadConfig(env);
@@ -45,7 +48,7 @@ describe('loadConfig', () => {
       message = (err as Error).message;
     }
     expect(message).toContain('NOCODB_API_TOKEN');
-    expect(message).toContain('ID_TRUSTED_APP_CIDRS');
+    expect(message).toContain('trustedCIDR');
     // Names only: no configured value may leak into the error.
     expect(message).not.toContain('value-for-');
   });
@@ -81,8 +84,8 @@ describe('loadConfig', () => {
 
   it('rejects production CIDR allowlists that are malformed', () => {
     const env = fullProductionEnv();
-    env.ID_EVENT_SOURCE_CIDRS = 'not-a-cidr';
-    expect(() => loadConfig(env)).toThrowError(/ID_EVENT_SOURCE_CIDRS/);
+    env.trustedCIDR = 'not-a-cidr';
+    expect(() => loadConfig(env)).toThrowError(/trustedCIDR/);
   });
 
   it('rejects production CIDR allowlists that are effectively empty', () => {
@@ -90,4 +93,14 @@ describe('loadConfig', () => {
     env.ID_TRUSTED_PROXY_CIDRS = ' , ';
     expect(() => loadConfig(env)).toThrowError(/ID_TRUSTED_PROXY_CIDRS/);
   });
+});
+
+it('accepts canonical OfficePulse URL while preserving the existing server-only setting', () => {
+  expect(
+    loadConfig({
+      NODE_ENV: 'test',
+      OFFICEPULSE_API_BASE_URL: 'https://pbx.test',
+      OFFICEPULSE_PROVISIONING_BASE_URL: 'https://old.test',
+    }).serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL,
+  ).toBe('https://pbx.test');
 });

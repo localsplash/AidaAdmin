@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
  * Deployed smoke test against a REAL OfficePulse runtime database and API
  * (issue #29's last definition-of-done item). It drives an already-running,
  * non-production AidaAdmin that has E2E_FAKE_SESSION=true and both
- * OFFICEPULSE_RUNTIME_DATABASE_URL and OFFICEPULSE_PROVISIONING_BASE_URL
+ * OFFICEPULSE_RUNTIME_DATABASE_URL and OFFICEPULSE_API_BASE_URL
  * pointed at the live services:
  *
  *   E2E_RUNTIME_URL=https://aida-admin.staging.example npm run test:e2e -- runtime
@@ -18,7 +18,7 @@ test.skip(!target, 'set E2E_RUNTIME_URL to a deployed non-production AidaAdmin')
 
 test('reads dependency status from the real aidacalls_db database', async ({ page }) => {
   await page.goto(`${target}/runtime`);
-  await expect(page.getByRole('heading', { name: /^runtime$/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /^call history$/i })).toBeVisible();
   await page.getByRole('tab', { name: /dependencies/i }).click();
   const table = page.getByRole('table', { name: /dependency status/i });
   await expect(table).toBeVisible();
@@ -37,6 +37,6 @@ test('probes the real OfficePulse /readyz through the explicit test action', asy
 test('lists calls without leaking another tenant (Super Admin, all tenants)', async ({ page }) => {
   await page.goto(`${target}/runtime`);
   await expect(page.getByRole('tab', { name: /^calls$/i })).toBeVisible();
-  await page.getByLabel(/^show$/i).selectOption('all');
+  await expect(page.getByLabel('Tenant id (or all)')).toHaveValue('all');
   await expect(page.getByText(/no calls match|call sessions/i).first()).toBeVisible();
 });

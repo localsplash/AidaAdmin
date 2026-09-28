@@ -11,8 +11,8 @@ describe('call state reducer (OfficePulse vocabulary)', () => {
   it('follows a screened call through takeover to hangup', () => {
     let view = emptyCallView('c1');
     view = reduceEvent(view, ev(1, 'bootstrapped', { profileId: 'p1', profileRevision: 2 }));
-    expect(view.phase).toBe('screening');
-    expect(view.aidaPresent).toBe(true);
+    expect(view.phase).toBe('bootstrapping');
+    expect(view.aidaPresent).toBe(false);
     expect(view.timeline[0]!.detail).toBe('profile p1 rev 2');
 
     view = reduceEvents(view, [
@@ -34,7 +34,7 @@ describe('call state reducer (OfficePulse vocabulary)', () => {
 
   it('records why a takeover failed and leaves the caller with Aida', () => {
     const view = reduceEvents(emptyCallView('c1'), [
-      ev(1, 'bootstrapped'),
+      ev(1, 'aida-connected'),
       ev(2, 'ringing'),
       ev(3, 'takeover-failed', { reason: 'no-answer' }),
     ]);
@@ -83,7 +83,7 @@ describe('call state reducer (OfficePulse vocabulary)', () => {
       ev(2, 'livekit.participant_joined'),
       ev(3, 'something-new'),
     ]);
-    expect(view.phase).toBe('screening');
+    expect(view.phase).toBe('bootstrapping');
     expect(view.highestSequence).toBe(3);
     expect(reduceEvent(view, ev(4, 'livekit.room_finished')).phase).toBe('ended');
   });

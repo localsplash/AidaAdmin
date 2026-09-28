@@ -1,3 +1,4 @@
+import './timezone.js';
 import { createApp } from './app.js';
 import { ConfigError } from './config.js';
 import { loadPlatformConfig } from './platform-config.js';

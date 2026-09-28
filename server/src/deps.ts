@@ -1,3 +1,4 @@
+import { observerIssuer, type ObserverIssuer } from './runtime/observer.js';
 import type { Pool } from 'mysql2/promise';
 import {
   MemoryAuthDb,
@@ -22,15 +23,14 @@ import { MemoryIdentityEventStore, type IdentityEventStore } from './id/event-st
 import { HttpNocoDbApi } from './nocodb/api.js';
 import { CachedBaseResolver, resolveBaseId } from './nocodb/base.js';
 import { reportDrift } from './nocodb/schema.js';
-import { createRepos, NocoStore, type AidaConfigRepos } from './nocodb/repos.js';
+import { createRepos, NocoStore, type AidaConfigRepos, type AuditLog } from './nocodb/repos.js';
 import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
 import { MysqlRuntimeReader, parseMysqlUrl, type RuntimeReader } from './officepulse/runtime-db.js';
-import {
-  HttpHandsetProvisioningDelivery,
-  type HandsetProvisioningDelivery,
-} from './provisioning/handset-delivery.js';
 
 export interface AppDeps {
+  observerIssuer?: ObserverIssuer | null;
+  /** PBX auditing does not require a NocoDB configuration base. */
+  audit?: AuditLog | null;
   idClient: IdClient | null;
   sessionStore: SessionRepository;
   stateStore: AuthStateRepository;
@@ -42,7 +42,6 @@ export interface AppDeps {
   baseResolver: CachedBaseResolver | null;
   officePulse: OfficePulseClient | null;
   runtimeReader: RuntimeReader | null;
-  handsetDelivery: HandsetProvisioningDelivery | null;
   pool: Pool | null;
   dbReady: () => Promise<boolean>;
   configReady?: () => Promise<boolean>;
@@ -85,12 +84,13 @@ export function createDeps(config: AppConfig): AppDeps {
   const databaseUrl = config.serviceConfig.AIDA_ADMIN_DATABASE_URL;
   const pool = databaseUrl ? createPool(databaseUrl) : null;
   const nocodb = nocodbFromConfig(config, idClient, pool);
-  const officePulseBase = config.serviceConfig.OFFICEPULSE_PROVISIONING_BASE_URL;
-  const handsetUrl = config.serviceConfig.HANDSET_PROVISIONING_URL;
+  const officePulseBase = config.serviceConfig.OFFICEPULSE_API_BASE_URL;
   const runtimeUrl = config.serviceConfig.OFFICEPULSE_RUNTIME_DATABASE_URL;
   const memoryDb = new MemoryAuthDb();
   return {
     idClient,
+    observerIssuer: observerIssuer(config.serviceConfig),
+    audit: pool ? new MysqlAuditLog(pool) : null,
     // Memory sessions exist only in credential-free tests; configuring Identity
     // always selects centralized sessions, regardless of the local SQL store.
     sessionStore: idClient
@@ -104,7 +104,6 @@ export function createDeps(config: AppConfig): AppDeps {
     baseResolver: nocodb?.baseResolver ?? null,
     officePulse: officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null,
     runtimeReader: runtimeUrl ? new MysqlRuntimeReader(parseMysqlUrl(runtimeUrl)) : null,
-    handsetDelivery: handsetUrl ? new HttpHandsetProvisioningDelivery(handsetUrl) : null,
     pool,
     dbReady: pool ? () => ping(pool) : async () => true,
     configReady: nocodb

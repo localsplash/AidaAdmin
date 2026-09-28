@@ -9,12 +9,12 @@ import {
 } from './components/StatusScreens';
 import { TenantPage } from './components/TenantPage';
 import { TenantContextBanner } from './components/TenantContextBanner';
+import { EnvironmentNotice } from './components/EnvironmentNotice';
 import { AppearanceScreen } from './screens/AppearanceScreen';
 import { OperationsScreen } from './screens/OperationsScreen';
-import { DidRoutesScreen } from './screens/DidRoutesScreen';
 import { ExtensionsScreen } from './screens/ExtensionsScreen';
 import { ProfilesScreen } from './screens/ProfilesScreen';
-import { RingGroupsScreen } from './screens/RingGroupsScreen';
+import { QueuesScreen } from './screens/QueuesScreen';
 import { RuntimeScreen } from './screens/RuntimeScreen';
 import { CallDetailScreen } from './screens/CallDetailScreen';
 import { TenantsScreen } from './screens/TenantsScreen';
@@ -25,9 +25,8 @@ const TENANT_SCREENS = [
   { path: 'users', label: 'Users' },
   { path: 'numbers', label: 'Numbers' },
   { path: 'extensions', label: 'Extensions' },
-  { path: 'ring-groups', label: 'Ring groups' },
+  { path: 'queues', label: 'Queues' },
   { path: 'profiles', label: 'Profiles' },
-  { path: 'did-routes', label: 'DID routes' },
   { path: 'appearance', label: 'Appearance' },
 ] as const;
 
@@ -104,9 +103,9 @@ function AuthenticatedShell({
             Dashboard
           </NavLink>
           {session.user.superAdmin ? <NavLink to="/tenants">Tenants</NavLink> : null}
-          {session.selectedTenant ? <NavLink to="/operations">Live operations</NavLink> : null}
+          {session.selectedTenant ? <NavLink to="/operations">LIVE</NavLink> : null}
           {session.user.superAdmin || session.selectedTenant?.role === 'TENANT_ADMIN' ? (
-            <NavLink to="/runtime">Runtime</NavLink>
+            <NavLink to="/runtime">Call History</NavLink>
           ) : null}
         </nav>
         <span className="app-user">{session.user.displayName ?? session.user.email ?? 'User'}</span>
@@ -114,6 +113,7 @@ function AuthenticatedShell({
           Sign out
         </button>
       </header>
+      <EnvironmentNotice />
       <TenantContextBanner session={session} onTenantChanged={onSessionChanged} />
       {session.selectedTenant ? (
         <nav className="tenant-navigation" aria-label="Tenant management">
@@ -151,10 +151,10 @@ function AuthenticatedShell({
             }
           />
           <Route
-            path="/tenants/:tenantId/ring-groups"
+            path="/tenants/:tenantId/queues"
             element={
               <TenantPage session={session} onChanged={onSessionChanged}>
-                <RingGroupsScreen />
+                <QueuesScreen />
               </TenantPage>
             }
           />
@@ -175,14 +175,6 @@ function AuthenticatedShell({
             }
           />
           <Route
-            path="/tenants/:tenantId/did-routes"
-            element={
-              <TenantPage session={session} onChanged={onSessionChanged}>
-                <DidRoutesScreen />
-              </TenantPage>
-            }
-          />
-          <Route
             path="/tenants/:tenantId/appearance"
             element={
               <TenantPage session={session} onChanged={onSessionChanged}>
@@ -192,6 +184,7 @@ function AuthenticatedShell({
           />
           <Route path="/operations" element={<OperationsScreen />} />
           <Route path="/runtime" element={<RuntimeScreen session={session} />} />
+          <Route path="/runtime/calls" element={<RuntimeScreen session={session} />} />
           <Route path="/runtime/calls/:callSessionId" element={<CallDetailScreen />} />
           <Route path="/forbidden" element={<ForbiddenScreen />} />
           <Route path="*" element={<NotFoundScreen />} />

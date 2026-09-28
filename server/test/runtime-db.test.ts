@@ -65,15 +65,14 @@ describe('MysqlRuntimeReader', () => {
     await reader.listControlCommands('call-1');
     await reader.listParticipants('call-1');
     await reader.listWebhookDeliveries(20);
-    await reader.listProvisioningOperations();
     await reader.listDependencyStatus();
-    await reader.listDidFallbacks('ten-1');
     await reader.listFailedCommands(24, 'ten-1');
     await reader.listEventsOfType(['fallback', 'takeover-failed'], 24, 'ten-1');
     await reader.ping();
 
     const all = statements();
-    expect(all.length).toBeGreaterThanOrEqual(14);
+    expect(all.length).toBeGreaterThanOrEqual(12);
+    expect(all.some(({ sql }) => /provisioning_operation|did_fallback/.test(sql))).toBe(false);
     for (const { sql } of all) {
       expect(sql.trimStart()).toMatch(/^SELECT /);
       expect(sql).not.toMatch(/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)\b/i);

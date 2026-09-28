@@ -17,7 +17,12 @@ export function resolveSettings(env: NodeJS.ProcessEnv, rows: NocoRecord[]): Nod
     indexed.set(index, String(row.settingValue ?? ''));
   }
   const resolved: NodeJS.ProcessEnv = { ...env };
-  const keys = [...SERVICE_ENV_VARS, 'ID_REGISTER_WEBHOOK', 'ASSET_STORAGE_DIR'];
+  const keys = [
+    ...SERVICE_ENV_VARS,
+    'ID_REGISTER_WEBHOOK',
+    'ASSET_STORAGE_DIR',
+    'ENVIRONMENT_NAME',
+  ];
   for (const key of keys) {
     if (env[key]?.trim()) continue;
     for (const scope of SCOPES) {
@@ -28,7 +33,8 @@ export function resolveSettings(env: NodeJS.ProcessEnv, rows: NocoRecord[]): Nod
       }
     }
   }
-  // The public platform domain is deliberately shared; trust contexts are not.
+  // The platform's own keys are read under their platform names: trustedCIDR
+  // as itself (it is in SERVICE_ENV_VARS), PARENT_DOMAIN as ID_PARENT_DOMAIN.
   if (!resolved.ID_PARENT_DOMAIN?.trim()) {
     for (const scope of SCOPES) {
       const value = indexed.get(`${scope}:PARENT_DOMAIN`);

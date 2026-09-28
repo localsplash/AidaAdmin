@@ -2,11 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   runtimeApi,
-  type CallListState,
   type DependencyRecord,
-  type DidFallback,
   type LiveReadiness,
-  type ProvisioningOperation,
   type RuntimeCall,
   type RuntimeParticipant,
   type WebhookDelivery,
@@ -14,16 +11,15 @@ import {
 import type { SessionView } from '../api/session';
 import { RuntimeErrorNotice } from '../components/RuntimeError';
 
-type Section = 'calls' | 'dependencies' | 'provisioning' | 'fallbacks' | 'webhooks' | 'orphans';
+type Section = 'calls' | 'issues' | 'dependencies' | 'webhooks' | 'orphans';
 
 /** Sections a tenant administrator can use; the rest are Super Admin. */
-const TENANT_SECTIONS: Section[] = ['calls', 'provisioning', 'fallbacks'];
+const TENANT_SECTIONS: Section[] = ['calls', 'issues'];
 
 const SECTION_LABEL: Record<Section, string> = {
   calls: 'Calls',
+  issues: 'Operational errors',
   dependencies: 'Dependencies',
-  provisioning: 'Provisioning',
-  fallbacks: 'DID fail-safes',
   webhooks: 'Webhook deliveries',
   orphans: 'Orphaned calls',
 };
@@ -51,33 +47,20 @@ function useSection<T>(load: () => Promise<T>, deps: unknown[]) {
 }
 
 function CallsSection({ superAdmin }: { superAdmin: boolean }) {
-  const [state, setState] = useState<CallListState>('active');
   const [tenant, setTenant] = useState<string>(superAdmin ? 'all' : '');
   const calls = useSection(
-    () => runtimeApi.listCalls(state, superAdmin ? tenant || undefined : undefined),
-    [state, tenant, superAdmin],
+    () => runtimeApi.listCalls('recent', superAdmin ? tenant || undefined : undefined),
+    [tenant, superAdmin],
   );
   return (
     <>
       <form onSubmit={(e) => e.preventDefault()}>
-        <label>
-          Show
-          <select value={state} onChange={(e) => setState(e.target.value as CallListState)}>
-            <option value="active">Active</option>
-            <option value="recent">Recent (ended)</option>
-            {superAdmin ? <option value="orphaned">Orphaned</option> : null}
-            {superAdmin ? <option value="all">All</option> : null}
-          </select>
-        </label>
         {superAdmin ? (
           <label>
             Tenant id (or all)
             <input value={tenant} onChange={(e) => setTenant(e.target.value)} />
           </label>
         ) : null}
-        <button type="button" onClick={calls.refresh}>
-          Refresh
-        </button>
       </form>
       {calls.error ? <RuntimeErrorNotice error={calls.error} /> : null}
       {calls.data === null ? (
@@ -125,6 +108,49 @@ function CallsTable({ calls }: { calls: RuntimeCall[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function IssuesSection() {
+  const issues = useSection(() => runtimeApi.issues(), []);
+  return (
+    <>
+      <button type="button" onClick={issues.refresh}>
+        Refresh
+      </button>
+      {issues.error ? <RuntimeErrorNotice error={issues.error} /> : null}
+      {!issues.data ? (
+        <p role="status">{issues.loading ? 'Loading…' : ''}</p>
+      ) : (
+        <>
+          <p>Operational errors in the last {issues.data.windowHours} hours.</p>
+          {issues.data.failedCommands.length === 0 && issues.data.events.length === 0 ? (
+            <p>No operational errors.</p>
+          ) : (
+            <ul>
+              {issues.data.failedCommands.map((command) => (
+                <li key={`command-${command.callSessionId}-${command.idempotencyKey}`}>
+                  {command.createdAt} — takeover failed on{' '}
+                  <Link to={`/runtime/calls/${encodeURIComponent(command.callSessionId)}`}>
+                    {command.callSessionId}
+                  </Link>
+                  {typeof command.result?.error === 'string' ? `: ${command.result.error}` : ''}
+                </li>
+              ))}
+              {issues.data.events.map((event) => (
+                <li key={`event-${event.callSessionId}-${event.sequenceNumber}`}>
+                  {event.createdAt} — {event.eventType} on{' '}
+                  <Link to={`/runtime/calls/${encodeURIComponent(event.callSessionId)}`}>
+                    {event.callSessionId}
+                  </Link>
+                  {typeof event.payload?.reason === 'string' ? `: ${event.payload.reason}` : ''}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </>
   );
 }
 
@@ -216,128 +242,6 @@ function DependencyTable({
         </tbody>
       </table>
     </>
-  );
-}
-
-function ProvisioningSection() {
-  const ops = useSection(() => runtimeApi.provisioning(), []);
-  const [status, setStatus] = useState<string | null>(null);
-  const [retryError, setRetryError] = useState<unknown>(null);
-
-  const retry = async (op: ProvisioningOperation) => {
-    const kind = op.kind as 'EXTENSION' | 'RING_GROUP' | 'DID';
-    setRetryError(null);
-    try {
-      await runtimeApi.retryProvisioning(kind, op.externalId);
-      setStatus(`Re-issued ${kind} provisioning for ${op.externalId}`);
-      ops.refresh();
-    } catch (err) {
-      setRetryError(err);
-    }
-  };
-
-  return (
-    <>
-      <p>
-        OfficePulse's provisioning record (idempotent by request id). Retrying re-issues the same
-        update; a lost SIP secret is never re-served — rotate it explicitly instead.
-      </p>
-      {status ? <p role="status">{status}</p> : null}
-      {ops.error ? <RuntimeErrorNotice error={ops.error} /> : null}
-      {retryError ? <RuntimeErrorNotice error={retryError} /> : null}
-      {ops.data ? (
-        ops.data.operations.length === 0 ? (
-          <p>No provisioning operations recorded.</p>
-        ) : (
-          <table>
-            <caption className="visually-hidden">Provisioning operations</caption>
-            <thead>
-              <tr>
-                <th scope="col">When</th>
-                <th scope="col">Kind</th>
-                <th scope="col">Record</th>
-                <th scope="col">Action</th>
-                <th scope="col">Status</th>
-                <th scope="col">Retry</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ops.data.operations.map((op) => (
-                <tr key={op.requestId}>
-                  <td>{op.createdAt}</td>
-                  <td>{op.kind}</td>
-                  <td>
-                    <code>{op.externalId}</code>
-                  </td>
-                  <td>{op.action}</td>
-                  <td>{op.status}</td>
-                  <td>
-                    {['EXTENSION', 'RING_GROUP', 'DID'].includes(op.kind) ? (
-                      <button type="button" onClick={() => void retry(op)}>
-                        Retry {op.kind.toLowerCase()}
-                      </button>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )
-      ) : null}
-    </>
-  );
-}
-
-function FallbacksSection() {
-  const fallbacks = useSection(() => runtimeApi.fallbacks(), []);
-  return (
-    <>
-      <p>
-        Where each DID's caller goes when NocoDB or LiveKit is unavailable — projected by
-        OfficePulse when the DID route was provisioned. A DID missing here has no local fail-safe:
-        save its route again to project one.
-      </p>
-      {fallbacks.error ? <RuntimeErrorNotice error={fallbacks.error} /> : null}
-      {fallbacks.data ? (
-        fallbacks.data.fallbacks.length === 0 ? (
-          <p>No DID fail-safes projected.</p>
-        ) : (
-          <FallbackTable rows={fallbacks.data.fallbacks} />
-        )
-      ) : null}
-    </>
-  );
-}
-
-function FallbackTable({ rows }: { rows: DidFallback[] }) {
-  return (
-    <table>
-      <caption className="visually-hidden">DID fail-safe destinations</caption>
-      <thead>
-        <tr>
-          <th scope="col">DID</th>
-          <th scope="col">Tenant</th>
-          <th scope="col">Destination</th>
-          <th scope="col">Enabled</th>
-          <th scope="col">Updated</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((f) => (
-          <tr key={f.didRouteId}>
-            <td>{f.didE164}</td>
-            <td>{f.tenantId}</td>
-            <td>
-              {f.destinationType} <code>{f.destinationId}</code>
-            </td>
-            <td>{f.enabled ? 'yes' : 'no'}</td>
-            <td>{f.updatedAt}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
   );
 }
 
@@ -435,18 +339,18 @@ function OrphansSection() {
 export function RuntimeScreen({ session }: { session: SessionView }) {
   const superAdmin = session.user.superAdmin;
   const sections: Section[] = superAdmin
-    ? ['calls', 'dependencies', 'provisioning', 'fallbacks', 'webhooks', 'orphans']
+    ? ['calls', 'issues', 'dependencies', 'webhooks', 'orphans']
     : TENANT_SECTIONS;
   const [section, setSection] = useState<Section>('calls');
 
   return (
     <section aria-labelledby="runtime-heading">
-      <h1 id="runtime-heading">Runtime</h1>
+      <h1 id="runtime-heading">Call History</h1>
       <p>
-        OfficePulse's runtime record, read through a read-only account. Commands go to OfficePulse's
-        API and are audited.
+        Review ended calls, their timelines and outcomes.{' '}
+        <Link to="/operations">View live calls</Link>.
       </p>
-      <div role="tablist" aria-label="Runtime sections" className="call-tabs">
+      <div role="tablist" aria-label="Call History sections" className="call-tabs">
         {sections.map((s) => (
           <button
             key={s}
@@ -463,9 +367,8 @@ export function RuntimeScreen({ session }: { session: SessionView }) {
       <div role="tabpanel" id="runtime-panel" aria-labelledby={`runtime-tab-${section}`}>
         <h2>{SECTION_LABEL[section]}</h2>
         {section === 'calls' ? <CallsSection superAdmin={superAdmin} /> : null}
+        {section === 'issues' ? <IssuesSection /> : null}
         {section === 'dependencies' ? <DependenciesSection /> : null}
-        {section === 'provisioning' ? <ProvisioningSection /> : null}
-        {section === 'fallbacks' ? <FallbacksSection /> : null}
         {section === 'webhooks' ? <WebhooksSection /> : null}
         {section === 'orphans' ? <OrphansSection /> : null}
       </div>

@@ -2,7 +2,7 @@ import { identityActor } from './context.js';
 /**
  * Server-to-server client for the `id` identity service (normative
  * specification §2.1). Trust is TLS plus source-IPv4 allowlisting enforced by
- * `id` (ID_TRUSTED_APP_CIDRS); there is deliberately no ID_CLIENT_SECRET,
+ * `id` (its `trustedCIDR` row); there is deliberately no ID_CLIENT_SECRET,
  * webhook HMAC, or password handling in this repository.
  */
 

@@ -26,6 +26,10 @@ const envSchema = z.object({
   ID_REGISTER_WEBHOOK: envBool,
   /** Where validated appearance assets (logos) are stored and served from. */
   ASSET_STORAGE_DIR: z.string().default('data/assets'),
+  ENVIRONMENT_NAME: z.preprocess(
+    (value) => (typeof value === 'string' ? value.trim() || undefined : value),
+    z.enum(['dev', 'staging', 'prod']).optional(),
+  ),
 });
 
 /**
@@ -40,31 +44,35 @@ const envSchema = z.object({
  * same private HTTP API that handles provisioning.
  */
 export const SERVICE_ENV_VARS = [
+  'LIVEKIT_URL',
+  'LIVEKIT_API_KEY',
+  'LIVEKIT_API_SECRET',
   'PUBLIC_BASE_URL',
   'SESSION_SECRET',
   'AIDA_ADMIN_DATABASE_URL',
   'ID_BASE_URL',
   'ID_PUBLIC_BASE_URL',
   'ID_CLIENT_SECRET',
-  'ID_TRUSTED_APP_CIDRS',
-  'ID_EVENT_SOURCE_CIDRS',
+  // The platform-wide `trustedCIDR` row (app=*): the networks the platform's
+  // own servers sit on, which is who may deliver /id/events.
+  'trustedCIDR',
   'ID_TRUSTED_PROXY_CIDRS',
   'ID_PARENT_DOMAIN',
   'NOCODB_BASE_URL',
   'NOCODB_API_TOKEN',
+  'OFFICEPULSE_API_BASE_URL',
   'OFFICEPULSE_PROVISIONING_BASE_URL',
   'OFFICEPULSE_RUNTIME_DATABASE_URL',
-  'HANDSET_PROVISIONING_URL',
 ] as const;
 
 export type ServiceEnvVar = (typeof SERVICE_ENV_VARS)[number];
 
-/** CIDR allowlists that must be present and non-empty in production. */
-export const REQUIRED_CIDR_VARS = [
-  'ID_TRUSTED_APP_CIDRS',
-  'ID_EVENT_SOURCE_CIDRS',
-  'ID_TRUSTED_PROXY_CIDRS',
-] as const;
+/**
+ * CIDR allowlists that must be present and non-empty in production: the
+ * platform's trusted network, and the reverse proxies whose X-Forwarded-For
+ * is believed when resolving a client against it.
+ */
+export const REQUIRED_CIDR_VARS = ['trustedCIDR', 'ID_TRUSTED_PROXY_CIDRS'] as const;
 
 const CIDR_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
 
@@ -83,6 +91,7 @@ export interface AppConfig {
   e2eFakeSession: boolean;
   idRegisterWebhook: boolean;
   assetStorageDir: string;
+  environmentName: string | null;
   /** Service variables present in the environment; values stay out of this object except where a later phase needs them. */
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
   /** Names (never values) of service variables absent from the environment. */
@@ -101,12 +110,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const serviceConfig: Partial<Record<ServiceEnvVar, string>> = {};
   const missingServiceConfig: ServiceEnvVar[] = [];
   for (const name of SERVICE_ENV_VARS) {
-    const value = env[name];
+    const value =
+      name === 'OFFICEPULSE_PROVISIONING_BASE_URL' || name === 'OFFICEPULSE_API_BASE_URL'
+        ? env.OFFICEPULSE_API_BASE_URL?.trim() || env.OFFICEPULSE_PROVISIONING_BASE_URL
+        : env[name];
     if (value === undefined || value.trim() === '') {
       if (
+        !name.startsWith('LIVEKIT_') &&
         name !== 'ID_CLIENT_SECRET' &&
         name !== 'ID_PUBLIC_BASE_URL' &&
-        name !== 'HANDSET_PROVISIONING_URL'
+        name !== 'OFFICEPULSE_PROVISIONING_BASE_URL'
       )
         missingServiceConfig.push(name);
     } else {
@@ -149,6 +162,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     e2eFakeSession: E2E_FAKE_SESSION,
     idRegisterWebhook: ID_REGISTER_WEBHOOK,
     assetStorageDir: ASSET_STORAGE_DIR,
+    environmentName: parsed.data.ENVIRONMENT_NAME ?? null,
     serviceConfig,
     missingServiceConfig,
   };

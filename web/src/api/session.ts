@@ -10,6 +10,8 @@ export interface TenantContextView {
   name: string;
   slug: string;
   role: 'SUPER_ADMIN' | 'TENANT_ADMIN' | 'USER';
+  /** The tenant's primary Asterisk context (its PBX routing scope), when assigned. */
+  pbxContext?: string | null;
 }
 
 export interface SessionView {

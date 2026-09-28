@@ -97,6 +97,15 @@ describe('App shell', () => {
     const banner = screen.getByRole('status');
     expect(banner).toHaveTextContent(/acme dental/i);
     expect(banner).toHaveTextContent(/tenant_admin/i);
+    expect(screen.getAllByRole('link', { name: 'Numbers' })).toHaveLength(2);
+    expect(screen.queryByRole('link', { name: /DID routes/i })).not.toBeInTheDocument();
+  });
+
+  it('removes the unpublished DID page without a compatibility redirect', async () => {
+    mockSessionResponse(200, authenticatedSession);
+    renderApp('/tenants/1/did-routes');
+    expect(await screen.findByRole('heading', { name: /page not found/i })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Numbers' })).not.toBeInTheDocument();
   });
 
   it('shows a not-found page for unknown routes when authenticated', async () => {

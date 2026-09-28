@@ -44,10 +44,12 @@ describe('RuntimeScreen', () => {
         <RuntimeScreen session={tenantAdmin} />
       </MemoryRouter>,
     );
-    const tabs = within(await screen.findByRole('tablist', { name: /runtime sections/i }))
+    const tabs = within(await screen.findByRole('tablist', { name: /call history sections/i }))
       .getAllByRole('tab')
       .map((t) => t.textContent);
-    expect(tabs).toEqual(['Calls', 'Provisioning', 'DID fail-safes']);
+    expect(tabs).toEqual(['Calls', 'Operational errors']);
+    expect(fetch).toHaveBeenCalledWith('/runtime/calls?state=recent', expect.any(Object));
+    expect(screen.queryByRole('option', { name: 'Active' })).toBeNull();
     expect(screen.queryByRole('tab', { name: /dependencies/i })).not.toBeInTheDocument();
     expect(await screen.findByText(/no calls match/i)).toBeInTheDocument();
   });
@@ -100,58 +102,6 @@ describe('RuntimeScreen', () => {
     await user.click(screen.getByRole('button', { name: /test dependencies now/i }));
     await waitFor(() => expect(posts).toEqual(['/runtime/dependencies/test']));
     expect(await screen.findByText(/officepulse live: unreachable/i)).toBeInTheDocument();
-  });
-
-  it('retries provisioning through the explicit action, kind and id only', async () => {
-    const posts: Array<Record<string, unknown>> = [];
-    mockFetch((url, init) => {
-      if (url.startsWith('/runtime/calls?')) return emptyCalls;
-      if (url.startsWith('/runtime/provisioning?')) {
-        return {
-          status: 200,
-          body: {
-            operations: [
-              {
-                requestId: 'r1',
-                kind: 'DID',
-                externalId: 'route-9',
-                action: 'provision',
-                status: 'provisioned',
-                createdAt: 't',
-              },
-              {
-                requestId: 'r2',
-                kind: 'HANDSET',
-                externalId: 'dev-1',
-                action: 'provision',
-                status: 'provisioned',
-                createdAt: 't',
-              },
-            ],
-          },
-        };
-      }
-      if (url === '/runtime/provisioning/retry' && init?.method === 'POST') {
-        posts.push(JSON.parse(String(init.body)));
-        return {
-          status: 200,
-          body: { retried: { kind: 'DID', externalId: 'route-9', tenantId: 'ten-1' } },
-        };
-      }
-      return null;
-    });
-    render(
-      <MemoryRouter>
-        <RuntimeScreen session={superAdmin} />
-      </MemoryRouter>,
-    );
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole('tab', { name: /provisioning/i }));
-    // Handsets are keyed by device and have no retry; DIDs do.
-    expect(await screen.findAllByRole('button', { name: /^retry/i })).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: /retry did/i }));
-    await waitFor(() => expect(posts).toEqual([{ kind: 'DID', externalId: 'route-9' }]));
-    expect(await screen.findByRole('status')).toHaveTextContent(/re-issued DID provisioning/i);
   });
 
   it('names the missing variable when the runtime database is not configured', async () => {
@@ -255,7 +205,7 @@ describe('CallDetailScreen', () => {
                 {
                   idempotencyKey: 'k1',
                   commandType: 'TAKEOVER',
-                  payload: null,
+                  payload: { deviceId: 'handset-1', endpointId: '411' },
                   status: 'completed',
                   result: { status: 'answered' },
                   createdAt: 't',
@@ -283,14 +233,17 @@ describe('CallDetailScreen', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByRole('heading', { name: /call call-1/i })).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent(/ended/i);
+    await waitFor(() => expect(screen.getAllByRole('status')[0]).toHaveTextContent(/ended/i));
     expect(screen.getByText(/profile-1 \(rev 2\)/)).toBeInTheDocument();
     expect(screen.getByText(/route-1 \(rev 3\)/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Refresh|Observe live transcript/ })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Live transcript' })).toBeNull();
     const timeline = screen.getByRole('table', { name: /durable call events/i });
     expect(within(timeline).getAllByRole('row')).toHaveLength(4);
     expect(within(timeline).getByText('profile profile-1 rev 2')).toBeInTheDocument();
     const commands = screen.getByRole('table', { name: /control commands/i });
     expect(within(commands).getByText('completed')).toBeInTheDocument();
+    expect(screen.getByText('Taken over by ext 411')).toBeInTheDocument();
     const participants = screen.getByRole('table', { name: /livekit participants/i });
     expect(within(participants).getByText('agent-aida')).toBeInTheDocument();
   });
@@ -306,4 +259,39 @@ describe('CallDetailScreen', () => {
     );
     expect(await screen.findByRole('alert')).toHaveTextContent(/call_not_found/);
   });
+});
+
+it('keeps operational errors in Call History', async () => {
+  mockFetch((url) =>
+    url.startsWith('/runtime/issues')
+      ? {
+          status: 200,
+          body: {
+            windowHours: 24,
+            failedCommands: [],
+            dependenciesDown: [],
+            events: [
+              {
+                callSessionId: 'call-1',
+                sequenceNumber: 1,
+                eventType: 'takeover-failed',
+                createdAt: 't',
+                payload: { reason: 'no-answer' },
+              },
+            ],
+          },
+        }
+      : emptyCalls,
+  );
+  render(
+    <MemoryRouter>
+      <RuntimeScreen session={tenantAdmin} />
+    </MemoryRouter>,
+  );
+  await userEvent.setup().click(screen.getByRole('tab', { name: 'Operational errors' }));
+  expect(await screen.findByText(/no-answer/)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'call-1' })).toHaveAttribute(
+    'href',
+    '/runtime/calls/call-1',
+  );
 });

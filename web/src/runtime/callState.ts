@@ -134,8 +134,8 @@ function applyEvent(
   const reason = detail ?? detailOf(eventType, payload);
   switch (eventType) {
     case 'bootstrapped':
-      view.phase = 'screening';
-      view.aidaPresent = true;
+      view.phase = 'bootstrapping';
+      view.aidaPresent = false;
       break;
     case 'screening-started':
     case 'aida-connected':

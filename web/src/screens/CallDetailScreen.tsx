@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { runtimeApi, type CallDetail } from '../api/runtime';
 import { RuntimeErrorNotice } from '../components/RuntimeError';
 import { emptyCallView, PHASE_LABEL, reduceEvents } from '../runtime/callState';
+import { handsetTakeoverExtension } from '../runtime/handsetTakeover';
 
 /**
  * One call, end to end: what it was configured with, what happened, who
@@ -26,6 +27,8 @@ export function CallDetailScreen() {
 
   useEffect(() => {
     load();
+    const timer = setInterval(load, 3000);
+    return () => clearInterval(timer);
   }, [load]);
 
   // One section and one heading for every state, so the page's landmark
@@ -36,12 +39,12 @@ export function CallDetailScreen() {
   } else if (!detail) {
     body = <p role="status">Loading…</p>;
   } else {
-    body = <Loaded detail={detail} onRefresh={load} />;
+    body = <Loaded detail={detail} />;
   }
   return (
     <section aria-labelledby="call-heading">
       <p>
-        <Link to="/operations">← Live operations</Link> · <Link to="/runtime">Runtime</Link>
+        <Link to="/operations">← LIVE</Link> · <Link to="/runtime">Call History</Link>
       </p>
       <h1 id="call-heading">Call {callSessionId}</h1>
       {body}
@@ -49,9 +52,10 @@ export function CallDetailScreen() {
   );
 }
 
-function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => void }) {
+function Loaded({ detail }: { detail: CallDetail }) {
   const { call, events, commands, participants } = detail;
   const view = reduceEvents(emptyCallView(call.id), events);
+  const takenOverBy = handsetTakeoverExtension(commands, events);
 
   return (
     <>
@@ -60,11 +64,8 @@ function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => vo
         disposition <code>{call.disposition}</code>, version {call.version}
       </p>
       {view.failureReason ? <p role="alert">Failure: {view.failureReason}</p> : null}
+      {takenOverBy && <p>Taken over by ext {takenOverBy}</p>}
       {view.sequenceGap ? <p role="alert">The durable event record has a gap.</p> : null}
-      <button type="button" onClick={onRefresh}>
-        Refresh
-      </button>
-
       <h2>Call</h2>
       <dl>
         <dt>Tenant</dt>
@@ -160,7 +161,14 @@ function Loaded({ detail, onRefresh }: { detail: CallDetail; onRefresh: () => vo
               <tr key={c.idempotencyKey}>
                 <td>{c.commandType}</td>
                 <td>{c.status}</td>
-                <td>{c.result ? JSON.stringify(c.result) : ''}</td>
+                <td>
+                  {c.commandType === 'TAKEOVER' &&
+                    typeof c.payload?.deviceId === 'string' &&
+                    typeof c.payload.endpointId === 'string' && (
+                      <p>Takeover requested by ext {c.payload.endpointId}</p>
+                    )}
+                  {c.result ? JSON.stringify(c.result) : ''}
+                </td>
                 <td>
                   <code>{c.idempotencyKey}</code>
                 </td>

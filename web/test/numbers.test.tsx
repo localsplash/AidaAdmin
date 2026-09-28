@@ -19,7 +19,8 @@ it('saves an explicit all-members assignment with both services and preserves im
   const saved: unknown[] = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (_url, init?: RequestInit) => {
+    vi.fn(async (url, init?: RequestInit) => {
+      if (!String(url).includes('/numbers')) return new Response('{}', { status: 503 });
       if (init?.method === 'PUT') {
         saved.push(JSON.parse(String(init.body)));
         return new Response(JSON.stringify({ number }));
@@ -51,4 +52,89 @@ it('saves an explicit all-members assignment with both services and preserves im
       expectedVersion: 3,
     },
   ]);
+});
+
+it('creates a globally unique Number / DID through Identity and refreshes PBX routing', async () => {
+  const created = {
+    iPhoneNumberId: 8,
+    iTenantId: 1,
+    phoneNumber: '+19492799074',
+    label: 'Main line',
+    bEnabled: true,
+    bVoice: true,
+    bMessaging: true,
+    accessPolicy: 'TENANT_MEMBERS',
+    iVersion: 1,
+  } as const;
+  let numbers: unknown[] = [];
+  const saved: unknown[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url, init?: RequestInit) => {
+      const path = String(url);
+      if (path.endsWith('/numbers')) {
+        if (init?.method === 'POST') {
+          saved.push(JSON.parse(String(init.body)));
+          numbers = [created];
+          return new Response(JSON.stringify({ number: created }));
+        }
+        return new Response(JSON.stringify({ numbers }));
+      }
+      if (path.endsWith('/did-routes')) {
+        return new Response(
+          JSON.stringify({
+            source: 'asterisk',
+            pbxInstanceId: 'officepulse-test',
+            context: 'office',
+            contexts: ['office'],
+            didContext: 'from-carrier',
+            provisioningEnabled: true,
+            numbers,
+            dids: numbers.map(() => ({
+              did: created.phoneNumber,
+              managed: false,
+              availability: 'unconfigured',
+              applyState: 'unknown',
+            })),
+          }),
+        );
+      }
+      if (path.endsWith('/queues')) {
+        return new Response(
+          JSON.stringify({
+            source: 'asterisk',
+            pbxInstanceId: 'officepulse-test',
+            context: 'office',
+            contexts: ['office'],
+            provisioningEnabled: true,
+            queues: [],
+          }),
+        );
+      }
+      return new Response('{}', { status: 404 });
+    }),
+  );
+  render(
+    <MemoryRouter initialEntries={['/tenants/1/numbers']}>
+      <Routes>
+        <Route path="/tenants/:tenantId/numbers" element={<TenantNumbersScreen />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  const user = userEvent.setup();
+  await user.click(await screen.findByText('Add Number / DID…'));
+  await user.type(screen.getByLabelText('Phone number'), created.phoneNumber);
+  await user.type(screen.getByLabelText('Label'), created.label);
+  await user.click(screen.getByRole('button', { name: 'Save number' }));
+  expect(saved).toEqual([
+    {
+      phoneNumber: created.phoneNumber,
+      label: created.label,
+      bEnabled: true,
+      bVoice: true,
+      bMessaging: true,
+      accessPolicy: 'TENANT_MEMBERS',
+    },
+  ]);
+  expect(await screen.findByText(created.phoneNumber)).toBeInTheDocument();
 });

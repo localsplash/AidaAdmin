@@ -4,9 +4,7 @@ import type {
   RuntimeCallSession,
   RuntimeControlCommand,
   RuntimeDependencyStatus,
-  RuntimeDidFallback,
   RuntimeParticipant,
-  RuntimeProvisioningOperation,
   RuntimeReader,
   RuntimeWebhookDelivery,
 } from '../../src/officepulse/runtime-db.js';
@@ -25,9 +23,7 @@ export class FakeRuntimeReader implements RuntimeReader {
   commands = new Map<string, RuntimeControlCommand[]>();
   participants = new Map<string, RuntimeParticipant[]>();
   webhooks: RuntimeWebhookDelivery[] = [];
-  provisioning: RuntimeProvisioningOperation[] = [];
   dependencies: RuntimeDependencyStatus[] = [];
-  fallbacks: RuntimeDidFallback[] = [];
   /** When set, every read throws — the database is unreachable. */
   down = false;
   now = () => Date.now();
@@ -88,19 +84,9 @@ export class FakeRuntimeReader implements RuntimeReader {
     return this.webhooks.slice(0, limit);
   }
 
-  async listProvisioningOperations(limit = 100): Promise<RuntimeProvisioningOperation[]> {
-    this.guard();
-    return this.provisioning.slice(0, limit);
-  }
-
   async listDependencyStatus(): Promise<RuntimeDependencyStatus[]> {
     this.guard();
     return this.dependencies;
-  }
-
-  async listDidFallbacks(tenantId?: string): Promise<RuntimeDidFallback[]> {
-    this.guard();
-    return this.fallbacks.filter((f) => tenantId === undefined || f.tenantId === tenantId);
   }
 
   async listFailedCommands(_sinceHours: number, tenantId?: string) {
