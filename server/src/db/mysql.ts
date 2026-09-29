@@ -1,3 +1,4 @@
+import type { MysqlConnectionConfig } from './config.js';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import mysql, { type Pool, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { AuthStateRepository } from '../auth/state-store.js';
@@ -9,21 +10,12 @@ import type { AuditEntry } from '../nocodb/repos.js';
 /** Admin owns only transient OAuth state, event receipts and its audit trail.
  * Users, organizations, memberships and application sessions belong to Identity.
  */
-export function createPool(databaseUrl: string): Pool {
-  const url = new URL(databaseUrl);
-  if (url.protocol !== 'mysql:' || url.pathname !== '/aida_admin_db') {
-    throw new Error(
-      'AIDA_ADMIN_DATABASE_URL must use mysql and the dedicated aida_admin_db database',
-    );
+export function createPool(config: MysqlConnectionConfig): Pool {
+  if (config.database !== 'aida_admin_db') {
+    throw new Error('aida-admin/DB_NAME must be the dedicated aida_admin_db database');
   }
-  if (url.search || url.hash)
-    throw new Error('AIDA_ADMIN_DATABASE_URL must not contain query or fragment overrides');
   const pool = mysql.createPool({
-    host: url.hostname,
-    port: Number(url.port || 3306),
-    user: decodeURIComponent(url.username),
-    password: decodeURIComponent(url.password),
-    database: 'aida_admin_db',
+    ...config,
     connectionLimit: 5,
     timezone: 'Z',
     charset: 'utf8mb4',

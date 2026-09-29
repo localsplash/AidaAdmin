@@ -1,4 +1,12 @@
 import { z } from 'zod';
+import {
+  DATABASE_SETTING_KEYS,
+  RUNTIME_DATABASE_SCOPE,
+  missingDatabaseSettings,
+  mysqlConnectionConfig,
+  type DatabaseSettings,
+  type MysqlConnectionConfig,
+} from './db/config.js';
 
 /**
  * Strict environment boolean: "false"/"0"/"no" mean false. (z.coerce.boolean
@@ -49,7 +57,7 @@ export const SERVICE_ENV_VARS = [
   'LIVEKIT_API_SECRET',
   'PUBLIC_BASE_URL',
   'SESSION_SECRET',
-  'AIDA_ADMIN_DATABASE_URL',
+  ...DATABASE_SETTING_KEYS,
   'ID_BASE_URL',
   'ID_PUBLIC_BASE_URL',
   'ID_CLIENT_SECRET',
@@ -62,7 +70,6 @@ export const SERVICE_ENV_VARS = [
   'NOCODB_API_TOKEN',
   'OFFICEPULSE_API_BASE_URL',
   'OFFICEPULSE_PROVISIONING_BASE_URL',
-  'OFFICEPULSE_RUNTIME_DATABASE_URL',
 ] as const;
 
 export type ServiceEnvVar = (typeof SERVICE_ENV_VARS)[number];
@@ -95,12 +102,19 @@ export interface AppConfig {
   /** Service variables present in the environment; values stay out of this object except where a later phase needs them. */
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
   /** Names (never values) of service variables absent from the environment. */
-  missingServiceConfig: ServiceEnvVar[];
+  missingServiceConfig: string[];
+  /** Own writable store, isolated from OfficePulse's read-only connection. */
+  database: MysqlConnectionConfig | null;
+  /** DB_* rows from app=aida-admin-runtime, never writer credentials. */
+  runtimeDatabase: MysqlConnectionConfig | null;
 }
 
 export class ConfigError extends Error {}
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+export function loadConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  runtimeSettings: DatabaseSettings = {},
+): AppConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     const names = parsed.error.issues.map((issue) => issue.path.join('.')).join(', ');
@@ -108,7 +122,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
 
   const serviceConfig: Partial<Record<ServiceEnvVar, string>> = {};
-  const missingServiceConfig: ServiceEnvVar[] = [];
+  const missingServiceConfig: string[] = [];
   for (const name of SERVICE_ENV_VARS) {
     const value =
       name === 'OFFICEPULSE_PROVISIONING_BASE_URL' || name === 'OFFICEPULSE_API_BASE_URL'
@@ -117,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     if (value === undefined || value.trim() === '') {
       if (
         !name.startsWith('LIVEKIT_') &&
+        name !== 'DB_PORT' &&
         name !== 'ID_CLIENT_SECRET' &&
         name !== 'ID_PUBLIC_BASE_URL' &&
         name !== 'OFFICEPULSE_PROVISIONING_BASE_URL'
@@ -125,6 +140,34 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     } else {
       serviceConfig[name] = value;
     }
+  }
+
+  missingServiceConfig.push(
+    ...missingDatabaseSettings(runtimeSettings).map((key) => `${RUNTIME_DATABASE_SCOPE}/${key}`),
+  );
+  let database: MysqlConnectionConfig | null = null;
+  let runtimeDatabase: MysqlConnectionConfig | null = null;
+  try {
+    if (!missingDatabaseSettings(serviceConfig).length) {
+      database = mysqlConnectionConfig(serviceConfig, 'aida-admin');
+      if (database.database !== 'aida_admin_db')
+        throw new Error('aida-admin/DB_NAME must be the dedicated aida_admin_db database');
+    }
+    if (!missingDatabaseSettings(runtimeSettings).length) {
+      runtimeDatabase = mysqlConnectionConfig(runtimeSettings, RUNTIME_DATABASE_SCOPE);
+      if (
+        runtimeDatabase.database !== 'aidacalls_db' &&
+        !/^aida_[a-z0-9_]+_test$/.test(runtimeDatabase.database)
+      ) {
+        throw new Error(
+          'aida-admin-runtime/DB_NAME must be aidacalls_db or a disposable aida_*_test schema',
+        );
+      }
+    }
+  } catch (error) {
+    throw new ConfigError(
+      error instanceof Error ? error.message : 'Invalid database configuration',
+    );
   }
 
   const { NODE_ENV, PORT, LOG_LEVEL, E2E_FAKE_SESSION, ID_REGISTER_WEBHOOK, ASSET_STORAGE_DIR } =
@@ -165,5 +208,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     environmentName: parsed.data.ENVIRONMENT_NAME ?? null,
     serviceConfig,
     missingServiceConfig,
+    database,
+    runtimeDatabase,
   };
 }

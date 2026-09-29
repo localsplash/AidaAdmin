@@ -59,11 +59,12 @@ errors. `PARENT_DOMAIN` supplies `ID_PARENT_DOMAIN` when that key is absent.
 
 The rows this app reads, by the scope they belong in:
 
-| Scope        | Keys                                                                                                                                                                                                                                                     |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `aida-admin` | `PUBLIC_BASE_URL`, `SESSION_SECRET`, `AIDA_ADMIN_DATABASE_URL`, `OFFICEPULSE_RUNTIME_DATABASE_URL`, `ID_BASE_URL` (and optionally `ID_PUBLIC_BASE_URL`), `ID_CLIENT_SECRET` (only while Identity runs in `secret`/`dual` mode), `ID_TRUSTED_PROXY_CIDRS` |
-| `aida`       | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse                                                                                                                               |
-| `*`          | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME`                                                                                                                                                                                                       |
+| Scope                | Keys                                                                                                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aida-admin`         | `PUBLIC_BASE_URL`, `SESSION_SECRET`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT`, `ID_BASE_URL` (and optionally `ID_PUBLIC_BASE_URL`), `ID_CLIENT_SECRET` (only while Identity runs in `secret`/`dual` mode), `ID_TRUSTED_PROXY_CIDRS` |
+| `aida-admin-runtime` | `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT` — the separate read-only connection to OfficePulse's runtime database                                                                                                                      |
+| `aida`               | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse                                                                                                                                    |
+| `*`                  | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME`                                                                                                                                                                                                            |
 
 `ID_BASE_URL` stays in the `aida-admin` scope on purpose: OfficePulse refuses
 that key in any scope it reads. Inbound `/id/events` deliveries are admitted by
@@ -79,25 +80,41 @@ mismatch; an unreachable OfficePulse is an availability problem, not a mismatch.
 Connection/settings changes require a process restart in this first release.
 Runtime reads do not create a missing base or schema.
 
-### Database account
+### Database accounts
 
-`AIDA_ADMIN_DATABASE_URL` names the account AidaAdmin uses for `aida_admin_db`
-(by convention `aida_admin_app`). On a shared MySQL, create it with
-`scripts/db-users.sh`, which reads that same URL, decodes it the way the server
-does, and needs only the server's admin password:
+AidaPlatformDB's `install.sh database` / `install.sh apps` writes canonical
+`DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` and `DB_PORT` rows and provisions
+accounts from those same values. `DB_PASSWORD` is a secret, literal value, not
+URL-encoded; `DB_PORT` defaults to 3306 when omitted.
+
+`app=aida-admin` owns `aida_admin_db` as `aida_admin_app`. Its `DB_*` keys may be
+overridden by the same environment keys, but never fall through to `aida` or `*`.
+`app=aida-admin-runtime` independently describes `aidacalls_db` as `aidaadmin_ro`.
+The reader resolves only that scope: it cannot inherit Admin's writable credentials
+or OfficePulse's writer. Its DB host/port may differ because the clients can reach
+the same MySQL server over different network paths. No database URL setting is read.
+
+To run own-store account provisioning independently, export the resolved
+`app=aida-admin` values and an operator's MySQL admin password:
 
 ```sh
 docker run --rm --network <network> -v "$PWD/scripts:/scripts:ro" \
-  -e AIDA_ADMIN_DATABASE_URL=… -e MYSQL_ADMIN_PASSWORD=… \
-  mysql:8.4 bash /scripts/db-users.sh
+  -e DB_HOST -e DB_PORT -e DB_NAME -e DB_USER -e DB_PASSWORD \
+  -e MYSQL_ADMIN_PASSWORD mysql:8.4 bash /scripts/db-users.sh
 ```
 
-It creates the database if missing, and the account (`'%'`) with `ALL
-PRIVILEGES` on it and nothing else. It is idempotent: grants converge on every
-run, and a new password in the URL rotates it. `DB_HOST` overrides the URL's host
-when you reach MySQL by another name. The read-only `aidaadmin_ro` account for
-`OFFICEPULSE_RUNTIME_DATABASE_URL` is created by OfficePulse, which owns
-`aidacalls_db`.
+The script creates `aida_admin_db` and grants its account `ALL PRIVILEGES` only
+on that schema. `MYSQL_ADMIN_HOST` / `MYSQL_ADMIN_PORT` optionally change the
+operator's network path without changing app settings. Re-running converges
+grants; changing `DB_PASSWORD` and re-running rotates the password. The separate
+runtime reader is provisioned through OfficePulse's `scripts/db-users.sh` with
+`SELECT` only. Startup still places its connections in read-only transaction mode.
+
+For an existing installation, run AidaPlatformDB setup against the updated `dev`
+checkouts before restarting the apps. Setup copies existing credentials into the
+canonical rows without replacing nonblank values or rotating passwords. Old rows
+can then be removed; they are no longer runtime configuration. Both connection
+scopes are required in production. The worker remains API-only and needs no SQL settings.
 
 The Compose file's external networks and volumes are named per environment in
 `.env`: `PLATFORM_NETWORK` (default `platform-local`) and `ADMIN_ASSETS_VOLUME`
