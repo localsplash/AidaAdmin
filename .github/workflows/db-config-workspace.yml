@@ -1,0 +1,24 @@
+name: DB configuration workspace
+on:
+  push:
+    branches: [chore/standard-db-settings-20260929]
+    paths: [.github/workflows/db-config-workspace.yml]
+permissions:
+  contents: read
+jobs:
+  workspace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch latest development sources
+        run: |
+          mkdir sources
+          for repo in AidaAdmin AidaAgent OfficePulseAidaIntegration AidaPlatformDB; do
+            git clone --depth 1 --branch dev "https://github.com/localsplash/${repo}.git" "sources/${repo}"
+            git -C "sources/${repo}" rev-parse HEAD > "sources/${repo}/.source-commit"
+          done
+          tar --exclude=.git -czf sources.tar.gz sources
+      - uses: actions/upload-artifact@v4
+        with:
+          name: db-configuration-sources
+          path: sources.tar.gz
+          retention-days: 1
