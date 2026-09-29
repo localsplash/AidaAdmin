@@ -8,8 +8,7 @@ vi.mock('mysql2/promise', () => ({
   },
 }));
 
-const { MysqlRuntimeReader, parseMysqlUrl, RuntimeDbError } =
-  await import('../src/officepulse/runtime-db.js');
+const { MysqlRuntimeReader, RuntimeDbError } = await import('../src/officepulse/runtime-db.js');
 
 function statements(): Array<{ sql: string; params: unknown[] }> {
   return (execute as Mock).mock.calls.map(([sql, params]) => ({
@@ -17,26 +16,6 @@ function statements(): Array<{ sql: string; params: unknown[] }> {
     params: (params as unknown[]) ?? [],
   }));
 }
-
-describe('parseMysqlUrl', () => {
-  it('reads every connection field from one URL', () => {
-    expect(parseMysqlUrl('mysql://aidaadmin_ro:p%40ss@db.internal:3307/aidacalls_db')).toEqual({
-      host: 'db.internal',
-      port: 3307,
-      user: 'aidaadmin_ro',
-      password: 'p@ss',
-      database: 'aidacalls_db',
-    });
-    expect(parseMysqlUrl('mysql://u:p@h/aidacalls_db').port).toBe(3306);
-  });
-
-  it('names the variable when the URL is unusable, never the value', () => {
-    for (const bad of ['not a url', 'postgresql://u:p@h/db', 'mysql://u:p@h/']) {
-      expect(() => parseMysqlUrl(bad)).toThrow(RuntimeDbError);
-      expect(() => parseMysqlUrl(bad)).toThrow(/OFFICEPULSE_RUNTIME_DATABASE_URL/);
-    }
-  });
-});
 
 describe('MysqlRuntimeReader', () => {
   const reader = new MysqlRuntimeReader({

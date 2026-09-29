@@ -94,20 +94,30 @@ describe('preflight report', () => {
     PUBLIC_BASE_URL: 'https://admin.aida.localsplash.ai',
     ID_BASE_URL: 'https://id.localsplash.ai',
     SESSION_SECRET: 'x'.repeat(32),
-    AIDA_ADMIN_DATABASE_URL: 'postgresql://localhost/aida_admin',
+    DB_HOST: 'admin-db',
+    DB_NAME: 'aida_admin_db',
+    DB_USER: 'aida_admin_app',
+    DB_PASSWORD: 'pw',
     OFFICEPULSE_API_BASE_URL: 'http://officepulse.internal:8085',
-    OFFICEPULSE_RUNTIME_DATABASE_URL: 'mysql://aidaadmin_ro:pw@officepulse-db:3306/aidacalls_db',
     trustedCIDR: '10.0.0.0/8',
   };
 
   it('passes when everything needed is configured', () => {
     const report = buildDiagnostics(
-      loadConfig({
-        ...base,
-        ID_PARENT_DOMAIN: 'localsplash.ai',
-        NOCODB_BASE_URL: 'https://nocodb.localsplash.ai',
-        NOCODB_API_TOKEN: 'token-value',
-      }),
+      loadConfig(
+        {
+          ...base,
+          ID_PARENT_DOMAIN: 'localsplash.ai',
+          NOCODB_BASE_URL: 'https://nocodb.localsplash.ai',
+          NOCODB_API_TOKEN: 'token-value',
+        },
+        {
+          DB_HOST: 'runtime-db',
+          DB_NAME: 'aidacalls_db',
+          DB_USER: 'aidaadmin_ro',
+          DB_PASSWORD: 'reader-pw',
+        },
+      ),
     );
     expect(report.loginReady).toBe(true);
     expect(report.findings).toEqual([]);
@@ -154,7 +164,7 @@ describe('preflight report', () => {
     );
     const summaries = report.findings.map((f) => f.summary).join('\n');
     expect(summaries).toMatch(/SESSION_SECRET/);
-    expect(summaries).toMatch(/AIDA_ADMIN_DATABASE_URL/);
+    expect(summaries).toMatch(/aida-admin\/DB_HOST/);
     expect(summaries).toMatch(/trustedCIDR/);
     // Warnings alone never block login.
     expect(report.loginReady).toBe(true);

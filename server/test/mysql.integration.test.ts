@@ -22,7 +22,14 @@ const event = (id: number): IdEvent => ({
 describe.skipIf(!databaseUrl)('MySQL Admin persistence', () => {
   let pool: Pool;
   beforeAll(async () => {
-    pool = createPool(databaseUrl!);
+    const url = new URL(databaseUrl!); // Test harness input only; deployed configuration is DB_*.
+    pool = createPool({
+      host: url.hostname,
+      port: Number(url.port || 3306),
+      database: url.pathname.slice(1),
+      user: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+    });
     await migrate(pool);
     await migrate(pool);
     for (const table of [

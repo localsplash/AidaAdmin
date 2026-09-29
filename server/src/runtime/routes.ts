@@ -5,6 +5,7 @@ import type { AppDeps } from '../deps.js';
 import type { Logger } from '../logger.js';
 import { NotFoundError } from '../nocodb/repos.js';
 import { OfficePulseError } from '../officepulse/client.js';
+import { REQUIRED_DATABASE_KEYS, RUNTIME_DATABASE_SCOPE } from '../db/config.js';
 import { RuntimeDbError, type RuntimeCallSession } from '../officepulse/runtime-db.js';
 
 /**
@@ -118,9 +119,11 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
       res.status(503).json({
         error: 'runtime_db_not_configured',
         message:
-          'The OfficePulse runtime database is not configured: set OFFICEPULSE_RUNTIME_DATABASE_URL ' +
-          'to the read-only aidaadmin_ro account on aidacalls_db',
-        missingConfiguration: ['OFFICEPULSE_RUNTIME_DATABASE_URL'],
+          'The OfficePulse runtime database is not configured: set DB_HOST, DB_NAME, DB_USER and DB_PASSWORD ' +
+          'in app=aida-admin-runtime for the read-only aidaadmin_ro account on aidacalls_db',
+        missingConfiguration: REQUIRED_DATABASE_KEYS.map(
+          (key) => `${RUNTIME_DATABASE_SCOPE}/${key}`,
+        ),
         correlationId: req.correlationId,
       });
       return null;

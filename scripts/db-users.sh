@@ -1,65 +1,44 @@
 #!/usr/bin/env bash
-#
-# Create or update the MySQL account AidaAdmin connects to its own store with.
-# Idempotent: every run converges the grants, and a new password rotates it.
-#
-#   aida_admin_app   ALL PRIVILEGES on aida_admin_db (OAuth state, event
-#                    receipts, audit), the database AidaAdmin owns.
-#
-# The account, password and database come from AIDA_ADMIN_DATABASE_URL, the
-# same value the server connects with, decoded the same way (percent-encoded
-# user and password). The read-only account for OfficePulse's aidacalls_db
-# (OFFICEPULSE_RUNTIME_DATABASE_URL, aidaadmin_ro) belongs to OfficePulse,
-# which owns that database; this script doesn't touch it.
-#
-# Run by an environment's operator with MySQL admin credentials, e.g. from a
-# throwaway client on a network that reaches the database:
-#
-#   docker run --rm --network <network> -v "$PWD/scripts:/scripts:ro" \
-#     -e AIDA_ADMIN_DATABASE_URL=… -e MYSQL_ADMIN_PASSWORD=… \
-#     mysql:8.4 bash /scripts/db-users.sh
-#
-# DB_HOST overrides the URL's host when the operator reaches MySQL by another
-# name. The account is created for any host ('%'): which networks can reach
-# MySQL is the environment's decision, not something to pin here.
-
+# Provision AidaAdmin's own store from its canonical app=aida-admin DB_* rows.
+# AidaPlatformDB runs this with the same DB_USER/DB_PASSWORD the app reads.
+# OfficePulse provisions the separate app=aida-admin-runtime read-only account.
+# MYSQL_ADMIN_HOST/PORT may override the operator's network path, never app settings.
+set +x
 set -euo pipefail
 
-URL="${AIDA_ADMIN_DATABASE_URL:?AIDA_ADMIN_DATABASE_URL: the mysql:// URL the server uses}"
-ADMIN="${MYSQL_ADMIN_USER:-root}"
-: "${MYSQL_ADMIN_PASSWORD:?MYSQL_ADMIN_PASSWORD: password for $ADMIN}"
+die() { printf '[db-users] %s\n' "$*" >&2; exit 2; }
+identifier() { [[ $1 =~ ^[A-Za-z0-9_]+$ && ${#1} -le $3 ]] || die "$2 must be a plain identifier (max $3 characters)"; }
+literal() { local value=${1//\\/\\\\}; printf "'%s'" "${value//\'/\'\'}"; }
 
-die() { echo "[db-users] $*" >&2; exit 2; }
-# Percent-decoding like decodeURIComponent: backslashes are protected first so
-# printf %b only ever sees the \xNN it is given.
-urldecode() { local s=${1//\\/\\\\}; printf '%b' "${s//%/\\x}"; }
-# Names are interpolated into SQL, so they must be plain identifiers.
-name() { [[ $1 =~ ^[A-Za-z0-9_]+$ ]] || die "not a plain identifier: $1"; printf '%s' "$1"; }
-# A SQL string literal: backslashes and quotes escaped for the default sql_mode.
-literal() { local s=${1//\\/\\\\}; printf "'%s'" "${s//\'/\'\'}"; }
+: "${DB_HOST:?DB_HOST is required}"
+: "${DB_NAME:?DB_NAME is required}"
+: "${DB_USER:?DB_USER is required}"
+: "${DB_PASSWORD:?DB_PASSWORD is required}"
+ADMIN=${MYSQL_ADMIN_USER:-root}
+: "${MYSQL_ADMIN_PASSWORD:?MYSQL_ADMIN_PASSWORD is required}"
+HOST=${MYSQL_ADMIN_HOST:-$DB_HOST}
+PORT=${MYSQL_ADMIN_PORT:-${DB_PORT:-3306}}
+identifier "$DB_NAME" DB_NAME 64
+[[ $DB_NAME == aida_admin_db ]] || die 'DB_NAME must be the dedicated aida_admin_db database'
+identifier "$DB_USER" DB_USER 32
+identifier "$ADMIN" MYSQL_ADMIN_USER 32
+[[ $DB_USER != "$ADMIN" && $DB_USER != root ]] || die 'Application and admin accounts must be distinct'
+[[ $PORT =~ ^[0-9]{1,5}$ ]] && (( 10#$PORT >= 1 && 10#$PORT <= 65535 )) || die 'MySQL port must be 1-65535'
+ACCOUNT="'$DB_USER'@'%'"
+# Database-level GRANT treats underscores as wildcards unless escaped.
+GRANT_DATABASE=${DB_NAME//_/\\_}
 
-re='^mysql://([^:@/]*)(:([^@/]*))?@([^:/?#]+)(:([0-9]+))?/([^/?#]+)'
-[[ $URL =~ $re ]] || die "AIDA_ADMIN_DATABASE_URL must look like mysql://user:password@host[:port]/database"
-USER_NAME=$(name "$(urldecode "${BASH_REMATCH[1]}")")
-PASSWORD=$(urldecode "${BASH_REMATCH[3]}")
-HOST="${DB_HOST:-${BASH_REMATCH[4]}}"
-PORT="${BASH_REMATCH[6]:-3306}"
-DB=$(name "${BASH_REMATCH[7]}")
-[ -n "$PASSWORD" ] || die "AIDA_ADMIN_DATABASE_URL has no password"
-who="'$USER_NAME'@'%'"
-# In a database-level GRANT, _ and % are wildcards: escape them so the grant
-# names exactly this database (aida\_admin\_db).
-DB_GRANT=${DB//_/\\_}
-
-# MYSQL_PWD keeps the admin password out of the process list; the SQL itself,
-# including the account password, goes over stdin.
-MYSQL_PWD="$MYSQL_ADMIN_PASSWORD" command mysql --protocol=TCP -h "$HOST" -P "$PORT" \
-  -u "$ADMIN" --batch --skip-column-names <<SQL
-CREATE DATABASE IF NOT EXISTS \`$DB\`;
-CREATE USER IF NOT EXISTS $who IDENTIFIED BY $(literal "$PASSWORD");
-ALTER USER $who IDENTIFIED BY $(literal "$PASSWORD");
-REVOKE ALL PRIVILEGES, GRANT OPTION FROM $who;
-GRANT ALL PRIVILEGES ON \`$DB_GRANT\`.* TO $who;
+if ! MYSQL_PWD="$MYSQL_ADMIN_PASSWORD" command mysql --protocol=TCP \
+  --host="$HOST" --port="$PORT" --user="$ADMIN" --connect-timeout=10 \
+  --default-character-set=utf8mb4 --binary-mode --batch --skip-column-names \
+  >/dev/null 2>&1 <<SQL
+SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION';
+CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS $ACCOUNT IDENTIFIED BY $(literal "$DB_PASSWORD");
+ALTER USER $ACCOUNT IDENTIFIED BY $(literal "$DB_PASSWORD");
+REVOKE ALL PRIVILEGES, GRANT OPTION FROM $ACCOUNT;
+GRANT ALL PRIVILEGES ON \`$GRANT_DATABASE\`.* TO $ACCOUNT;
 SQL
-
-echo "[db-users] $USER_NAME: ALL PRIVILEGES on $DB"
+then die 'MySQL provisioning failed; check connectivity/admin privileges and rerun.'
+fi
+printf '[db-users] %s: ALL PRIVILEGES on %s\n' "$DB_USER" "$DB_NAME"
