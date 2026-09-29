@@ -2,6 +2,13 @@ import { ConfigError, loadConfig, SERVICE_ENV_VARS, type AppConfig } from './con
 import { HttpNocoDbApi, type NocoDbApi, type NocoRecord } from './nocodb/api.js';
 import { resolveBaseId } from './nocodb/base.js';
 
+import {
+  DATABASE_SETTING_KEYS,
+  RUNTIME_DATABASE_SCOPE,
+  type DatabaseSettingKey,
+  type DatabaseSettings,
+} from './db/config.js';
+
 const SCOPES = ['aida-admin', 'aida', '*'];
 
 /** Deterministic settings: environment > service > voice > global. Blank is unset. */
@@ -25,7 +32,11 @@ export function resolveSettings(env: NodeJS.ProcessEnv, rows: NocoRecord[]): Nod
   ];
   for (const key of keys) {
     if (env[key]?.trim()) continue;
-    for (const scope of SCOPES) {
+    // Database credentials cannot fall through to another application's shared scope.
+    const scopes = DATABASE_SETTING_KEYS.includes(key as DatabaseSettingKey)
+      ? ['aida-admin']
+      : SCOPES;
+    for (const scope of scopes) {
       const value = indexed.get(`${scope}:${key}`);
       if (value?.trim()) {
         resolved[key] = value;
@@ -47,6 +58,22 @@ export function resolveSettings(env: NodeJS.ProcessEnv, rows: NocoRecord[]): Nod
   return resolved;
 }
 
+/** The reader is a separate scoped DB_* configuration, not an alias of the writer. */
+export function resolveRuntimeDatabaseSettings(rows: NocoRecord[]): DatabaseSettings {
+  const settings: DatabaseSettings = {};
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const key = String(row.settingKey ?? '') as DatabaseSettingKey;
+    if (row.app !== RUNTIME_DATABASE_SCOPE || !DATABASE_SETTING_KEYS.includes(key)) continue;
+    if (seen.has(key))
+      throw new ConfigError(`Duplicate PlatformConfig setting: ${RUNTIME_DATABASE_SCOPE}/${key}`);
+    seen.add(key);
+    const value = String(row.settingValue ?? '');
+    if (value.trim()) settings[key] = value;
+  }
+  return settings;
+}
+
 export async function loadPlatformConfig(
   env: NodeJS.ProcessEnv = process.env,
   suppliedApi?: NocoDbApi,
@@ -63,5 +90,5 @@ export async function loadPlatformConfig(
       'PlatformConfig requires exactly one cfg_tbl_Setting table; run platform bootstrap',
     );
   const rows = await api.listRecords(tables[0]!.id, []);
-  return loadConfig(resolveSettings(env, rows));
+  return loadConfig(resolveSettings(env, rows), resolveRuntimeDatabaseSettings(rows));
 }

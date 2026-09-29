@@ -355,7 +355,12 @@ describe('degraded states', () => {
     const res = await root.get('/runtime/calls');
     expect(res.status).toBe(503);
     expect(res.body.error).toBe('runtime_db_not_configured');
-    expect(res.body.missingConfiguration).toEqual(['OFFICEPULSE_RUNTIME_DATABASE_URL']);
+    expect(res.body.missingConfiguration).toEqual([
+      'aida-admin-runtime/DB_HOST',
+      'aida-admin-runtime/DB_NAME',
+      'aida-admin-runtime/DB_USER',
+      'aida-admin-runtime/DB_PASSWORD',
+    ]);
     // A tenant admin cannot take over on trust without it; a Super Admin can.
     const admin = await actor(20, false, ctx.acme.id);
     const denied = await admin.post('/runtime/calls/acme-live/commands', {
