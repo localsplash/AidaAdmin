@@ -1,0 +1,58 @@
+# Exact line edits against the reviewed dev files.
+EDITS = [
+    ('scripts/db-users.sh', '6894a09016adc50c2f5f1527b4fc2c1943c0ea58dcf51e5ecc3f9ea2e1241bad', '67d65bafe75025001f1c86239da1e5c5998dc2515e6bbc226d9d8dcd1ab0df0f', [
+        (1, 25, "# Provision AidaAdmin's own store from its canonical app=aida-admin DB_* rows.\n# AidaPlatformDB runs this with the same DB_USER/DB_PASSWORD the app reads.\n# OfficePulse provisions the separate app=aida-admin-runtime read-only account.\n# MYSQL_ADMIN_HOST/PORT may override the operator's network path, never app settings.\nset +x\n"),
+        (27, 30, 'die() { printf \'[db-users] %s\\n\' "$*" >&2; exit 2; }\nidentifier() { [[ $1 =~ ^[A-Za-z0-9_]+$ && ${#1} -le $3 ]] || die "$2 must be a plain identifier (max $3 characters)"; }\nliteral() { local value=${1//\\\\/\\\\\\\\}; printf "\'%s\'" "${value//\\\'/\\\'\\\'}"; }\n'),
+        (31, 39, ': "${DB_HOST:?DB_HOST is required}"\n: "${DB_NAME:?DB_NAME is required}"\n: "${DB_USER:?DB_USER is required}"\n: "${DB_PASSWORD:?DB_PASSWORD is required}"\nADMIN=${MYSQL_ADMIN_USER:-root}\n: "${MYSQL_ADMIN_PASSWORD:?MYSQL_ADMIN_PASSWORD is required}"\nHOST=${MYSQL_ADMIN_HOST:-$DB_HOST}\nPORT=${MYSQL_ADMIN_PORT:-${DB_PORT:-3306}}\nidentifier "$DB_NAME" DB_NAME 64\n[[ $DB_NAME == aida_admin_db ]] || die \'DB_NAME must be the dedicated aida_admin_db database\'\nidentifier "$DB_USER" DB_USER 32\nidentifier "$ADMIN" MYSQL_ADMIN_USER 32\n[[ $DB_USER != "$ADMIN" && $DB_USER != root ]] || die \'Application and admin accounts must be distinct\'\n[[ $PORT =~ ^[0-9]{1,5}$ ]] && (( 10#$PORT >= 1 && 10#$PORT <= 65535 )) || die \'MySQL port must be 1-65535\'\nACCOUNT="\'$DB_USER\'@\'%\'"\n# Database-level GRANT treats underscores as wildcards unless escaped.\nGRANT_DATABASE=${DB_NAME//_/\\\\_}\n'),
+        (40, 62, 'if ! MYSQL_PWD="$MYSQL_ADMIN_PASSWORD" command mysql --protocol=TCP \\\n  --host="$HOST" --port="$PORT" --user="$ADMIN" --connect-timeout=10 \\\n  --default-character-set=utf8mb4 --binary-mode --batch --skip-column-names \\\n  >/dev/null 2>&1 <<SQL\nSET SESSION sql_mode = \'NO_ENGINE_SUBSTITUTION\';\nCREATE DATABASE IF NOT EXISTS \\`$DB_NAME\\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\nCREATE USER IF NOT EXISTS $ACCOUNT IDENTIFIED BY $(literal "$DB_PASSWORD");\nALTER USER $ACCOUNT IDENTIFIED BY $(literal "$DB_PASSWORD");\nREVOKE ALL PRIVILEGES, GRANT OPTION FROM $ACCOUNT;\nGRANT ALL PRIVILEGES ON \\`$GRANT_DATABASE\\`.* TO $ACCOUNT;\n'),
+        (63, 65, 'then die \'MySQL provisioning failed; check connectivity/admin privileges and rerun.\'\nfi\nprintf \'[db-users] %s: ALL PRIVILEGES on %s\\n\' "$DB_USER" "$DB_NAME"\n'),
+    ]),
+    ('server/src/config.ts', 'be52a1160fc6712dbf6f5f75543f3c43f580783cc67d240a9d4f89446ca4ad69', '9ed05a716e20c97a2ce77df96effe3f601e632a905d9f83ff195b54b08cf5f6b', [
+        (1, 1, "import {\n  DATABASE_SETTING_KEYS,\n  RUNTIME_DATABASE_SCOPE,\n  missingDatabaseSettings,\n  mysqlConnectionConfig,\n  type DatabaseSettings,\n  type MysqlConnectionConfig,\n} from './db/config.js';\n"),
+        (51, 52, '  ...DATABASE_SETTING_KEYS,\n'),
+        (64, 65, ''),
+        (97, 98, "  missingServiceConfig: string[];\n  /** Own writable store, isolated from OfficePulse's read-only connection. */\n  database: MysqlConnectionConfig | null;\n  /** DB_* rows from app=aida-admin-runtime, never writer credentials. */\n  runtimeDatabase: MysqlConnectionConfig | null;\n"),
+        (102, 103, 'export function loadConfig(\n  env: NodeJS.ProcessEnv = process.env,\n  runtimeSettings: DatabaseSettings = {},\n): AppConfig {\n'),
+        (110, 111, '  const missingServiceConfig: string[] = [];\n'),
+        (119, 119, "        name !== 'DB_PORT' &&\n"),
+        (127, 127, "  }\n\n  missingServiceConfig.push(\n    ...missingDatabaseSettings(runtimeSettings).map((key) => `${RUNTIME_DATABASE_SCOPE}/${key}`),\n  );\n  let database: MysqlConnectionConfig | null = null;\n  let runtimeDatabase: MysqlConnectionConfig | null = null;\n  try {\n    if (!missingDatabaseSettings(serviceConfig).length) {\n      database = mysqlConnectionConfig(serviceConfig, 'aida-admin');\n      if (database.database !== 'aida_admin_db')\n        throw new Error('aida-admin/DB_NAME must be the dedicated aida_admin_db database');\n    }\n    if (!missingDatabaseSettings(runtimeSettings).length) {\n      runtimeDatabase = mysqlConnectionConfig(runtimeSettings, RUNTIME_DATABASE_SCOPE);\n      if (\n        runtimeDatabase.database !== 'aidacalls_db' &&\n        !/^aida_[a-z0-9_]+_test$/.test(runtimeDatabase.database)\n      ) {\n        throw new Error(\n          'aida-admin-runtime/DB_NAME must be aidacalls_db or a disposable aida_*_test schema',\n        );\n      }\n    }\n  } catch (error) {\n    throw new ConfigError(\n      error instanceof Error ? error.message : 'Invalid database configuration',\n    );\n"),
+        (167, 167, '    database,\n    runtimeDatabase,\n'),
+    ]),
+    ('server/src/db/config.ts', None, '186422dfa0ccbd94a9c08256e4dd9e7b523c1aa70a6e42a1f8fd97072cb3aac4', [
+        (0, 0, "/** Canonical PlatformConfig setting keys; each database has its own app scope. */\nexport const DATABASE_SETTING_KEYS = [\n  'DB_HOST',\n  'DB_PORT',\n  'DB_NAME',\n  'DB_USER',\n  'DB_PASSWORD',\n] as const;\nexport const REQUIRED_DATABASE_KEYS = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'] as const;\nexport const RUNTIME_DATABASE_SCOPE = 'aida-admin-runtime';\nexport type DatabaseSettingKey = (typeof DATABASE_SETTING_KEYS)[number];\nexport type DatabaseSettings = Partial<Record<DatabaseSettingKey, string>>;\n\nexport interface MysqlConnectionConfig {\n  host: string;\n  port: number;\n  database: string;\n  user: string;\n  password: string;\n}\n\nexport function missingDatabaseSettings(settings: DatabaseSettings): DatabaseSettingKey[] {\n  return REQUIRED_DATABASE_KEYS.filter((key) => !settings[key]?.trim());\n}\n\n/** Never construct or percent-decode a URL: passwords are literal setting values. */\nexport function mysqlConnectionConfig(\n  settings: DatabaseSettings,\n  scope: string,\n): MysqlConnectionConfig {\n  const missing = missingDatabaseSettings(settings);\n  if (missing.length)\n    throw new Error(\n      `Missing database configuration: ${missing.map((key) => `${scope}/${key}`).join(', ')}`,\n    );\n  const host = settings.DB_HOST!.trim();\n  const database = settings.DB_NAME!.trim();\n  const user = settings.DB_USER!.trim();\n  const rawPort = settings.DB_PORT?.trim() || '3306';\n  if (!/^[0-9]+$/.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) {\n    throw new Error(`Invalid database configuration: ${scope}/DB_PORT must be 1-65535`);\n  }\n  if (/[\\s/@?#]/.test(host))\n    throw new Error(\n      `Invalid database configuration: ${scope}/DB_HOST must be a hostname or IP address`,\n    );\n  if (!/^[A-Za-z0-9_]{1,64}$/.test(database))\n    throw new Error(`Invalid database configuration: ${scope}/DB_NAME must be a plain identifier`);\n  return { host, port: Number(rawPort), database, user, password: settings.DB_PASSWORD! };\n}\n"),
+    ]),
+    ('server/src/db/mysql.ts', 'e5bf9fa6c79dd84ca07ace28983d683367ab3dd88a5d5c338219afcfda648a54', '96cf5b24f957f3ac411295eaab74e6bd3cbe6c5e09bebe240747687df9a8f0fc', [
+        (0, 0, "import type { MysqlConnectionConfig } from './config.js';\n"),
+        (11, 17, "export function createPool(config: MysqlConnectionConfig): Pool {\n  if (config.database !== 'aida_admin_db') {\n    throw new Error('aida-admin/DB_NAME must be the dedicated aida_admin_db database');\n"),
+        (18, 20, ''),
+        (21, 26, '    ...config,\n'),
+    ]),
+    ('server/src/deps.ts', '11b5305c33584168b53a06cf5d39a08d991e9a24405b818820e8da7a66b4947e', 'f874a0d269d3110505739da9385e13f04142395d9e4b230c5b8d21e495c1c22d', [
+        (27, 28, "import { MysqlRuntimeReader, type RuntimeReader } from './officepulse/runtime-db.js';\n"),
+        (83, 85, '  const pool = config.database ? createPool(config.database) : null;\n'),
+        (87, 88, ''),
+        (105, 106, '    runtimeReader: config.runtimeDatabase ? new MysqlRuntimeReader(config.runtimeDatabase) : null,\n'),
+    ]),
+    ('server/src/diagnostics.ts', 'c524f4bb529f46e8237875bb44f954349e32b88032241fb5fd5eab3956d32285', '415581523de376172b81d2b4c84d8a45b90616e80a758e08fbff81d0c82bdb2f', [
+        (0, 1, "import type { AppConfig } from './config.js';\n"),
+        (121, 122, '  missingConfiguration: string[];\n'),
+        (201, 202, '  if (!config.database) {\n'),
+        (205, 207, "        'aida-admin/DB_HOST, DB_NAME, DB_USER and DB_PASSWORD are not fully configured: OAuth state and the identity-event cursor are in memory; application sessions remain in Identity',\n      fix: 'Set the aida-admin DB_* rows during AidaPlatformDB app setup for the dedicated aida_admin_db MySQL database',\n"),
+        (209, 210, '  if (!config.runtimeDatabase) {\n'),
+        (213, 215, '        \'aida-admin-runtime/DB_HOST, DB_NAME, DB_USER and DB_PASSWORD are not fully configured, so the runtime views (calls and dependencies) answer 503\',\n      fix: "Set the aida-admin-runtime DB_* rows for aidacalls_db using the read-only aidaadmin_ro account provisioned by AidaPlatformDB through OfficePulse\'s scripts/db-users.sh",\n'),
+    ]),
+    ('server/src/officepulse/runtime-db.ts', 'f661b108009fe0b10600133948583bb2257eac488c4971d58fd51dc5b9a5c5b3', '03f31720950324ead385ac2e79d41f95e944972834c4ef04e2403f651e0ce3e7', [
+        (16, 16, "import type { MysqlConnectionConfig } from '../db/config.js';\nexport type { MysqlConnectionConfig } from '../db/config.js';\n"),
+        (127, 159, ''),
+    ]),
+    ('server/src/platform-config.ts', 'e81d47d456e94e9745b3974f88e11e8948d99ad42663d8cf40e8cd57f7fa637a', '4b1e4189c0f5dc4cb4fbd0ebea1e5bd6a9aa543c28ace00dce05b399a3fd7449', [
+        (3, 3, "\nimport {\n  DATABASE_SETTING_KEYS,\n  RUNTIME_DATABASE_SCOPE,\n  type DatabaseSettingKey,\n  type DatabaseSettings,\n} from './db/config.js';\n"),
+        (27, 28, "    // Database credentials cannot fall through to another application's shared scope.\n    const scopes = DATABASE_SETTING_KEYS.includes(key as DatabaseSettingKey)\n      ? ['aida-admin']\n      : SCOPES;\n    for (const scope of scopes) {\n"),
+        (49, 49, "/** The reader is a separate scoped DB_* configuration, not an alias of the writer. */\nexport function resolveRuntimeDatabaseSettings(rows: NocoRecord[]): DatabaseSettings {\n  const settings: DatabaseSettings = {};\n  const seen = new Set<string>();\n  for (const row of rows) {\n    const key = String(row.settingKey ?? '') as DatabaseSettingKey;\n    if (row.app !== RUNTIME_DATABASE_SCOPE || !DATABASE_SETTING_KEYS.includes(key)) continue;\n    if (seen.has(key))\n      throw new ConfigError(`Duplicate PlatformConfig setting: ${RUNTIME_DATABASE_SCOPE}/${key}`);\n    seen.add(key);\n    const value = String(row.settingValue ?? '');\n    if (value.trim()) settings[key] = value;\n  }\n  return settings;\n}\n\n"),
+        (65, 66, '  return loadConfig(resolveSettings(env, rows), resolveRuntimeDatabaseSettings(rows));\n'),
+    ]),
+    ('server/src/runtime/routes.ts', '4cea976c0b7b7e5dbc69ede8c6691ed2a9c6915a43ba76f7737fdddc48c26db1', '1e8dbc41e3889c96ecd0acecf819a4447d25fde984b560e3152b806ccaa88c28', [
+        (7, 7, "import { REQUIRED_DATABASE_KEYS, RUNTIME_DATABASE_SCOPE } from '../db/config.js';\n"),
+        (120, 123, "          'The OfficePulse runtime database is not configured: set DB_HOST, DB_NAME, DB_USER and DB_PASSWORD ' +\n          'in app=aida-admin-runtime for the read-only aidaadmin_ro account on aidacalls_db',\n        missingConfiguration: REQUIRED_DATABASE_KEYS.map(\n          (key) => `${RUNTIME_DATABASE_SCOPE}/${key}`,\n        ),\n"),
+    ]),
+]
