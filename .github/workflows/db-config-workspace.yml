@@ -1,29 +1,93 @@
-name: DB configuration workspace
+name: Validate database configuration
 on:
   push:
     branches: [chore/standard-db-settings-20260929]
     paths: [.github/workflows/db-config-workspace.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  workspace:
+  verify:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: db-users-test
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_USER: aida_admin_app
+          MYSQL_PASSWORD: ci-test
+          MYSQL_DATABASE: aida_admin_db
+        ports: ['3306:3306']
+        options: --health-cmd="mysqladmin ping --silent" --health-interval=5s --health-timeout=5s --health-retries=30
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Fetch latest development sources and locked dependencies
+          cache: npm
+      - name: Apply reviewed source, tests and documentation
         run: |
-          mkdir sources
-          for repo in AidaAdmin AidaAgent OfficePulseAidaIntegration AidaPlatformDB; do
-            git clone --depth 1 --branch dev "https://github.com/localsplash/${repo}.git" "sources/${repo}"
-            git -C "sources/${repo}" rev-parse HEAD > "sources/${repo}/.source-commit"
-          done
-          (cd sources/AidaAdmin && npm ci --ignore-scripts)
-          (cd sources/OfficePulseAidaIntegration && npm ci --ignore-scripts)
-          tar --exclude=.git -czf sources.tar.gz sources
+          python - <<'PY'
+          import hashlib, runpy
+          from pathlib import Path
+          errors = []
+          for script in sorted(Path('.').glob('.db-config-*-edits.py')):
+              for name, before, after, edits in runpy.run_path(str(script))['EDITS']:
+                  path = Path(name)
+                  old = path.read_text() if path.exists() else ''
+                  assert hashlib.sha256(old.encode()).hexdigest() == before if before else not path.exists(), name
+                  lines = old.splitlines(True)
+                  for start, end, replacement in reversed(edits):
+                      lines[start:end] = [replacement]
+                  new = ''.join(lines)
+                  path.parent.mkdir(parents=True, exist_ok=True)
+                  path.write_text(new)
+                  actual = hashlib.sha256(new.encode()).hexdigest()
+                  if after and actual != after:
+                      errors.append(name)
+                      print('Integrity mismatch:', name, actual, 'expected', after)
+                  else:
+                      print('Verified:', name)
+          assert not errors, errors
+          PY
+          rm .github/workflows/db-config-workspace.yml .db-config-*-edits.py
+          git diff --check
+      - name: Format, lint, typecheck, test and build
+        env:
+          AIDA_ADMIN_TEST_DATABASE_URL: mysql://aida_admin_app:ci-test@127.0.0.1:3306/aida_admin_db
+          TEST_DB_USERS_MYSQL_URL: mysql://root:db-users-test@127.0.0.1:3306/aida_db_users_test
+        run: |
+          npm ci
+          sudo apt-get update -qq
+          sudo apt-get install -y default-mysql-client
+          npx prettier --write README.md
+          npm run format:check
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build
+      - name: Browser regression suite
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Publish validated work branch only
+        run: |
+          git checkout HEAD -- .github/workflows/db-config-workspace.yml .db-config-core-edits.py .db-config-test-edits.py .db-config-doc-edits.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: replace database URLs with isolated scoped DB settings'
+          git push origin HEAD:${{ github.ref_name }}
+          echo "VALIDATED_COMMIT=$(git rev-parse HEAD)"
+          echo "VALIDATED_TREE=$(git rev-parse HEAD^{tree})"
+      - name: Collect diagnostics
+        if: failure()
+        run: tar --exclude=.git --exclude=node_modules --exclude=server/dist --exclude=web/dist -czf "$RUNNER_TEMP/db-config-diagnostics.tgz" .
       - uses: actions/upload-artifact@v4
+        if: failure()
         with:
-          name: db-configuration-dependencies
-          path: sources.tar.gz
+          name: db-config-diagnostics
+          path: ${{ runner.temp }}/db-config-diagnostics.tgz
           retention-days: 1
