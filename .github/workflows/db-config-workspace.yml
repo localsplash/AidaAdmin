@@ -9,16 +9,21 @@ jobs:
   workspace:
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch latest development sources
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fetch latest development sources and locked dependencies
         run: |
           mkdir sources
           for repo in AidaAdmin AidaAgent OfficePulseAidaIntegration AidaPlatformDB; do
             git clone --depth 1 --branch dev "https://github.com/localsplash/${repo}.git" "sources/${repo}"
             git -C "sources/${repo}" rev-parse HEAD > "sources/${repo}/.source-commit"
           done
+          (cd sources/AidaAdmin && npm ci --ignore-scripts)
+          (cd sources/OfficePulseAidaIntegration && npm ci --ignore-scripts)
           tar --exclude=.git -czf sources.tar.gz sources
       - uses: actions/upload-artifact@v4
         with:
-          name: db-configuration-sources
+          name: db-configuration-dependencies
           path: sources.tar.gz
           retention-days: 1
