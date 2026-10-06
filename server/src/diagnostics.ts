@@ -1,4 +1,4 @@
-import type { AppConfig, ServiceEnvVar } from './config.js';
+import type { AppConfig } from './config.js';
 import { parseCidrList } from './config.js';
 import { missingNocoDbConfig } from './deps.js';
 
@@ -119,7 +119,7 @@ export interface Diagnostic {
 export interface DiagnosticsReport {
   callbackUri: string | null;
   authorizeUrl: string | null;
-  missingConfiguration: ServiceEnvVar[];
+  missingConfiguration: string[];
   findings: Diagnostic[];
   /** True when nothing blocks a login attempt. */
   loginReady: boolean;
@@ -199,20 +199,20 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
       fix: 'Set SESSION_SECRET to a long random value',
     });
   }
-  if (!config.serviceConfig.AIDA_ADMIN_DATABASE_URL) {
+  if (!config.database) {
     findings.push({
       level: 'warning',
       summary:
-        'AIDA_ADMIN_DATABASE_URL is not set: OAuth state and the identity-event cursor are in memory; application sessions remain in Identity',
-      fix: 'Point AIDA_ADMIN_DATABASE_URL at the dedicated aida_admin_db MySQL database',
+        'aida-admin/DB_HOST, DB_NAME, DB_USER and DB_PASSWORD are not fully configured: OAuth state and the identity-event cursor are in memory; application sessions remain in Identity',
+      fix: 'Set the aida-admin DB_* rows during AidaPlatformDB app setup for the dedicated aida_admin_db MySQL database',
     });
   }
-  if (!config.serviceConfig.OFFICEPULSE_RUNTIME_DATABASE_URL) {
+  if (!config.runtimeDatabase) {
     findings.push({
       level: 'warning',
       summary:
-        'OFFICEPULSE_RUNTIME_DATABASE_URL is not set, so the runtime views (calls and dependencies) answer 503',
-      fix: "Point OFFICEPULSE_RUNTIME_DATABASE_URL at aidacalls_db as the read-only aidaadmin_ro account from OfficePulse's deploy/sql/grants.sql",
+        'aida-admin-runtime/DB_HOST, DB_NAME, DB_USER and DB_PASSWORD are not fully configured, so the runtime views (calls and dependencies) answer 503',
+      fix: "Set the aida-admin-runtime DB_* rows for aidacalls_db using the read-only aidaadmin_ro account provisioned by AidaPlatformDB through OfficePulse's scripts/db-users.sh",
     });
   }
   if (!config.serviceConfig.OFFICEPULSE_API_BASE_URL) {

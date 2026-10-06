@@ -14,6 +14,8 @@
  */
 
 import mysql from 'mysql2/promise';
+import type { MysqlConnectionConfig } from '../db/config.js';
+export type { MysqlConnectionConfig } from '../db/config.js';
 
 /** Observed runtime label; no routing intent is accepted by Admin. */
 export type DestinationType = string;
@@ -125,38 +127,6 @@ export class RuntimeDbError extends Error {}
 
 /** Calls without an end older than this are presumed lost, not live. */
 export const ORPHAN_HORIZON_HOURS = 6;
-
-export interface MysqlConnectionConfig {
-  host: string;
-  port: number;
-  user: string;
-  password: string;
-  database: string;
-}
-
-/** `mysql://user:password@host:3306/aidacalls_db` → connection fields. */
-export function parseMysqlUrl(url: string): MysqlConnectionConfig {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new RuntimeDbError('OFFICEPULSE_RUNTIME_DATABASE_URL is not a valid URL');
-  }
-  if (parsed.protocol !== 'mysql:') {
-    throw new RuntimeDbError('OFFICEPULSE_RUNTIME_DATABASE_URL must start with mysql://');
-  }
-  const database = parsed.pathname.replace(/^\//, '');
-  if (!parsed.hostname || !database) {
-    throw new RuntimeDbError('OFFICEPULSE_RUNTIME_DATABASE_URL must name a host and a database');
-  }
-  return {
-    host: parsed.hostname,
-    port: parsed.port ? Number(parsed.port) : 3306,
-    user: decodeURIComponent(parsed.username),
-    password: decodeURIComponent(parsed.password),
-    database,
-  };
-}
 
 /** A whole-number bound that is safe to inline into SQL. */
 function clampInt(value: number | undefined, fallback: number, max: number): number {
