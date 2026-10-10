@@ -212,7 +212,7 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
       level: 'warning',
       summary:
         'OFFICEPULSE_API_BASE_URL is not set, so PBX inventory, the runtime views (calls and dependencies) and the OfficePulse readiness probe answer 503',
-      fix: 'Set OFFICEPULSE_API_BASE_URL to the private OfficePulseAidaIntegration API (port 8085)',
+      fix: 'Set OFFICEPULSE_API_BASE_URL to the private AidaPbx API (port 8085)',
     });
   }
   if (parseCidrList(config.serviceConfig.trustedCIDR).length === 0) {

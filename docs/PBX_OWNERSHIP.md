@@ -1,7 +1,7 @@
 # Asterisk source of truth
 
 Asterisk owns extensions, queues, queue membership, trunks and effective routing.
-OfficePulseAidaIntegration owns the PBX integration API and its operations UI.
+AidaPbx owns the PBX integration API and its operations UI.
 AidaAdmin owns business administration through Identity, business profiles and
 appearance. There is no separate AidaOfficePbxAdmin application. AidaHandset and
 AidaAgent work remains deferred. See the [cross-project decision](https://github.com/localsplash/identity/blob/dev/docs/PBX_OWNERSHIP.md).
