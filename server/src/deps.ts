@@ -25,7 +25,7 @@ import { CachedBaseResolver, resolveBaseId } from './nocodb/base.js';
 import { reportDrift } from './nocodb/schema.js';
 import { createRepos, NocoStore, type AidaConfigRepos, type AuditLog } from './nocodb/repos.js';
 import { HttpOfficePulseClient, type OfficePulseClient } from './officepulse/client.js';
-import { MysqlRuntimeReader, type RuntimeReader } from './officepulse/runtime-db.js';
+import { HttpRuntimeReader, type RuntimeReader } from './officepulse/runtime.js';
 
 export interface AppDeps {
   observerIssuer?: ObserverIssuer | null;
@@ -101,7 +101,8 @@ export function createDeps(config: AppConfig): AppDeps {
     missingNocoDb: missingNocoDbConfig(config),
     baseResolver: nocodb?.baseResolver ?? null,
     officePulse: officePulseBase ? new HttpOfficePulseClient(officePulseBase) : null,
-    runtimeReader: config.runtimeDatabase ? new MysqlRuntimeReader(config.runtimeDatabase) : null,
+    // Runtime views come from OfficePulse's private API; AidaAdmin has no login on its database.
+    runtimeReader: officePulseBase ? new HttpRuntimeReader(officePulseBase) : null,
     pool,
     dbReady: pool ? () => ping(pool) : async () => true,
     configReady: nocodb

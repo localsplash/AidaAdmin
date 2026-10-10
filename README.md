@@ -11,7 +11,7 @@ Identity owns every person, business, membership and staff application session.
 | `platform_db`           | Identity              | Authenticated Identity API only                                        |
 | NocoDB `PlatformConfig` | Platform applications | Tenant PBX scope, assistant profiles/assignments, appearance, settings |
 | `aida_admin_db` (MySQL) | AidaAdmin             | OAuth state, Identity event receipts/replay cursor, append-only audit  |
-| `aidacalls_db` (MySQL)  | OfficePulse           | Read-only runtime views; commands through the private HTTP API         |
+| `aidacalls_db` (MySQL)  | OfficePulse           | None: runtime views and commands through OfficePulse's private API     |
 | Asterisk tables         | PBX project           | OfficePulse adapter only; no AidaAdmin DDL or direct writes            |
 
 There is no AidaAdmin PostgreSQL dependency, local user/membership directory,
@@ -59,12 +59,11 @@ errors. `PARENT_DOMAIN` supplies `ID_PARENT_DOMAIN` when that key is absent.
 
 The rows this app reads, by the scope they belong in:
 
-| Scope                | Keys                                                                                                                                                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `aida-admin`         | `PUBLIC_BASE_URL`, `SESSION_SECRET`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT`, `ID_BASE_URL` (and optionally `ID_PUBLIC_BASE_URL`), `ID_CLIENT_SECRET` (only while Identity runs in `secret`/`dual` mode), `ID_TRUSTED_PROXY_CIDRS` |
-| `aida-admin-runtime` | `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT` — the separate read-only connection to OfficePulse's runtime database                                                                                                                      |
-| `aida`               | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse                                                                                                                                    |
-| `*`                  | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME`                                                                                                                                                                                                            |
+| Scope        | Keys                                                                                                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aida-admin` | `PUBLIC_BASE_URL`, `SESSION_SECRET`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT`, `ID_BASE_URL` (and optionally `ID_PUBLIC_BASE_URL`), `ID_CLIENT_SECRET` (only while Identity runs in `secret`/`dual` mode), `ID_TRUSTED_PROXY_CIDRS` |
+| `aida`       | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse                                                                                                                                    |
+| `*`          | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME`                                                                                                                                                                                                            |
 
 `ID_BASE_URL` stays in the `aida-admin` scope on purpose: OfficePulse refuses
 that key in any scope it reads. Inbound `/id/events` deliveries are admitted by
@@ -89,10 +88,11 @@ URL-encoded; `DB_PORT` defaults to 3306 when omitted.
 
 `app=aida-admin` owns `aida_admin_db` as `aida_admin_app`. Its `DB_*` keys may be
 overridden by the same environment keys, but never fall through to `aida` or `*`.
-`app=aida-admin-runtime` independently describes `aidacalls_db` as `aidaadmin_ro`.
-The reader resolves only that scope: it cannot inherit Admin's writable credentials
-or OfficePulse's writer. Its DB host/port may differ because the clients can reach
-the same MySQL server over different network paths. No database URL setting is read.
+This is AidaAdmin's only database connection. No database URL setting is read.
+Runtime call history, dependency status and issues come from OfficePulse's
+private API (`OFFICEPULSE_API_BASE_URL`), not from a login on its `aidacalls_db`;
+the former `aida-admin-runtime` (later `aida-pbx-reader`) rows and the
+`aidaadmin_ro` account are no longer used.
 
 To run own-store account provisioning independently, export the resolved
 `app=aida-admin` values and an operator's MySQL admin password:
@@ -184,7 +184,7 @@ Identity's parent domain must allow the callback
 names remain deployment settings; use `X.TLD` for another operator.
 
 `/healthz` is independent of authentication and dependencies. `/readyz` reports
-Admin persistence and runtime database status. `/id/events` accepts only the
+Admin persistence status. `/id/events` accepts only the
 configured Identity source CIDRs. Webhooks durably record receipts but do not
 advance the ordered replay cursor; missed lower event IDs remain replayable.
 Browser mutations require the CSRF token, and browser-supplied `X-Aida-*`

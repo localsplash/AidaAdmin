@@ -5,15 +5,14 @@ import type { AppDeps } from '../deps.js';
 import type { Logger } from '../logger.js';
 import { NotFoundError } from '../nocodb/repos.js';
 import { OfficePulseError } from '../officepulse/client.js';
-import { REQUIRED_DATABASE_KEYS, RUNTIME_DATABASE_SCOPE } from '../db/config.js';
-import { RuntimeDbError, type RuntimeCallSession } from '../officepulse/runtime-db.js';
+import type { RuntimeCallSession } from '../officepulse/runtime.js';
 
 /**
  * Runtime visibility and actions (issue #29). There is no AidaControl:
  * OfficePulseAidaIntegration orchestrates calls and owns the
- * `aidacalls_db` runtime database. AidaAdmin READS that database
- * through a read-only account and sends the few allowed ACTIONS to
- * OfficePulse's private HTTP API — never a proxy, never a table write.
+ * `aidacalls_db` runtime database. AidaAdmin READS runtime state and sends
+ * the few allowed ACTIONS through OfficePulse's private HTTP API; it has no
+ * login on that database — never a proxy, never a table access.
  *
  * Every route re-resolves the session, tenant, and role before touching
  * anything, so a revoked membership fails now, not at the next login.
@@ -114,46 +113,28 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
     return ctx.tenantId ?? undefined;
   }
 
+  function notConfigured(req: Request, res: Response): null {
+    res.status(503).json({
+      error: 'officepulse_not_configured',
+      message: 'OfficePulse is not configured: set OFFICEPULSE_API_BASE_URL',
+      missingConfiguration: ['OFFICEPULSE_API_BASE_URL'],
+      correlationId: req.correlationId,
+    });
+    return null;
+  }
+
+  /** Runtime views are read through OfficePulse's private API. */
   function reader(req: Request, res: Response) {
-    if (!deps.runtimeReader) {
-      res.status(503).json({
-        error: 'runtime_db_not_configured',
-        message:
-          'The OfficePulse runtime database is not configured: set DB_HOST, DB_NAME, DB_USER and DB_PASSWORD ' +
-          'in app=aida-admin-runtime for the read-only aidaadmin_ro account on aidacalls_db',
-        missingConfiguration: REQUIRED_DATABASE_KEYS.map(
-          (key) => `${RUNTIME_DATABASE_SCOPE}/${key}`,
-        ),
-        correlationId: req.correlationId,
-      });
-      return null;
-    }
-    return deps.runtimeReader;
+    return deps.runtimeReader ?? notConfigured(req, res);
   }
 
   function officePulse(req: Request, res: Response) {
-    if (!deps.officePulse) {
-      res.status(503).json({
-        error: 'officepulse_not_configured',
-        message: 'OfficePulse is not configured: set OFFICEPULSE_API_BASE_URL',
-        missingConfiguration: ['OFFICEPULSE_API_BASE_URL'],
-        correlationId: req.correlationId,
-      });
-      return null;
-    }
-    return deps.officePulse;
+    return deps.officePulse ?? notConfigured(req, res);
   }
 
   function fail(res: Response, req: Request, err: unknown): void {
     const correlationId = req.correlationId;
-    if (err instanceof RuntimeDbError) {
-      logger.error({ err, correlationId }, 'runtime database read failed');
-      res.status(502).json({
-        error: 'runtime_db_unavailable',
-        message: 'The OfficePulse runtime database could not be read',
-        correlationId,
-      });
-    } else if (err instanceof OfficePulseError) {
+    if (err instanceof OfficePulseError) {
       logger.error({ err, correlationId }, 'OfficePulse request failed');
       res.status(502).json({
         error: 'officepulse_unavailable',
@@ -375,7 +356,7 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
       const id = req.params.callSessionId as string;
 
       // The call must be this tenant's before anything is sent. Without the
-      // runtime database that cannot be established, so only a Super Admin
+      // runtime views that cannot be established, so only a Super Admin
       // may proceed on trust.
       let tenantId: string | null = ctx.tenantId;
       if (deps.runtimeReader) {

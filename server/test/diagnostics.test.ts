@@ -104,20 +104,12 @@ describe('preflight report', () => {
 
   it('passes when everything needed is configured', () => {
     const report = buildDiagnostics(
-      loadConfig(
-        {
-          ...base,
-          ID_PARENT_DOMAIN: 'localsplash.ai',
-          NOCODB_BASE_URL: 'https://nocodb.localsplash.ai',
-          NOCODB_API_TOKEN: 'token-value',
-        },
-        {
-          DB_HOST: 'runtime-db',
-          DB_NAME: 'aidacalls_db',
-          DB_USER: 'aidaadmin_ro',
-          DB_PASSWORD: 'reader-pw',
-        },
-      ),
+      loadConfig({
+        ...base,
+        ID_PARENT_DOMAIN: 'localsplash.ai',
+        NOCODB_BASE_URL: 'https://nocodb.localsplash.ai',
+        NOCODB_API_TOKEN: 'token-value',
+      }),
     );
     expect(report.loginReady).toBe(true);
     expect(report.findings).toEqual([]);
