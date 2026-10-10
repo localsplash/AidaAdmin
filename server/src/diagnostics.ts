@@ -211,8 +211,8 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
     findings.push({
       level: 'warning',
       summary:
-        'aida-admin-runtime/DB_HOST, DB_NAME, DB_USER and DB_PASSWORD are not fully configured, so the runtime views (calls and dependencies) answer 503',
-      fix: "Set the aida-admin-runtime DB_* rows for aidacalls_db using the read-only aidaadmin_ro account provisioned by AidaPlatformDB through OfficePulse's scripts/db-users.sh",
+        'aida-pbx-reader/DB_HOST, DB_NAME, DB_USER and DB_PASSWORD are not fully configured, so the runtime views (calls and dependencies) answer 503',
+      fix: "Set the aida-pbx-reader DB_* rows for aidacalls_db using the read-only aidaadmin_ro account provisioned by AidaPlatformDB through OfficePulse's scripts/db-users.sh",
     });
   }
   if (!config.serviceConfig.OFFICEPULSE_API_BASE_URL) {

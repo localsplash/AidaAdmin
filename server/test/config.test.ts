@@ -123,7 +123,7 @@ it('accepts canonical OfficePulse URL while preserving the existing server-only 
 });
 
 it('requires scoped runtime credentials in production without reusing the admin account', () => {
-  expect(() => loadConfig(fullProductionEnv())).toThrow(/aida-admin-runtime\/DB_USER/);
+  expect(() => loadConfig(fullProductionEnv())).toThrow(/aida-pbx-reader\/DB_USER/);
 });
 
 it('uses literal DB fields for two isolated connections and defaults the port', () => {
@@ -154,7 +154,7 @@ it('validates DB ports and schema boundaries without disclosing credentials', ()
       /DB_PORT/,
     );
     expect(() => loadConfig(fullProductionEnv(), { ...runtimeSettings, DB_PORT })).toThrow(
-      /aida-admin-runtime\/DB_PORT/,
+      /aida-pbx-reader\/DB_PORT/,
     );
   }
   expect(() =>
@@ -162,5 +162,5 @@ it('validates DB ports and schema boundaries without disclosing credentials', ()
   ).toThrow(/aida-admin\/DB_NAME/);
   expect(() =>
     loadConfig(fullProductionEnv(), { ...runtimeSettings, DB_NAME: 'asterisk' }),
-  ).toThrow(/aida-admin-runtime\/DB_NAME/);
+  ).toThrow(/aida-pbx-reader\/DB_NAME/);
 });

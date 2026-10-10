@@ -105,7 +105,7 @@ export interface AppConfig {
   missingServiceConfig: string[];
   /** Own writable store, isolated from OfficePulse's read-only connection. */
   database: MysqlConnectionConfig | null;
-  /** DB_* rows from app=aida-admin-runtime, never writer credentials. */
+  /** DB_* rows from app=aida-pbx-reader, never writer credentials. */
   runtimeDatabase: MysqlConnectionConfig | null;
 }
 
@@ -160,7 +160,7 @@ export function loadConfig(
         !/^aida_[a-z0-9_]+_test$/.test(runtimeDatabase.database)
       ) {
         throw new Error(
-          'aida-admin-runtime/DB_NAME must be aidacalls_db or a disposable aida_*_test schema',
+          'aida-pbx-reader/DB_NAME must be aidacalls_db or a disposable aida_*_test schema',
         );
       }
     }

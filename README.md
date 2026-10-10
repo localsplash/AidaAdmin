@@ -59,12 +59,12 @@ errors. `PARENT_DOMAIN` supplies `ID_PARENT_DOMAIN` when that key is absent.
 
 The rows this app reads, by the scope they belong in:
 
-| Scope                | Keys                                                                                                                                                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `aida-admin`         | `PUBLIC_BASE_URL`, `SESSION_SECRET`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT`, `ID_BASE_URL` (and optionally `ID_PUBLIC_BASE_URL`), `ID_CLIENT_SECRET` (only while Identity runs in `secret`/`dual` mode), `ID_TRUSTED_PROXY_CIDRS` |
-| `aida-admin-runtime` | `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT` — the separate read-only connection to OfficePulse's runtime database                                                                                                                      |
-| `aida`               | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse                                                                                                                                    |
-| `*`                  | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME`                                                                                                                                                                                                            |
+| Scope             | Keys                                                                                                                                                                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `aida-admin`      | `PUBLIC_BASE_URL`, `SESSION_SECRET`, `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT`, `ID_BASE_URL` (and optionally `ID_PUBLIC_BASE_URL`), `ID_CLIENT_SECRET` (only while Identity runs in `secret`/`dual` mode), `ID_TRUSTED_PROXY_CIDRS` |
+| `aida-pbx-reader` | `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, optional `DB_PORT` — the separate read-only connection to OfficePulse's runtime database                                                                                                                      |
+| `aida`            | `OFFICEPULSE_API_BASE_URL`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — shared with AidaAgent and OfficePulse                                                                                                                                    |
+| `*`               | `PARENT_DOMAIN`, `trustedCIDR`, `ENVIRONMENT_NAME`                                                                                                                                                                                                            |
 
 `ID_BASE_URL` stays in the `aida-admin` scope on purpose: OfficePulse refuses
 that key in any scope it reads. Inbound `/id/events` deliveries are admitted by
@@ -89,7 +89,10 @@ URL-encoded; `DB_PORT` defaults to 3306 when omitted.
 
 `app=aida-admin` owns `aida_admin_db` as `aida_admin_app`. Its `DB_*` keys may be
 overridden by the same environment keys, but never fall through to `aida` or `*`.
-`app=aida-admin-runtime` independently describes `aidacalls_db` as `aidaadmin_ro`.
+`app=aida-pbx-reader` independently describes `aidacalls_db` as `aidaadmin_ro`.
+(`aida-pbx` is the bridge between OfficePulse's Asterisk and Aida's LiveKit agent;
+this scope was called `aida-admin-runtime`, and rows left under that name stop
+startup until AidaPlatformDB's `install.sh` moves them.)
 The reader resolves only that scope: it cannot inherit Admin's writable credentials
 or OfficePulse's writer. Its DB host/port may differ because the clients can reach
 the same MySQL server over different network paths. No database URL setting is read.

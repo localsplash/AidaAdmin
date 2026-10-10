@@ -110,7 +110,7 @@ describe('RuntimeScreen', () => {
       body: {
         error: 'runtime_db_not_configured',
         message: 'The OfficePulse runtime database is not configured',
-        missingConfiguration: ['aida-admin-runtime/DB_HOST'],
+        missingConfiguration: ['aida-pbx-reader/DB_HOST'],
       },
     }));
     render(
@@ -118,7 +118,7 @@ describe('RuntimeScreen', () => {
         <RuntimeScreen session={superAdmin} />
       </MemoryRouter>,
     );
-    expect(await screen.findByRole('alert')).toHaveTextContent(/aida-admin-runtime\/DB_HOST/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/aida-pbx-reader\/DB_HOST/);
   });
 
   it('shows orphans as detection only', async () => {

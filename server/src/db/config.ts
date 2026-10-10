@@ -7,7 +7,10 @@ export const DATABASE_SETTING_KEYS = [
   'DB_PASSWORD',
 ] as const;
 export const REQUIRED_DATABASE_KEYS = ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD'] as const;
-export const RUNTIME_DATABASE_SCOPE = 'aida-admin-runtime';
+/** Read-only view of aida-pbx's database (the OfficePulse/LiveKit bridge's aidacalls_db). */
+export const RUNTIME_DATABASE_SCOPE = 'aida-pbx-reader';
+/** Former name of RUNTIME_DATABASE_SCOPE; AidaPlatformDB's installer moves its rows in place. */
+export const RETIRED_RUNTIME_DATABASE_SCOPE = 'aida-admin-runtime';
 export type DatabaseSettingKey = (typeof DATABASE_SETTING_KEYS)[number];
 export type DatabaseSettings = Partial<Record<DatabaseSettingKey, string>>;
 

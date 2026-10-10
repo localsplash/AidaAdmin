@@ -120,7 +120,7 @@ export function runtimeRoutes(logger: Logger, deps: AppDeps): Router {
         error: 'runtime_db_not_configured',
         message:
           'The OfficePulse runtime database is not configured: set DB_HOST, DB_NAME, DB_USER and DB_PASSWORD ' +
-          'in app=aida-admin-runtime for the read-only aidaadmin_ro account on aidacalls_db',
+          'in app=aida-pbx-reader for the read-only aidaadmin_ro account on aidacalls_db',
         missingConfiguration: REQUIRED_DATABASE_KEYS.map(
           (key) => `${RUNTIME_DATABASE_SCOPE}/${key}`,
         ),

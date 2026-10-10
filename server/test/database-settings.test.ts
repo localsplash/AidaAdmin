@@ -27,7 +27,7 @@ const reader = {
 };
 const rows = [
   ...Object.entries(admin).map(([key, value]) => setting('aida-admin', key, value)),
-  ...Object.entries(reader).map(([key, value]) => setting('aida-admin-runtime', key, value)),
+  ...Object.entries(reader).map(([key, value]) => setting('aida-pbx-reader', key, value)),
 ];
 afterEach(() => vi.restoreAllMocks());
 
@@ -44,7 +44,7 @@ describe('scoped database settings', () => {
   });
 
   it('never borrows global, shared, writer, or environment credentials for the reader', () => {
-    const unrelated = ['*', 'aida', 'officepulse', 'aida-agent'].flatMap((app) =>
+    const unrelated = ['*', 'aida', 'aida-pbx', 'aida-agent'].flatMap((app) =>
       Object.entries(admin).map(([key, value]) => setting(app, key, value)),
     );
     expect(resolveSettings({}, unrelated).DB_USER).toBeUndefined();
@@ -58,10 +58,18 @@ describe('scoped database settings', () => {
     expect(() =>
       resolveRuntimeDatabaseSettings([
         ...rows,
+        setting('aida-pbx-reader', 'DB_PASSWORD', 'dont-show-this'),
+      ]),
+    ).toThrow(/Duplicate.*aida-pbx-reader\/DB_PASSWORD/);
+    expect(() => mysqlConnectionConfig({ DB_HOST: 'h' }, 'reader')).toThrow(/reader\/DB_USER/);
+  });
+
+  it('refuses reader rows still under the retired scope name instead of ignoring them', () => {
+    expect(() =>
+      resolveRuntimeDatabaseSettings([
         setting('aida-admin-runtime', 'DB_PASSWORD', 'dont-show-this'),
       ]),
-    ).toThrow(/Duplicate.*aida-admin-runtime\/DB_PASSWORD/);
-    expect(() => mysqlConnectionConfig({ DB_HOST: 'h' }, 'reader')).toThrow(/reader\/DB_USER/);
+    ).toThrow(/aida-admin-runtime was renamed aida-pbx-reader/);
   });
 
   it('loads both connections through the NocoDB startup path', async () => {

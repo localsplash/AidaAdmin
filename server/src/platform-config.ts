@@ -4,6 +4,7 @@ import { resolveBaseId } from './nocodb/base.js';
 
 import {
   DATABASE_SETTING_KEYS,
+  RETIRED_RUNTIME_DATABASE_SCOPE,
   RUNTIME_DATABASE_SCOPE,
   type DatabaseSettingKey,
   type DatabaseSettings,
@@ -64,6 +65,11 @@ export function resolveRuntimeDatabaseSettings(rows: NocoRecord[]): DatabaseSett
   const seen = new Set<string>();
   for (const row of rows) {
     const key = String(row.settingKey ?? '') as DatabaseSettingKey;
+    // Rows left under the old name would otherwise be silently ignored.
+    if (row.app === RETIRED_RUNTIME_DATABASE_SCOPE)
+      throw new ConfigError(
+        `PlatformConfig scope ${RETIRED_RUNTIME_DATABASE_SCOPE} was renamed ${RUNTIME_DATABASE_SCOPE}: run AidaPlatformDB's install.sh (any phase) to move its rows`,
+      );
     if (row.app !== RUNTIME_DATABASE_SCOPE || !DATABASE_SETTING_KEYS.includes(key)) continue;
     if (seen.has(key))
       throw new ConfigError(`Duplicate PlatformConfig setting: ${RUNTIME_DATABASE_SCOPE}/${key}`);

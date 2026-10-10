@@ -175,7 +175,7 @@ describe('OperationsScreen', () => {
         body: {
           error: 'runtime_db_not_configured',
           message: 'The OfficePulse runtime database is not configured',
-          missingConfiguration: ['aida-admin-runtime/DB_HOST'],
+          missingConfiguration: ['aida-pbx-reader/DB_HOST'],
         },
       },
     });
@@ -184,7 +184,7 @@ describe('OperationsScreen', () => {
         <OperationsScreen />
       </MemoryRouter>,
     );
-    expect(await screen.findByRole('alert')).toHaveTextContent(/aida-admin-runtime\/DB_HOST/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/aida-pbx-reader\/DB_HOST/);
   });
 
   it('keeps the canonical POC diagnostic-only while native queue routing is unavailable', async () => {
