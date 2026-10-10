@@ -76,17 +76,6 @@ async function main(): Promise<void> {
         });
     }
 
-    if (deps.runtimeReader) {
-      void deps.runtimeReader.ping().then((ok) => {
-        if (ok) logger.info('OfficePulse runtime database (aidacalls_db) readable');
-        else {
-          logger.warn(
-            'OfficePulse runtime database is not reachable: runtime views answer 502 until it is',
-          );
-        }
-      });
-    }
-
     if (deps.idClient) {
       const idClient = deps.idClient;
       // Catch up on identity events missed while down, then (optionally)

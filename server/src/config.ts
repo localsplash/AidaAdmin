@@ -1,10 +1,8 @@
 import { z } from 'zod';
 import {
   DATABASE_SETTING_KEYS,
-  RUNTIME_DATABASE_SCOPE,
   missingDatabaseSettings,
   mysqlConnectionConfig,
-  type DatabaseSettings,
   type MysqlConnectionConfig,
 } from './db/config.js';
 
@@ -42,14 +40,14 @@ const envSchema = z.object({
 
 /**
  * External-service configuration (id login, NocoDB writes, the OfficePulse
- * private API and its runtime database). None of it is needed to run unit
+ * private API). None of it is needed to run unit
  * tests, but production startup requires every variable to be present.
  * Values are never logged — only names.
  *
  * There is no AidaControl: for the POC OfficePulseAidaIntegration is the
- * call orchestrator (its issue #9). AidaAdmin reads its `aidacalls_db`
- * runtime database through a read-only account and sends commands to the
- * same private HTTP API that handles provisioning.
+ * call orchestrator (its issue #9). AidaAdmin reads its runtime state
+ * and sends commands through the same private HTTP API that handles
+ * provisioning; it has no login on OfficePulse's `aidacalls_db`.
  */
 export const SERVICE_ENV_VARS = [
   'LIVEKIT_URL',
@@ -103,18 +101,13 @@ export interface AppConfig {
   serviceConfig: Partial<Record<ServiceEnvVar, string>>;
   /** Names (never values) of service variables absent from the environment. */
   missingServiceConfig: string[];
-  /** Own writable store, isolated from OfficePulse's read-only connection. */
+  /** Own writable store; AidaAdmin's only database connection. */
   database: MysqlConnectionConfig | null;
-  /** DB_* rows from app=aida-admin-runtime, never writer credentials. */
-  runtimeDatabase: MysqlConnectionConfig | null;
 }
 
 export class ConfigError extends Error {}
 
-export function loadConfig(
-  env: NodeJS.ProcessEnv = process.env,
-  runtimeSettings: DatabaseSettings = {},
-): AppConfig {
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
   if (!parsed.success) {
     const names = parsed.error.issues.map((issue) => issue.path.join('.')).join(', ');
@@ -142,27 +135,12 @@ export function loadConfig(
     }
   }
 
-  missingServiceConfig.push(
-    ...missingDatabaseSettings(runtimeSettings).map((key) => `${RUNTIME_DATABASE_SCOPE}/${key}`),
-  );
   let database: MysqlConnectionConfig | null = null;
-  let runtimeDatabase: MysqlConnectionConfig | null = null;
   try {
     if (!missingDatabaseSettings(serviceConfig).length) {
       database = mysqlConnectionConfig(serviceConfig, 'aida-admin');
       if (database.database !== 'aida_admin_db')
         throw new Error('aida-admin/DB_NAME must be the dedicated aida_admin_db database');
-    }
-    if (!missingDatabaseSettings(runtimeSettings).length) {
-      runtimeDatabase = mysqlConnectionConfig(runtimeSettings, RUNTIME_DATABASE_SCOPE);
-      if (
-        runtimeDatabase.database !== 'aidacalls_db' &&
-        !/^aida_[a-z0-9_]+_test$/.test(runtimeDatabase.database)
-      ) {
-        throw new Error(
-          'aida-admin-runtime/DB_NAME must be aidacalls_db or a disposable aida_*_test schema',
-        );
-      }
     }
   } catch (error) {
     throw new ConfigError(
@@ -209,6 +187,5 @@ export function loadConfig(
     serviceConfig,
     missingServiceConfig,
     database,
-    runtimeDatabase,
   };
 }

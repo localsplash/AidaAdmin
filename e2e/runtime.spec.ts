@@ -1,11 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Deployed smoke test against a REAL OfficePulse runtime database and API
+ * Deployed smoke test against a REAL OfficePulse private API
  * (issue #29's last definition-of-done item). It drives an already-running,
- * non-production AidaAdmin that has E2E_FAKE_SESSION=true and both
- * app=aida-admin-runtime DB_* settings and OFFICEPULSE_API_BASE_URL
- * pointed at the live services:
+ * non-production AidaAdmin that has E2E_FAKE_SESSION=true and
+ * OFFICEPULSE_API_BASE_URL pointed at the live service:
  *
  *   E2E_RUNTIME_URL=https://aida-admin.staging.example npm run test:e2e -- runtime
  *
@@ -16,7 +15,7 @@ const target = process.env.E2E_RUNTIME_URL;
 
 test.skip(!target, 'set E2E_RUNTIME_URL to a deployed non-production AidaAdmin');
 
-test('reads dependency status from the real aidacalls_db database', async ({ page }) => {
+test('reads dependency status from the real OfficePulse runtime', async ({ page }) => {
   await page.goto(`${target}/runtime`);
   await expect(page.getByRole('heading', { name: /^call history$/i })).toBeVisible();
   await page.getByRole('tab', { name: /dependencies/i }).click();
