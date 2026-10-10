@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Provision AidaAdmin's own store from its canonical app=aida-admin DB_* rows.
 # AidaPlatformDB runs this with the same DB_USER/DB_PASSWORD the app reads.
-# OfficePulse provisions the separate app=aida-pbx-reader read-only account.
 # MYSQL_ADMIN_HOST/PORT may override the operator's network path, never app settings.
 set +x
 set -euo pipefail

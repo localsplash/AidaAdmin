@@ -7,15 +7,16 @@ import type {
   RuntimeParticipant,
   RuntimeReader,
   RuntimeWebhookDelivery,
-} from '../../src/officepulse/runtime-db.js';
-import { ORPHAN_HORIZON_HOURS, RuntimeDbError } from '../../src/officepulse/runtime-db.js';
+} from '../../src/officepulse/runtime.js';
+import { ORPHAN_HORIZON_HOURS } from '../../src/officepulse/runtime.js';
+import { OfficePulseError } from '../../src/officepulse/client.js';
 
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
- * In-memory stand-in for the read-only `aidacalls_db` view. Tests seed
- * the public arrays directly; the query semantics (active/recent/orphaned,
- * tenant scoping) mirror the SQL in MysqlRuntimeReader.
+ * In-memory stand-in for OfficePulse's runtime views. Tests seed the public
+ * arrays directly; the query semantics (active/recent/orphaned, tenant
+ * scoping) mirror OfficePulse's own queries behind HttpRuntimeReader.
  */
 export class FakeRuntimeReader implements RuntimeReader {
   sessions: RuntimeCallSession[] = [];
@@ -24,12 +25,12 @@ export class FakeRuntimeReader implements RuntimeReader {
   participants = new Map<string, RuntimeParticipant[]>();
   webhooks: RuntimeWebhookDelivery[] = [];
   dependencies: RuntimeDependencyStatus[] = [];
-  /** When set, every read throws — the database is unreachable. */
+  /** When set, every read throws — OfficePulse is unreachable. */
   down = false;
   now = () => Date.now();
 
   private guard(): void {
-    if (this.down) throw new RuntimeDbError('aidacalls_db read failed (ECONNREFUSED)');
+    if (this.down) throw new OfficePulseError('OfficePulse could not be reached', 503);
   }
 
   async listCallSessions(filter: CallListFilter): Promise<RuntimeCallSession[]> {
@@ -120,10 +121,6 @@ export class FakeRuntimeReader implements RuntimeReader {
       }
     }
     return out;
-  }
-
-  async ping(): Promise<boolean> {
-    return !this.down;
   }
 }
 

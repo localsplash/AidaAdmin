@@ -166,16 +166,16 @@ describe('OperationsScreen', () => {
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 
-  it('names the missing variable when the runtime database is not configured', async () => {
+  it('names the missing variable when OfficePulse is not configured', async () => {
     mockRuntime({
       active: [],
       commands: [],
       failWith: {
         status: 503,
         body: {
-          error: 'runtime_db_not_configured',
-          message: 'The OfficePulse runtime database is not configured',
-          missingConfiguration: ['aida-pbx-reader/DB_HOST'],
+          error: 'officepulse_not_configured',
+          message: 'OfficePulse is not configured: set OFFICEPULSE_API_BASE_URL',
+          missingConfiguration: ['OFFICEPULSE_API_BASE_URL'],
         },
       },
     });
@@ -184,7 +184,7 @@ describe('OperationsScreen', () => {
         <OperationsScreen />
       </MemoryRouter>,
     );
-    expect(await screen.findByRole('alert')).toHaveTextContent(/aida-pbx-reader\/DB_HOST/);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/OFFICEPULSE_API_BASE_URL/);
   });
 
   it('keeps the canonical POC diagnostic-only while native queue routing is unavailable', async () => {

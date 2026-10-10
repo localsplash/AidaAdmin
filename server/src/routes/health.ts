@@ -15,20 +15,12 @@ export function healthRoutes(config: AppConfig, deps: AppDeps): Router {
     // production this reports degraded-but-ready with variable names only.
     const configReady = config.nodeEnv !== 'production' || config.missingServiceConfig.length === 0;
     const databaseReady = await deps.dbReady();
-    // The OfficePulse runtime database is reported, not gated on: AidaAdmin
-    // serves configuration without it, and its state is a diagnostic.
-    const runtimeDatabase = deps.runtimeReader
-      ? (await deps.runtimeReader.ping())
-        ? 'ok'
-        : 'unreachable'
-      : 'not_configured';
     const platformConfigReady = (await deps.configReady?.()) ?? true;
     const ready = configReady && databaseReady && platformConfigReady;
     res.status(ready ? 200 : 503).json({
       status: ready ? 'ready' : 'not_ready',
       database: databaseReady ? 'ok' : 'unreachable',
       platformConfig: platformConfigReady ? 'ok' : 'unavailable',
-      runtimeDatabase,
       missingConfiguration: config.missingServiceConfig,
     });
   });

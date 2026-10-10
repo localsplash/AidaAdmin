@@ -207,19 +207,11 @@ export function buildDiagnostics(config: AppConfig): DiagnosticsReport {
       fix: 'Set the aida-admin DB_* rows during AidaPlatformDB app setup for the dedicated aida_admin_db MySQL database',
     });
   }
-  if (!config.runtimeDatabase) {
-    findings.push({
-      level: 'warning',
-      summary:
-        'aida-pbx-reader/DB_HOST, DB_NAME, DB_USER and DB_PASSWORD are not fully configured, so the runtime views (calls and dependencies) answer 503',
-      fix: "Set the aida-pbx-reader DB_* rows for aidacalls_db using the read-only aidaadmin_ro account provisioned by AidaPlatformDB through OfficePulse's scripts/db-users.sh",
-    });
-  }
   if (!config.serviceConfig.OFFICEPULSE_API_BASE_URL) {
     findings.push({
       level: 'warning',
       summary:
-        'OFFICEPULSE_API_BASE_URL is not set, so PBX inventory and the OfficePulse readiness probe answer 503',
+        'OFFICEPULSE_API_BASE_URL is not set, so PBX inventory, the runtime views (calls and dependencies) and the OfficePulse readiness probe answer 503',
       fix: 'Set OFFICEPULSE_API_BASE_URL to the private OfficePulseAidaIntegration API (port 8085)',
     });
   }

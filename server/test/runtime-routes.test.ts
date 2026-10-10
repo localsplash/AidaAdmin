@@ -349,18 +349,13 @@ describe('takeover', () => {
 });
 
 describe('degraded states', () => {
-  it('names the variable when the runtime database is not configured', async () => {
+  it('names the variable when OfficePulse, which serves the runtime views, is not configured', async () => {
     ctx.deps.runtimeReader = null;
     const root = await actor(1, true, null);
     const res = await root.get('/runtime/calls');
     expect(res.status).toBe(503);
-    expect(res.body.error).toBe('runtime_db_not_configured');
-    expect(res.body.missingConfiguration).toEqual([
-      'aida-pbx-reader/DB_HOST',
-      'aida-pbx-reader/DB_NAME',
-      'aida-pbx-reader/DB_USER',
-      'aida-pbx-reader/DB_PASSWORD',
-    ]);
+    expect(res.body.error).toBe('officepulse_not_configured');
+    expect(res.body.missingConfiguration).toEqual(['OFFICEPULSE_API_BASE_URL']);
     // A tenant admin cannot take over on trust without it; a Super Admin can.
     const admin = await actor(20, false, ctx.acme.id);
     const denied = await admin.post('/runtime/calls/acme-live/commands', {
@@ -371,12 +366,12 @@ describe('degraded states', () => {
     expect(ctx.officePulse.commands).toHaveLength(0);
   });
 
-  it('answers 502 when the runtime database is unreachable', async () => {
+  it('answers 502 when the runtime views cannot be read from OfficePulse', async () => {
     ctx.runtime.down = true;
     const root = await actor(1, true, null);
     const res = await root.get('/runtime/calls');
     expect(res.status).toBe(502);
-    expect(res.body.error).toBe('runtime_db_unavailable');
+    expect(res.body.error).toBe('officepulse_unavailable');
     expect(JSON.stringify(res.body)).not.toContain('ECONNREFUSED');
   });
 

@@ -1,15 +1,14 @@
 /**
  * Same-origin client for the runtime views (issue #29). The server reads
- * OfficePulse's `aidacalls_db` database through a read-only account and
- * sends the few allowed actions to OfficePulse's private API; the browser
- * never sees either.
+ * runtime state from OfficePulse's private API and sends the few allowed
+ * actions there too; the browser never sees that API.
  */
 
 export class RuntimeApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
-    /** Server error code, e.g. runtime_db_not_configured. */
+    /** Server error code, e.g. officepulse_not_configured. */
     readonly code?: string,
     readonly missingConfiguration: string[] = [],
   ) {
