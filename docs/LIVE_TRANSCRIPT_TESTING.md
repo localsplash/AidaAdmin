@@ -4,7 +4,7 @@ An administrator observes text in LIVE while a caller uses an ordinary
 telephone. No AidaHandset installation or device enrollment is involved.
 
 Missing native admission/bootstrap implementation is tracked in
-[OfficePulse #18](https://github.com/localsplash/OfficePulseAidaIntegration/issues/18).
+[OfficePulse #18](https://github.com/localsplash/AidaPbx/issues/18).
 AidaAdmin #37 remains open until its real-call acceptance is recorded.
 
 ## Prerequisites

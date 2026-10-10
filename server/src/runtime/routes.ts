@@ -9,7 +9,7 @@ import type { RuntimeCallSession } from '../officepulse/runtime.js';
 
 /**
  * Runtime visibility and actions (issue #29). There is no AidaControl:
- * OfficePulseAidaIntegration orchestrates calls and owns the
+ * AidaPbx orchestrates calls and owns the
  * `aidacalls_db` runtime database. AidaAdmin READS runtime state and sends
  * the few allowed ACTIONS through OfficePulse's private HTTP API; it has no
  * login on that database — never a proxy, never a table access.
