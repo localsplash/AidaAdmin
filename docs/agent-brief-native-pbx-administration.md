@@ -6,7 +6,7 @@
 
 Replace AidaAdmin's retired/legacy PBX provisioning integration with tenant-authorized administration of OfficePulse's canonical `/v1/admin/pbx` API. Provide usable screens for extension create/delete, native queue create/delete and membership, and managed DID schedule/ring-to-LiveKit routing.
 
-This brief is paired with the OfficePulseAidaIntegration native PBX provisioning brief. Implement against its accepted OpenAPI contract, not the historical `/v1/provisioning/*` client. If the upstream contract changes, update both repositories and their contract tests together.
+This brief is paired with the AidaPbx native PBX provisioning brief. Implement against its accepted OpenAPI contract, not the historical `/v1/provisioning/*` client. If the upstream contract changes, update both repositories and their contract tests together.
 
 ## Required architectural decisions
 

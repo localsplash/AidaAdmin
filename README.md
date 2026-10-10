@@ -1,7 +1,7 @@
 # AidaAdmin
 
 AidaAdmin is the administration UI and backend for the shared Echo/Aida office
-platform. OfficePulseAidaIntegration owns native PBX configuration and voice orchestration.
+platform. AidaPbx owns native PBX configuration and voice orchestration.
 Identity owns every person, business, membership and staff application session.
 
 ## Storage and ownership
