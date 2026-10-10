@@ -11,7 +11,7 @@ Identity owns every person, business, membership and staff application session.
 | `platform_db`           | Identity              | Authenticated Identity API only                                        |
 | NocoDB `PlatformConfig` | Platform applications | Tenant PBX scope, assistant profiles/assignments, appearance, settings |
 | `aida_admin_db` (MySQL) | AidaAdmin             | OAuth state, Identity event receipts/replay cursor, append-only audit  |
-| `aidacalls_db` (MySQL)  | OfficePulse           | None: runtime views and commands through OfficePulse's private API     |
+| `aida_pbx_db` (MySQL)   | AidaPbx               | None: runtime views and commands through OfficePulse's private API     |
 | Asterisk tables         | PBX project           | OfficePulse adapter only; no AidaAdmin DDL or direct writes            |
 
 There is no AidaAdmin PostgreSQL dependency, local user/membership directory,
@@ -90,7 +90,7 @@ URL-encoded; `DB_PORT` defaults to 3306 when omitted.
 overridden by the same environment keys, but never fall through to `aida` or `*`.
 This is AidaAdmin's only database connection. No database URL setting is read.
 Runtime call history, dependency status and issues come from OfficePulse's
-private API (`OFFICEPULSE_API_BASE_URL`), not from a login on its `aidacalls_db`;
+private API (`OFFICEPULSE_API_BASE_URL`), not from a login on its `aida_pbx_db`;
 the former `aida-admin-runtime` (later `aida-pbx-reader`) rows and the
 `aidaadmin_ro` account are no longer used.
 
@@ -203,7 +203,7 @@ Manage each tenant’s **Numbers** in AidaAdmin. The Add Number / DID form creat
 
 Each Number shows its PBX routing state and an inline routing editor; single-number tenants open it by default. Identity assignments remain visible when PBX scope is missing or OfficePulse is unavailable, with routing actions disabled as appropriate. The immutable E.164 value is their reference; managed routing settings are read from and committed to OfficePulse/Asterisk. Number assignment does not provision carrier service. Disable an existing DID route separately when stopping PBX routing; disabling the shared number removes Echo access and prevents PBX mutations for it until its enabled voice assignment is restored. Tenant/number reassignment is deliberately unsupported to protect historical messages and media.
 
-Deploy Identity migration `0005_shared_phone_numbers` and import reviewed existing assignments before this Admin version. Runtime call history now uses `aidacalls_db`; `aida_admin_db` still stores this application’s local state. See the infrastructure repository’s shared-number rollout guide for a data-preserving existing-database migration.
+Deploy Identity migration `0005_shared_phone_numbers` and import reviewed existing assignments before this Admin version. Runtime call history now uses AidaPbx's `aida_pbx_db` (formerly `aidacalls_db`); `aida_admin_db` still stores this application’s local state. See the infrastructure repository’s shared-number rollout guide for a data-preserving existing-database migration.
 
 **LIVE** shows only current calls for the selected tenant, refreshed automatically.
 Every call gets a tab with a pulsing green indicator (static with reduced motion),

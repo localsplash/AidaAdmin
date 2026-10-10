@@ -47,7 +47,7 @@ const envSchema = z.object({
  * There is no AidaControl: for the POC AidaPbx is the
  * call orchestrator (its issue #9). AidaAdmin reads its runtime state
  * and sends commands through the same private HTTP API that handles
- * provisioning; it has no login on OfficePulse's `aidacalls_db`.
+ * provisioning; it has no login on AidaPbx's `aida_pbx_db`.
  */
 export const SERVICE_ENV_VARS = [
   'LIVEKIT_URL',

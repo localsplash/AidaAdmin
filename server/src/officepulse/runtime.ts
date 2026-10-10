@@ -2,7 +2,7 @@
  * Read-only view of AidaPbx's runtime state (calls,
  * events, commands, participants, webhook deliveries, dependency status).
  *
- * OfficePulse owns `aidacalls_db` and is its only client: AidaAdmin reads
+ * AidaPbx owns `aida_pbx_db` and is its only client: AidaAdmin reads
  * these views through OfficePulse's private API (`/v1/admin/calls...` and
  * `/v1/admin/runtime/...`), never with a database login of its own. Staff
  * and tenant authorization happen here before a request goes out; the

@@ -62,7 +62,7 @@ no DID-specific exception; other operator-owned trunk and PJSIP configuration
 remains outside AidaAdmin.
 
 Native call history is UTC `asterisk.cdr`; `userfield` contains the recording
-basename. `aidacalls_db` is separate integration diagnostics. Native CDR pagination,
+basename. `aida_pbx_db` (AidaPbx's runtime database) is separate integration diagnostics. Native CDR pagination,
 verified tenant attribution and authorized recording access remain unfinished.
 A filename supplied by a browser must not grant recording access.
 
