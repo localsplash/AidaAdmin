@@ -31,8 +31,8 @@ OfficePulse's `npm run pbx:adopt-queue -- <context> <queue>`. The retired
 `aida_tbl_ProfileAssignment`, edited in Profiles and Numbers. OfficePulse uses a
 dedicated SELECT-only PBX account; AidaAdmin passes the current globally unique
 Identity Number assignments with managed-DID requests, so per-number
-environment allowlists are unnecessary. Enable `PBX_INVENTORY_ENABLED` and
-assign contexts before rollout. Missing scope, query failures and incompatible
+environment allowlists are unnecessary. Set OfficePulse's PBX inventory login
+(`PBX_DB_INVENTORY_USER` and `_PASSWORD`) and assign contexts before rollout. Missing scope, query failures and incompatible
 schema produce explicit errors (`pbx_scope_missing`, `context_forbidden`, 502
 on a mismatched echo). Inventory describes persisted PBX configuration, not
 live registrations.

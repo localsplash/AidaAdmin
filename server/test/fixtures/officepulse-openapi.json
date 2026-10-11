@@ -1397,7 +1397,7 @@
           "Backend API"
         ],
         "summary": "List native extensions of one context with managed-route detection",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD). Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -1480,7 +1480,7 @@
           "Backend API"
         ],
         "summary": "Create an extension in this context; disclose SIP secret once",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD). Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -1575,7 +1575,7 @@
           "Backend API"
         ],
         "summary": "Delete the endpoint bundle dialed by this context's managed route, with its saved queue memberships",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD). Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -1662,7 +1662,7 @@
           "Backend API"
         ],
         "summary": "List queues owned by this context (exact ownership markers) and their members",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD). Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -1745,7 +1745,7 @@
           "Backend API"
         ],
         "summary": "Create a queue from a friendly slug (native ID <context>.slug) or an owned legacy name",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD). Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -1840,7 +1840,7 @@
           "Backend API"
         ],
         "summary": "Delete an owned queue and members; conflict while a DID references it",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD). Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -1928,7 +1928,7 @@
           "Backend API"
         ],
         "summary": "Idempotently set an owned queue member resolved from this context's managed route",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD). Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -2040,7 +2040,7 @@
           "Backend API"
         ],
         "summary": "Delete one owned saved membership",
-        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials. Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
+        "description": "Private admitted backend network or Identity-authenticated Operations gateway (Super Admin) with mutation CSRF. Ownership is derived from Asterisk records inside the requested context of this PBX instance. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD). Disabled mutation routes are absent. Credentials are returned only by extension creation; responses must not be cached.",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -2137,7 +2137,7 @@
           "Backend API"
         ],
         "summary": "Read managed routes owned by this context; identify foreign, manual and unconfigured Identity Numbers explicitly",
-        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD).",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -2244,7 +2244,7 @@
           "Backend API"
         ],
         "summary": "Set queue hours and ring budget before LiveKit; refuse manual or foreign route adoption",
-        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD).",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
@@ -2370,7 +2370,7 @@
           "Backend API"
         ],
         "summary": "Delete recognized managed Realtime rows owned by this context; retain Identity number assignment",
-        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require PBX_PROVISIONING_ENABLED=true plus dedicated writer credentials.",
+        "description": "Private admitted backend network. AidaAdmin revalidates Identity tenant access, resolves the tenant's extension and DID ingress contexts, and supplies the current tenant Number assignments. DID routes are excluded from the browser Operations gateway. PBX mutations and DID reads require the dedicated writer credentials (PBX_DB_PROVISIONING_USER and _PASSWORD).",
         "x-access-policy": "trusted-backend-network",
         "parameters": [
           {
