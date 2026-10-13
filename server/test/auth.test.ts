@@ -132,6 +132,8 @@ describe('login callback', () => {
     ]);
 
     const sessionCookies = cb.headers['set-cookie'] as unknown as string[];
+    // Survives a browser restart: Identity, not a cookie timer, ends sessions.
+    expect(sessionCookies.find((c) => c.startsWith('aida.sid='))).toMatch(/Max-Age=315360000/);
     const session = await request(app).get('/api/session').set('Cookie', sessionCookies);
     expect(session.status).toBe(200);
     expect(session.body.user.iUserId).toBe(42);

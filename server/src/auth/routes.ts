@@ -4,6 +4,9 @@ import type { AppDeps } from '../deps.js';
 import type { Logger } from '../logger.js';
 
 export const SESSION_COOKIE = 'aida.sid';
+// Identity decides whether a session is live and never expires one on a
+// timer, so the cookie outlives browser restarts: ten years, like Identity's.
+const SESSION_COOKIE_MAX_AGE_MS = 10 * 365 * 24 * 3600 * 1000;
 const STATE_COOKIE = 'aida.authstate';
 
 export function readCookie(req: Request, name: string): string | undefined {
@@ -134,7 +137,10 @@ export function authRoutes(config: AppConfig, logger: Logger, deps: AppDeps): Ro
         provider: identity?.provider ?? null,
         ...(central ? { centralToken: central } : {}),
       });
-      res.cookie(SESSION_COOKIE, sid, cookieOptions(config, true));
+      res.cookie(SESSION_COOKIE, sid, {
+        ...cookieOptions(config, true),
+        maxAge: SESSION_COOKIE_MAX_AGE_MS,
+      });
       res.redirect('/');
     } catch (err) {
       next(err);
