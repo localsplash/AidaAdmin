@@ -314,6 +314,7 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
           Boolean(deps.idClient?.manageTenantMember) ||
           (req.session!.superAdmin && directory.canEditDisplayName),
         canManageDirectory: Boolean(deps.idClient?.addTenantMember) || req.session!.superAdmin,
+        canRemove: Boolean(deps.idClient?.removeTenantMember),
         assignableRoles: req.session!.superAdmin
           ? ['SUPER_ADMIN', 'TENANT_ADMIN', 'USER']
           : ['TENANT_ADMIN', 'USER'],
@@ -378,6 +379,9 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
           return;
         }
         if (deps.idClient?.manageTenantMember) {
+          // Identity may answer with a different user: changing an
+          // invitation's email to an address someone already owns hands the
+          // access to that person.
           const member = await deps.idClient.manageTenantMember(tenantId, identityUserId, input);
           res.json({
             tenantUser: {
@@ -421,6 +425,51 @@ export function adminRoutes(logger: Logger, deps: AppDeps): Router {
         );
         await audit(req, 'tenant_user.save', 'tenant_user', mapping.id as string, tenantId);
         res.json({ tenantUser: mapping });
+      } catch (err) {
+        try {
+          fail(res, req, err);
+        } catch (unhandled) {
+          next(unhandled);
+        }
+      }
+    },
+  );
+
+  /** Take someone out of the tenant; Identity deletes a user who was only an invitation. */
+  router.delete(
+    '/admin/tenants/:tenantId/users/:identityUserId',
+    tenantAdmin,
+    async (req, res, next) => {
+      try {
+        const identityUserId = Number(req.params.identityUserId);
+        if (!Number.isInteger(identityUserId) || identityUserId <= 0) {
+          res.status(400).json({
+            error: 'validation',
+            message: 'identityUserId must be a positive integer',
+            correlationId: req.correlationId,
+          });
+          return;
+        }
+        if (!req.session!.superAdmin && identityUserId === req.session!.iUserId) {
+          res.status(403).json({
+            error: 'forbidden',
+            message: 'You cannot remove yourself from this tenant',
+            correlationId: req.correlationId,
+          });
+          return;
+        }
+        if (!deps.idClient?.removeTenantMember)
+          throw new DirectoryUnavailableError('Identity membership management is unavailable');
+        const tenantId = req.params.tenantId as string;
+        const result = await deps.idClient.removeTenantMember(tenantId, identityUserId);
+        await audit(
+          req,
+          'tenant_user.remove',
+          'tenant_user',
+          `${tenantId}:${identityUserId}`,
+          tenantId,
+        );
+        res.json(result);
       } catch (err) {
         try {
           fail(res, req, err);

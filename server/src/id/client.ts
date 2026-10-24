@@ -89,6 +89,7 @@ export interface IdClient {
     tenantId: string,
     input: { email: string; displayName: string | null; role: string; enabled: boolean },
   ): Promise<PlatformMembership>;
+  removeTenantMember?(tenantId: string, userId: number): Promise<{ userDeleted: boolean }>;
   introspectSession?(token: string): Promise<SessionIntrospection>;
   revokeSession?(token: string): Promise<void>;
   selectTenant?(token: string, iTenantId: number | null): Promise<void>;
@@ -242,6 +243,9 @@ export class HttpIdClient implements IdClient {
       ...fields,
       bEnabled: enabled,
     });
+  }
+  async removeTenantMember(tenantId: string, userId: number): Promise<{ userDeleted: boolean }> {
+    return this.directoryRequest(`tenants/${tenantId}/memberships/${userId}`, 'DELETE');
   }
   async updateDirectoryUser(iUserId: number, displayName: string | null): Promise<DirectoryUser> {
     return this.directoryRequest(`users/${iUserId}`, 'PATCH', { displayName });

@@ -13,6 +13,7 @@ export function TenantUsersScreen() {
   const [users, setUsers] = useState<TenantUser[] | null>(null);
   const [roles, setRoles] = useState<string[]>([]);
   const [canAdd, setCanAdd] = useState(false);
+  const [canRemove, setCanRemove] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [editing, setEditing] = useState<TenantUser | null>(null);
@@ -26,6 +27,7 @@ export function TenantUsersScreen() {
       setUsers(r.users);
       setRoles(r.assignableRoles ?? ['TENANT_ADMIN', 'USER']);
       setCanAdd(r.canManageDirectory ?? false);
+      setCanRemove(r.canRemove ?? false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load users');
     }
@@ -61,23 +63,46 @@ export function TenantUsersScreen() {
         email: form.email.trim(),
         displayName: form.displayName.trim() || null,
       };
-      if (editing)
+      if (editing) {
         await adminApi.editTenantUser(tenantId, editing.identity_user_id, {
           ...fields,
           ...(editing.claimed ? { email: undefined } : {}),
         });
-      else await adminApi.addTenantUser(tenantId, fields);
-      setStatus(
-        editing
-          ? 'User updated.'
-          : `Added ${form.email.trim()}. They can sign in with their linked account.`,
-      );
+        setStatus('User updated.');
+      } else {
+        const added = (await adminApi.addTenantUser(tenantId, fields)) as {
+          user?: { claimed?: boolean };
+        };
+        setStatus(
+          added.user?.claimed
+            ? `Added ${fields.email}. They already have an account and can sign in now.`
+            : `Added ${fields.email}. They get access the first time they sign in with Google or Microsoft using this address.`,
+        );
+      }
       cancel();
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not save the user');
     } finally {
       setBusy(false);
+    }
+  };
+  const remove = async (user: TenantUser) => {
+    const name = user.display_name || user.email || 'this user';
+    if (!window.confirm(`Remove ${name} from this tenant?`)) return;
+    setError(null);
+    setStatus(null);
+    try {
+      const r = await adminApi.removeTenantUser(tenantId, user.identity_user_id);
+      setStatus(
+        r.userDeleted
+          ? `Removed ${name}. They had never signed in, so their invitation was deleted.`
+          : `Removed ${name} from this tenant.`,
+      );
+      if (editing?.identity_user_id === user.identity_user_id) cancel();
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not remove the user');
     }
   };
   const visible = (users ?? []).filter((u) =>
@@ -136,13 +161,24 @@ export function TenantUsersScreen() {
                   </td>
                   <td>
                     {roles.includes(user.role) ? (
-                      <button
-                        type="button"
-                        aria-label={`Edit ${user.display_name || user.email || 'user'}`}
-                        onClick={() => edit(user)}
-                      >
-                        Edit
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          aria-label={`Edit ${user.display_name || user.email || 'user'}`}
+                          onClick={() => edit(user)}
+                        >
+                          Edit
+                        </button>
+                        {canRemove ? (
+                          <button
+                            type="button"
+                            aria-label={`Remove ${user.display_name || user.email || 'user'}`}
+                            onClick={() => void remove(user)}
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </>
                     ) : (
                       <span>Managed by Super Admin</span>
                     )}
@@ -186,7 +222,11 @@ export function TenantUsersScreen() {
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
               />
               {editing?.claimed ? (
-                <small>This email belongs to a linked sign-in account.</small>
+                <small>This person has signed in, so their email comes from their sign-in.</small>
+              ) : editing ? (
+                <small>
+                  If someone already has an account with this address, this access moves to them.
+                </small>
               ) : null}
             </label>
             <label>

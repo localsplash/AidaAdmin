@@ -306,6 +306,8 @@ export const adminApi = {
     tenantId: string,
     input: { email: string; displayName: string | null; role: string; enabled: boolean },
   ) => call(`/admin/tenants/${tenantId}/users`, 'POST', input),
+  removeTenantUser: (tenantId: string, userId: number) =>
+    call<{ userDeleted: boolean }>(`/admin/tenants/${tenantId}/users/${userId}`, 'DELETE'),
   editTenantUser: (
     tenantId: string,
     userId: number,
@@ -321,6 +323,7 @@ export const adminApi = {
       users: TenantUser[];
       canEditDisplayName: boolean;
       canManageDirectory?: boolean;
+      canRemove?: boolean;
       assignableRoles?: string[];
       directoryError: string | null;
     }>(`/admin/tenants/${tenantId}/users`, 'GET'),
