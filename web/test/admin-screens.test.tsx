@@ -317,6 +317,25 @@ describe('tenant user management', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Account conflict');
     expect(screen.getByLabelText('Email address')).toHaveValue('pending@example.invalid');
   });
+  it('removes a user after confirming and says when the invitation was deleted', async () => {
+    const deletes: string[] = [];
+    mockFetch((url, init) => {
+      if (init?.method === 'DELETE') {
+        deletes.push(url);
+        return { status: 200, body: { userDeleted: true } };
+      }
+      return { status: 200, body: { ...members(false, false), canRemove: true } };
+    });
+    vi.stubGlobal(
+      'confirm',
+      vi.fn(() => true),
+    );
+    renderTenantUsers();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Remove Pat' }));
+    await waitFor(() => expect(deletes).toEqual(['/admin/tenants/ten-1/users/42']));
+    expect(await screen.findByRole('status')).toHaveTextContent('invitation was deleted');
+  });
   it('shows pending sign-in status and prevents tenant admins editing Super Admins', async () => {
     const body = members(false, false);
     body.users[0]!.role = 'SUPER_ADMIN';
