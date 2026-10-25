@@ -28,8 +28,12 @@ const envSchema = z.object({
    * Refused outright in production (see loadConfig).
    */
   E2E_FAKE_SESSION: envBool,
-  /** Register the /id/events webhook with id at startup. */
-  ID_REGISTER_WEBHOOK: envBool,
+  /**
+   * Register the /id/events webhook with id at startup. On unless set to
+   * false: an app that never registers shows as "Not integrated" in id and
+   * keeps sessions id has already ended.
+   */
+  ID_REGISTER_WEBHOOK: z.preprocess((value) => value ?? true, envBool),
   /** Where validated appearance assets (logos) are stored and served from. */
   ASSET_STORAGE_DIR: z.string().default('data/assets'),
   ENVIRONMENT_NAME: z.preprocess(

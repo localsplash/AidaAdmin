@@ -87,9 +87,12 @@ async function main(): Promise<void> {
       const publicBase = config.serviceConfig.PUBLIC_BASE_URL;
       if (config.idRegisterWebhook && publicBase) {
         const webhookUrl = new URL('/id/events', publicBase).toString();
-        void idClient.registerWebhook('AidaAdmin', webhookUrl).catch((err) => {
-          logger.error({ err }, 'id webhook registration failed');
-        });
+        void idClient
+          .registerWebhook('AidaAdmin', webhookUrl)
+          .then(() => logger.info({ webhookUrl }, 'id webhook registered'))
+          .catch((err) => {
+            logger.error({ err, webhookUrl }, 'id webhook registration failed');
+          });
       }
     }
   });
