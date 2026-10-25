@@ -297,6 +297,22 @@ describe('tenant users and directory', () => {
     expect(JSON.stringify(stored)).not.toContain('pat@example.invalid');
   });
 
+  it('removes a member through Identity and reports a deleted invitation', async () => {
+    const tenant = await createTenant();
+    const calls: Array<[string, number]> = [];
+    ctx.deps.idClient!.removeTenantMember = async (tenantId, userId) => {
+      calls.push([tenantId, userId]);
+      return { userDeleted: true };
+    };
+    const res = await request(ctx.app)
+      .delete(`/admin/tenants/${tenant.id}/users/42`)
+      .set('Cookie', ctx.cookies)
+      .set('x-csrf-token', ctx.csrf);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ userDeleted: true });
+    expect(calls).toEqual([[tenant.id, 42]]);
+  });
+
   it('rejects an unknown identity user', async () => {
     const tenant = await createTenant();
     const res = await put(`/admin/tenants/${tenant.id}/users/999`, {
