@@ -70,6 +70,9 @@ that key in any scope it reads. Inbound `/id/events` deliveries are admitted by
 `trustedCIDR`, the platform-wide network policy every application reads;
 `ID_TRUSTED_PROXY_CIDRS` is separate deployment policy naming the reverse
 proxies whose `X-Forwarded-For` is believed when resolving that client.
+On every start AidaAdmin registers `PUBLIC_BASE_URL` + `/id/events` with
+Identity (`POST /api/apps/register`), so Identity's Applications page shows it
+as integrated; set `ID_REGISTER_WEBHOOK=false` only to opt out.
 Set `ENVIRONMENT_NAME` (`dev`, `staging`, or `prod`) in global scope `app=*`.
 The persistent environment label compares this resolved setting with OfficePulse
 `/readyz` every thirty seconds. A mismatch prominently names both environments and
