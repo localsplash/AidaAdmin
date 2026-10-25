@@ -81,6 +81,8 @@ describe('loadConfig', () => {
     );
     expect(loadConfig({ NODE_ENV: 'test', E2E_FAKE_SESSION: 'true' }).e2eFakeSession).toBe(true);
     expect(loadConfig({ NODE_ENV: 'test', ID_REGISTER_WEBHOOK: '1' }).idRegisterWebhook).toBe(true);
+    // Registering is the default: id lists an app that never does as "Not integrated".
+    expect(loadConfig({ NODE_ENV: 'test' }).idRegisterWebhook).toBe(true);
     expect(() => loadConfig({ NODE_ENV: 'test', E2E_FAKE_SESSION: 'banana' })).toThrowError(
       /E2E_FAKE_SESSION/,
     );
